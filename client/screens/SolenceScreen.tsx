@@ -30,12 +30,13 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { useTheme } from "@/hooks/useTheme";
 import { Spacing, BorderRadius } from "@/constants/theme";
-import { getApiUrl } from "@/lib/query-client";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const ORB_SIZE = SCREEN_WIDTH * 0.6;
 
 type VoiceState = "idle" | "listening" | "responding" | "speaking";
+
+const API_BASE_URL = "https://solence-joelgarciamendez.replit.app";
 
 const FREE_MESSAGE_LIMIT = 5;
 const STORAGE_KEY = "solence_daily_usage";
@@ -217,19 +218,18 @@ export default function SolenceScreen() {
     }
   };
 
-  const sendAudioToAPI = async (audioUri: string) => {
+  const sendAudioToAPI = async (recordingUri: string) => {
     try {
-      const baseUrl = getApiUrl();
       const formData = new FormData();
 
       formData.append("audio", {
-        uri: audioUri,
+        uri: recordingUri,
         type: "audio/m4a",
         name: "recording.m4a",
       } as any);
       formData.append("sessionId", sessionId);
 
-      const response = await fetch(`${baseUrl}api/chat/voice`, {
+      const response = await fetch(`${API_BASE_URL}/api/chat/voice`, {
         method: "POST",
         body: formData,
       });
@@ -245,7 +245,7 @@ export default function SolenceScreen() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
       if (data.audioUrl) {
-        setAudioUri(`${baseUrl}${data.audioUrl}`);
+        setAudioUri(`${API_BASE_URL}${data.audioUrl}`);
         setVoiceState("speaking");
       } else {
         setVoiceState("idle");

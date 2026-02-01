@@ -68,3 +68,8 @@ task = "shell.exec"
 args = "npm run expo:dev"
 waitForPort = 8081
 ensurePreviewReachable = "/status"
+
+[userenv]
+
+[userenv.shared]
+SOLENCE_API_URL = "https://solence-joelgarciamendez.replit.app"

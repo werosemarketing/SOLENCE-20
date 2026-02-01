@@ -48,7 +48,9 @@ Colors are defined in `client/constants/theme.ts`:
 - Orb secondary: #c4956c (warm tan)
 
 ## Backend API Configuration
-The app uses `EXPO_PUBLIC_DOMAIN` environment variable to connect to the backend API. The voice chat endpoint expects:
+The app connects to the external Solence backend at: https://solence-joelgarciamendez.replit.app
+
+The voice chat endpoint expects:
 
 ```
 POST /api/chat/voice
