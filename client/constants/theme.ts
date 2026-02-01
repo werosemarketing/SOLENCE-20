@@ -1,30 +1,35 @@
 import { Platform } from "react-native";
 
-const tintColorLight = "#007AFF";
-const tintColorDark = "#0A84FF";
-
 export const Colors = {
   light: {
-    text: "#11181C",
+    text: "#2d2a26",
+    textMuted: "#6b6560",
     buttonText: "#FFFFFF",
     tabIconDefault: "#687076",
-    tabIconSelected: tintColorLight,
-    link: "#007AFF",
-    backgroundRoot: "#FFFFFF", // Elevation 0
-    backgroundDefault: "#F2F2F2", // Elevation 1
-    backgroundSecondary: "#E6E6E6", // Elevation 2
-    backgroundTertiary: "#D9D9D9", // Elevation 3
+    tabIconSelected: "#9d6b53",
+    link: "#9d6b53",
+    backgroundRoot: "#faf8f5",
+    backgroundDefault: "#f5f2ed",
+    backgroundSecondary: "#efe9e2",
+    backgroundTertiary: "#e5ddd4",
+    orbPrimary: "#9d6b53",
+    orbSecondary: "#c4956c",
+    orbGlow: "rgba(196, 149, 108, 0.3)",
   },
   dark: {
-    text: "#ECEDEE",
+    text: "#e8e4e0",
+    textMuted: "#a09890",
     buttonText: "#FFFFFF",
     tabIconDefault: "#9BA1A6",
-    tabIconSelected: tintColorDark,
-    link: "#0A84FF",
-    backgroundRoot: "#1F2123", // Elevation 0
-    backgroundDefault: "#2A2C2E", // Elevation 1
-    backgroundSecondary: "#353739", // Elevation 2
-    backgroundTertiary: "#404244", // Elevation 3
+    tabIconSelected: "#c4956c",
+    link: "#c4956c",
+    backgroundRoot: "#1a1625",
+    backgroundDefault: "#242030",
+    backgroundSecondary: "#2e2a3a",
+    backgroundTertiary: "#383444",
+    orbPrimary: "#9d6b53",
+    orbSecondary: "#c4956c",
+    orbGlow: "rgba(196, 149, 108, 0.3)",
   },
 };
 
@@ -62,7 +67,8 @@ export const Typography = {
   h2: {
     fontSize: 28,
     lineHeight: 36,
-    fontWeight: "700" as const,
+    fontWeight: "300" as const,
+    letterSpacing: 2,
   },
   h3: {
     fontSize: 24,
@@ -89,17 +95,22 @@ export const Typography = {
     lineHeight: 24,
     fontWeight: "400" as const,
   },
+  message: {
+    fontSize: 18,
+    lineHeight: 28,
+    fontWeight: "300" as const,
+  },
+  stateText: {
+    fontSize: 16,
+    fontWeight: "300" as const,
+  },
 };
 
 export const Fonts = Platform.select({
   ios: {
-    /** iOS `UIFontDescriptorSystemDesignDefault` */
     sans: "system-ui",
-    /** iOS `UIFontDescriptorSystemDesignSerif` */
     serif: "ui-serif",
-    /** iOS `UIFontDescriptorSystemDesignRounded` */
     rounded: "ui-rounded",
-    /** iOS `UIFontDescriptorSystemDesignMonospaced` */
     mono: "ui-monospace",
   },
   default: {
