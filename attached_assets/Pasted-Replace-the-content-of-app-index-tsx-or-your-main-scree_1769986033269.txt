@@ -1,0 +1,362 @@
+Replace the content of app/index.tsx (or your main screen file) with:
+
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  useColorScheme,
+  Dimensions,
+  Animated,
+  Easing,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Audio } from 'expo-av';
+import * as SecureStore from 'expo-secure-store';
+import Svg, { Defs, RadialGradient, Stop, Ellipse } from 'react-native-svg';
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const ORB_SIZE = SCREEN_WIDTH * 0.6;
+type VoiceState = 'idle' | 'listening' | 'responding' | 'speaking';
+// IMPORTANT: Change this to your published web app URL
+const API_BASE_URL = 'https://solence-joelgarciamendez.replit.app';
+export default function SolenceScreen() {
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
+  
+  const [voiceState, setVoiceState] = useState<VoiceState>('idle');
+  const [currentMessage, setCurrentMessage] = useState<string>('');
+  const [sessionId, setSessionId] = useState<string>('');
+  const [dailyMessageCount, setDailyMessageCount] = useState(0);
+  const [isSubscribed, setIsSubscribed] = useState(false);
+  const [showSubscriptionPrompt, setShowSubscriptionPrompt] = useState(false);
+  
+  const breatheAnim = useRef(new Animated.Value(1)).current;
+  const pulseAnim = useRef(new Animated.Value(0.6)).current;
+  const recordingRef = useRef<Audio.Recording | null>(null);
+  const soundRef = useRef<Audio.Sound | null>(null);
+  const FREE_MESSAGE_LIMIT = 5;
+  const colors = {
+    background: isDark ? '#1a1625' : '#faf8f5',
+    text: isDark ? '#e8e4e0' : '#2d2a26',
+    textMuted: isDark ? '#a09890' : '#6b6560',
+    orbPrimary: '#9d6b53',
+    orbSecondary: '#c4956c',
+    orbGlow: 'rgba(196, 149, 108, 0.3)',
+  };
+  useEffect(() => {
+    const newSessionId = `mobile-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    setSessionId(newSessionId);
+    checkDailyUsage();
+  }, []);
+  useEffect(() => {
+    if (voiceState === 'idle') {
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(breatheAnim, {
+            toValue: 1.05,
+            duration: 4000,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+          Animated.timing(breatheAnim, {
+            toValue: 1,
+            duration: 4000,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+        ])
+      ).start();
+    } else if (voiceState === 'listening') {
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, {
+            toValue: 0.9,
+            duration: 600,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+          Animated.timing(pulseAnim, {
+            toValue: 0.6,
+            duration: 600,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+        ])
+      ).start();
+    }
+  }, [voiceState]);
+  const checkDailyUsage = async () => {
+    try {
+      const today = new Date().toDateString();
+      const stored = await SecureStore.getItemAsync('solence_daily_usage');
+      if (stored) {
+        const { date, count } = JSON.parse(stored);
+        if (date === today) {
+          setDailyMessageCount(count);
+        } else {
+          await SecureStore.setItemAsync('solence_daily_usage', JSON.stringify({ date: today, count: 0 }));
+          setDailyMessageCount(0);
+        }
+      }
+    } catch (e) {
+      console.log('Error checking daily usage:', e);
+    }
+  };
+  const incrementDailyUsage = async () => {
+    try {
+      const today = new Date().toDateString();
+      const newCount = dailyMessageCount + 1;
+      await SecureStore.setItemAsync('solence_daily_usage', JSON.stringify({ date: today, count: newCount }));
+      setDailyMessageCount(newCount);
+      return newCount;
+    } catch (e) {
+      console.log('Error incrementing usage:', e);
+      return dailyMessageCount + 1;
+    }
+  };
+  const canSendMessage = () => {
+    if (isSubscribed) return true;
+    return dailyMessageCount < FREE_MESSAGE_LIMIT;
+  };
+  const startRecording = async () => {
+    if (!canSendMessage()) {
+      setShowSubscriptionPrompt(true);
+      return;
+    }
+    try {
+      const { status } = await Audio.requestPermissionsAsync();
+      if (status !== 'granted') {
+        console.log('Microphone permission denied');
+        return;
+      }
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+      });
+      const recording = new Audio.Recording();
+      await recording.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+      await recording.startAsync();
+      recordingRef.current = recording;
+      setVoiceState('listening');
+    } catch (e) {
+      console.log('Error starting recording:', e);
+    }
+  };
+  const stopRecording = async () => {
+    if (!recordingRef.current) return;
+    try {
+      setVoiceState('responding');
+      await recordingRef.current.stopAndUnloadAsync();
+      const uri = recordingRef.current.getURI();
+      recordingRef.current = null;
+      if (uri) {
+        await sendAudioToAPI(uri);
+      }
+    } catch (e) {
+      console.log('Error stopping recording:', e);
+      setVoiceState('idle');
+    }
+  };
+  const sendAudioToAPI = async (audioUri: string) => {
+    try {
+      const formData = new FormData();
+      formData.append('audio', {
+        uri: audioUri,
+        type: 'audio/m4a',
+        name: 'recording.m4a',
+      } as any);
+      formData.append('sessionId', sessionId);
+      const response = await fetch(`${API_BASE_URL}/api/chat/voice`, {
+        method: 'POST',
+        body: formData,
+      });
+      if (!response.ok) {
+        throw new Error('API request failed');
+      }
+      const data = await response.json();
+      
+      await incrementDailyUsage();
+      setCurrentMessage(data.text);
+      if (data.audioUrl) {
+        await playAudioResponse(`${API_BASE_URL}${data.audioUrl}`);
+      } else {
+        setVoiceState('idle');
+      }
+    } catch (e) {
+      console.log('Error sending audio:', e);
+      setCurrentMessage('I had trouble hearing you. Please try again.');
+      setVoiceState('idle');
+    }
+  };
+  const playAudioResponse = async (audioUrl: string) => {
+    try {
+      setVoiceState('speaking');
+      
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+      });
+      const { sound } = await Audio.Sound.createAsync({ uri: audioUrl });
+      soundRef.current = sound;
+      sound.setOnPlaybackStatusUpdate((status) => {
+        if (status.isLoaded && status.didJustFinish) {
+          setVoiceState('idle');
+          sound.unloadAsync();
+        }
+      });
+      await sound.playAsync();
+    } catch (e) {
+      console.log('Error playing audio:', e);
+      setVoiceState('idle');
+    }
+  };
+  const handleOrbPress = () => {
+    if (voiceState === 'idle') {
+      startRecording();
+    } else if (voiceState === 'listening') {
+      stopRecording();
+    }
+  };
+  const remainingMessages = Math.max(0, FREE_MESSAGE_LIMIT - dailyMessageCount);
+  return (
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+      <View style={styles.content}>
+        <View style={styles.header}>
+          <Text style={[styles.title, { color: colors.text }]}>Solence</Text>
+          {!isSubscribed && (
+            <Text style={[styles.usageText, { color: colors.textMuted }]}>
+              {remainingMessages} messages left today
+            </Text>
+          )}
+        </View>
+        <View style={styles.orbContainer}>
+          <TouchableOpacity
+            onPress={handleOrbPress}
+            activeOpacity={0.9}
+            disabled={voiceState === 'responding' || voiceState === 'speaking'}
+          >
+            <Animated.View
+              style={[
+                styles.orbWrapper,
+                {
+                  transform: [{ scale: voiceState === 'listening' ? pulseAnim : breatheAnim }],
+                },
+              ]}
+            >
+              <View style={[styles.orbGlow, { backgroundColor: colors.orbGlow }]} />
+              <Svg width={ORB_SIZE} height={ORB_SIZE} viewBox="0 0 200 200">
+                <Defs>
+                  <RadialGradient id="orbGradient" cx="50%" cy="50%" r="50%">
+                    <Stop offset="0%" stopColor={colors.orbSecondary} stopOpacity="1" />
+                    <Stop offset="70%" stopColor={colors.orbPrimary} stopOpacity="1" />
+                    <Stop offset="100%" stopColor="#6b4a3a" stopOpacity="1" />
+                  </RadialGradient>
+                </Defs>
+                <Ellipse cx="100" cy="100" rx="80" ry="80" fill="url(#orbGradient)" />
+              </Svg>
+            </Animated.View>
+          </TouchableOpacity>
+          <Text style={[styles.stateText, { color: colors.textMuted }]}>
+            {voiceState === 'idle' && 'Tap to speak'}
+            {voiceState === 'listening' && 'Listening...'}
+            {voiceState === 'responding' && 'Thinking...'}
+            {voiceState === 'speaking' && 'Speaking...'}
+          </Text>
+        </View>
+        {currentMessage ? (
+          <View style={styles.messageContainer}>
+            <Text style={[styles.messageText, { color: colors.text }]}>{currentMessage}</Text>
+          </View>
+        ) : null}
+      </View>
+      {showSubscriptionPrompt && (
+        <View style={styles.subscriptionOverlay}>
+          <View style={[styles.subscriptionModal, { backgroundColor: colors.background }]}>
+            <Text style={[styles.subscriptionTitle, { color: colors.text }]}>
+              Unlock Unlimited Conversations
+            </Text>
+            <Text style={[styles.subscriptionDescription, { color: colors.textMuted }]}>
+              You've used your 5 free messages today. Subscribe for unlimited access to Solence.
+            </Text>
+            <TouchableOpacity
+              style={styles.subscribeButton}
+              onPress={() => setShowSubscriptionPrompt(false)}
+            >
+              <Text style={styles.subscribeButtonText}>Subscribe - $15.99/month</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.cancelButton}
+              onPress={() => setShowSubscriptionPrompt(false)}
+            >
+              <Text style={[styles.cancelButtonText, { color: colors.textMuted }]}>
+                Maybe Later
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+    </SafeAreaView>
+  );
+}
+const styles = StyleSheet.create({
+  container: { flex: 1 },
+  content: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 40,
+  },
+  header: { alignItems: 'center' },
+  title: { fontSize: 28, fontWeight: '300', letterSpacing: 2 },
+  usageText: { fontSize: 14, marginTop: 8 },
+  orbContainer: { alignItems: 'center', justifyContent: 'center', flex: 1 },
+  orbWrapper: { alignItems: 'center', justifyContent: 'center' },
+  orbGlow: {
+    position: 'absolute',
+    width: SCREEN_WIDTH * 0.78,
+    height: SCREEN_WIDTH * 0.78,
+    borderRadius: SCREEN_WIDTH * 0.39,
+    opacity: 0.5,
+  },
+  stateText: { fontSize: 16, marginTop: 24, fontWeight: '300' },
+  messageContainer: { paddingHorizontal: 20, paddingBottom: 40, maxHeight: 200 },
+  messageText: { fontSize: 18, lineHeight: 28, textAlign: 'center', fontWeight: '300' },
+  subscriptionOverlay: {
+    position: 'absolute',
+    top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  subscriptionModal: { borderRadius: 20, padding: 30, width: '100%', maxWidth: 340, alignItems: 'center' },
+  subscriptionTitle: { fontSize: 22, fontWeight: '600', textAlign: 'center', marginBottom: 12 },
+  subscriptionDescription: { fontSize: 16, textAlign: 'center', lineHeight: 24, marginBottom: 24 },
+  subscribeButton: {
+    backgroundColor: '#9d6b53',
+    paddingVertical: 16,
+    paddingHorizontal: 32,
+    borderRadius: 30,
+    width: '100%',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  subscribeButtonText: { color: '#fff', fontSize: 18, fontWeight: '600' },
+  cancelButton: { paddingVertical: 12 },
+  cancelButtonText: { fontSize: 16 },
+});
+2. Install these packages in the mobile project:
+
+Run this in the Shell:
+
+npx expo install expo-av expo-secure-store react-native-svg react-native-safe-area-context
+3. Update the API URL:
+
+In the code above, change API_BASE_URL to your published web app URL (the one that ends in .replit.app).
+
+That's it! Once you create the new mobile project and paste this code, you'll see the QR code and can test on your phone.
+
+
+Scroll to latest
