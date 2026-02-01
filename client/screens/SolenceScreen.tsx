@@ -24,6 +24,7 @@ import {
   RecordingPresets,
   AudioModule,
   useAudioPlayer,
+  setAudioModeAsync,
 } from "expo-audio";
 import * as Haptics from "expo-haptics";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -186,6 +187,11 @@ export default function SolenceScreen() {
         return;
       }
 
+      await setAudioModeAsync({
+        allowsRecording: true,
+        playsInSilentMode: true,
+      });
+
       isRecordingRef.current = true;
       audioRecorder.record();
       setVoiceState("listening");
@@ -205,6 +211,11 @@ export default function SolenceScreen() {
 
       await audioRecorder.stop();
       isRecordingRef.current = false;
+
+      await setAudioModeAsync({
+        allowsRecording: false,
+        playsInSilentMode: true,
+      });
 
       const uri = audioRecorder.uri;
       if (uri) {
