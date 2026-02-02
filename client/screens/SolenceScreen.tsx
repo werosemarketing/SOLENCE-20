@@ -35,13 +35,12 @@ import * as FileSystem from "expo-file-system/legacy";
 
 import { useTheme } from "@/hooks/useTheme";
 import { Spacing, BorderRadius } from "@/constants/theme";
+import { getApiUrl } from "@/lib/query-client";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 const ORB_SIZE = SCREEN_WIDTH * 0.5;
 
 type VoiceState = "idle" | "listening" | "responding" | "speaking";
-
-const API_BASE_URL = "https://solence-joelgarciamendez.replit.app";
 
 const FREE_MESSAGE_LIMIT = 5;
 const STORAGE_KEY = "solence_daily_usage";
@@ -619,17 +618,23 @@ export default function SolenceScreen() {
     try {
       console.log("Sending audio from:", recordingUri);
 
-      const formData = new FormData();
-      formData.append("audio", {
-        uri: recordingUri,
-        type: "audio/m4a",
-        name: "recording.m4a",
-      } as any);
-      formData.append("sessionId", sessionId);
+      const audioBase64 = await FileSystem.readAsStringAsync(recordingUri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      console.log("Audio base64 length:", audioBase64.length);
 
-      const response = await fetch(`${API_BASE_URL}/api/chat/voice`, {
+      const apiUrl = getApiUrl();
+      console.log("API URL:", apiUrl);
+
+      const response = await fetch(`${apiUrl}/api/chat/voice`, {
         method: "POST",
-        body: formData,
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          audio: audioBase64,
+          sessionId: sessionId,
+        }),
       });
 
       if (!response.ok) {
@@ -639,13 +644,19 @@ export default function SolenceScreen() {
       }
 
       const data = await response.json();
+      console.log("API response received:", data.text?.substring(0, 50));
 
       await incrementDailyUsage();
       setCurrentMessage(data.text);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
-      if (data.audioUrl) {
-        setAudioUri(`${API_BASE_URL}${data.audioUrl}`);
+      if (data.audioBase64) {
+        const audioFileUri = FileSystem.cacheDirectory + `solence_response_${Date.now()}.mp3`;
+        await FileSystem.writeAsStringAsync(audioFileUri, data.audioBase64, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        console.log("Audio saved to:", audioFileUri);
+        setAudioUri(audioFileUri);
         setVoiceState("speaking");
         shouldContinueListeningRef.current = isConversationActive;
       } else {
