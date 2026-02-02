@@ -17,7 +17,6 @@ import Animated, {
   withTiming,
   withDelay,
   Easing,
-  cancelAnimation,
   interpolate,
   FadeIn,
   FadeInDown,
@@ -46,6 +45,7 @@ const API_BASE_URL = "https://solence-joelgarciamendez.replit.app";
 
 const FREE_MESSAGE_LIMIT = 5;
 const STORAGE_KEY = "solence_daily_usage";
+const AUTO_STOP_DELAY = 5000;
 
 function AmbientParticle({ delay, size, startX, startY, isDark }: { 
   delay: number; 
@@ -311,7 +311,6 @@ function EtherealOrb({ voiceState, isDark }: { voiceState: VoiceState; isDark: b
   }));
 
   const baseColor = isDark ? "rgba(196, 149, 108," : "rgba(180, 130, 95,";
-  const coreColor = isDark ? "#c4956c" : "#b8845a";
 
   return (
     <View style={styles.etherealContainer}>
@@ -402,6 +401,7 @@ export default function SolenceScreen() {
   const [showSubscriptionPrompt, setShowSubscriptionPrompt] = useState(false);
   const [permissionDenied, setPermissionDenied] = useState(false);
   const [audioUri, setAudioUri] = useState<string | null>(null);
+  const [isConversationActive, setIsConversationActive] = useState(false);
 
   const messageOpacity = useSharedValue(0);
 
@@ -409,6 +409,8 @@ export default function SolenceScreen() {
   const audioPlayer = useAudioPlayer(audioUri || "");
 
   const isRecordingRef = useRef(false);
+  const autoStopTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const shouldContinueListeningRef = useRef(false);
 
   const particles = useRef(
     Array.from({ length: 12 }, (_, i) => ({
@@ -439,6 +441,21 @@ export default function SolenceScreen() {
       audioPlayer.play();
     }
   }, [audioUri]);
+
+  useEffect(() => {
+    if (audioPlayer) {
+      const subscription = audioPlayer.addListener("playbackStatusUpdate", (status) => {
+        if (status.didJustFinish && isConversationActive && shouldContinueListeningRef.current) {
+          setTimeout(() => {
+            if (isConversationActive && canSendMessage()) {
+              startRecording();
+            }
+          }, 500);
+        }
+      });
+      return () => subscription.remove();
+    }
+  }, [audioPlayer, isConversationActive]);
 
   const animatedMessageStyle = useAnimatedStyle(() => ({
     opacity: messageOpacity.value,
@@ -489,9 +506,18 @@ export default function SolenceScreen() {
     return dailyMessageCount < FREE_MESSAGE_LIMIT;
   };
 
+  const clearAutoStopTimer = () => {
+    if (autoStopTimerRef.current) {
+      clearTimeout(autoStopTimerRef.current);
+      autoStopTimerRef.current = null;
+    }
+  };
+
   const startRecording = async () => {
     if (!canSendMessage()) {
       setShowSubscriptionPrompt(true);
+      setIsConversationActive(false);
+      shouldContinueListeningRef.current = false;
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
       return;
     }
@@ -503,6 +529,7 @@ export default function SolenceScreen() {
         if (!status.canAskAgain) {
           setPermissionDenied(true);
         }
+        setIsConversationActive(false);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
         return;
       }
@@ -516,16 +543,26 @@ export default function SolenceScreen() {
       await audioRecorder.record();
       setVoiceState("listening");
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+      clearAutoStopTimer();
+      autoStopTimerRef.current = setTimeout(() => {
+        if (isRecordingRef.current) {
+          stopRecording();
+        }
+      }, AUTO_STOP_DELAY);
     } catch (e: any) {
       console.log("Error starting recording:", e?.message || e);
       isRecordingRef.current = false;
       setVoiceState("idle");
+      setIsConversationActive(false);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     }
   };
 
   const stopRecording = async () => {
     if (!isRecordingRef.current) return;
+
+    clearAutoStopTimer();
 
     try {
       setVoiceState("responding");
@@ -594,8 +631,13 @@ export default function SolenceScreen() {
       if (data.audioUrl) {
         setAudioUri(`${API_BASE_URL}${data.audioUrl}`);
         setVoiceState("speaking");
+        shouldContinueListeningRef.current = isConversationActive;
       } else {
-        setVoiceState("idle");
+        if (isConversationActive && canSendMessage()) {
+          setTimeout(() => startRecording(), 500);
+        } else {
+          setVoiceState("idle");
+        }
       }
     } catch (e: any) {
       console.log("Error sending audio:", e?.message || e);
@@ -607,10 +649,30 @@ export default function SolenceScreen() {
 
   const handleOrbPress = () => {
     if (voiceState === "idle") {
+      setIsConversationActive(true);
+      shouldContinueListeningRef.current = true;
       startRecording();
     } else if (voiceState === "listening") {
       stopRecording();
     }
+  };
+
+  const endConversation = () => {
+    setIsConversationActive(false);
+    shouldContinueListeningRef.current = false;
+    clearAutoStopTimer();
+    
+    if (isRecordingRef.current) {
+      audioRecorder.stop();
+      isRecordingRef.current = false;
+    }
+    
+    if (audioPlayer) {
+      audioPlayer.pause();
+    }
+    
+    setVoiceState("idle");
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   };
 
   const openSettings = async () => {
@@ -629,7 +691,7 @@ export default function SolenceScreen() {
     if (permissionDenied) return "Microphone access required";
     switch (voiceState) {
       case "idle":
-        return "Tap to speak";
+        return "Tap to begin";
       case "listening":
         return "Listening...";
       case "responding":
@@ -637,7 +699,7 @@ export default function SolenceScreen() {
       case "speaking":
         return "Speaking...";
       default:
-        return "Tap to speak";
+        return "Tap to begin";
     }
   };
 
@@ -710,6 +772,24 @@ export default function SolenceScreen() {
           >
             {getStateText()}
           </Animated.Text>
+
+          {isConversationActive && voiceState !== "idle" ? (
+            <Pressable
+              onPress={endConversation}
+              style={({ pressed }) => [
+                styles.endButton,
+                { 
+                  backgroundColor: isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.05)",
+                  opacity: pressed ? 0.7 : 1 
+                },
+              ]}
+              testID="end-conversation-button"
+            >
+              <Text style={[styles.endButtonText, { color: theme.textMuted }]}>
+                End conversation
+              </Text>
+            </Pressable>
+          ) : null}
 
           {permissionDenied && Platform.OS !== "web" ? (
             <Pressable
@@ -854,6 +934,17 @@ const styles = StyleSheet.create({
     fontWeight: "300",
     letterSpacing: 2,
     textTransform: "uppercase",
+  },
+  endButton: {
+    marginTop: Spacing.lg,
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.xl,
+    borderRadius: BorderRadius.full,
+  },
+  endButtonText: {
+    fontSize: 14,
+    fontWeight: "400",
+    letterSpacing: 1,
   },
   settingsButton: {
     marginTop: Spacing.lg,
