@@ -545,9 +545,15 @@ export default function SolenceScreen() {
         playsInSilentMode: true,
       });
 
+      console.log("Preparing recorder...");
+      await audioRecorder.prepareToRecordAsync();
+      console.log("Recorder prepared");
+      
       console.log("Starting recorder...");
       isRecordingRef.current = true;
-      await audioRecorder.record();
+      audioRecorder.record();
+      
+      await new Promise(resolve => setTimeout(resolve, 100));
       console.log("Recorder started, state:", audioRecorder.isRecording);
       setVoiceState("listening");
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
