@@ -563,13 +563,15 @@ export default function SolenceScreen() {
     if (!isRecordingRef.current) return;
 
     clearAutoStopTimer();
+    isRecordingRef.current = false;
 
     try {
       setVoiceState("responding");
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
       await audioRecorder.stop();
-      isRecordingRef.current = false;
+
+      await new Promise(resolve => setTimeout(resolve, 300));
 
       await setAudioModeAsync({
         allowsRecording: false,
@@ -577,33 +579,28 @@ export default function SolenceScreen() {
       });
 
       const uri = audioRecorder.uri;
+      console.log("Recording URI:", uri);
+      
       if (uri) {
         await sendAudioToAPI(uri);
       } else {
+        console.log("No recording URI available");
+        setCurrentMessage("Recording was too short. Please try again.");
         setVoiceState("idle");
       }
-    } catch (e) {
-      console.log("Error stopping recording:", e);
+    } catch (e: any) {
+      console.log("Error stopping recording:", e?.message || e);
       setVoiceState("idle");
     }
   };
 
   const sendAudioToAPI = async (recordingUri: string) => {
     try {
-      const fileInfo = await FileSystem.getInfoAsync(recordingUri);
-      if (!fileInfo.exists) {
-        throw new Error("Recording file not found");
-      }
-
-      const stableUri = `${FileSystem.cacheDirectory}recording-${Date.now()}.m4a`;
-      await FileSystem.copyAsync({
-        from: recordingUri,
-        to: stableUri,
-      });
+      console.log("Sending audio from:", recordingUri);
 
       const formData = new FormData();
       formData.append("audio", {
-        uri: stableUri,
+        uri: recordingUri,
         type: "audio/m4a",
         name: "recording.m4a",
       } as any);
@@ -613,8 +610,6 @@ export default function SolenceScreen() {
         method: "POST",
         body: formData,
       });
-
-      await FileSystem.deleteAsync(stableUri, { idempotent: true });
 
       if (!response.ok) {
         const errorText = await response.text();
