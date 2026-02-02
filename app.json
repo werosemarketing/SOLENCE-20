@@ -44,7 +44,13 @@
           }
         }
       ],
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Solence needs microphone access to hear your voice and provide thoughtful responses."
+        }
+      ]
     ],
     "experiments": {
       "reactCompiler": true

@@ -513,11 +513,13 @@ export default function SolenceScreen() {
       });
 
       isRecordingRef.current = true;
-      audioRecorder.record();
+      await audioRecorder.record();
       setVoiceState("listening");
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    } catch (e) {
-      console.log("Error starting recording:", e);
+    } catch (e: any) {
+      console.log("Error starting recording:", e?.message || e);
+      isRecordingRef.current = false;
+      setVoiceState("idle");
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     }
   };
