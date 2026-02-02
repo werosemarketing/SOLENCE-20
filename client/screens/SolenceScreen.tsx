@@ -514,7 +514,10 @@ export default function SolenceScreen() {
   };
 
   const startRecording = async () => {
+    console.log("=== START RECORDING ===");
+    
     if (!canSendMessage()) {
+      console.log("Cannot send - limit reached");
       setShowSubscriptionPrompt(true);
       setIsConversationActive(false);
       shouldContinueListeningRef.current = false;
@@ -523,7 +526,9 @@ export default function SolenceScreen() {
     }
 
     try {
+      console.log("Requesting permissions...");
       const status = await AudioModule.requestRecordingPermissionsAsync();
+      console.log("Permission status:", status.granted);
 
       if (!status.granted) {
         if (!status.canAskAgain) {
@@ -534,18 +539,22 @@ export default function SolenceScreen() {
         return;
       }
 
+      console.log("Setting audio mode...");
       await setAudioModeAsync({
         allowsRecording: true,
         playsInSilentMode: true,
       });
 
+      console.log("Starting recorder...");
       isRecordingRef.current = true;
       await audioRecorder.record();
+      console.log("Recorder started, state:", audioRecorder.isRecording);
       setVoiceState("listening");
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
       clearAutoStopTimer();
       autoStopTimerRef.current = setTimeout(() => {
+        console.log("Auto-stop triggered");
         if (isRecordingRef.current) {
           stopRecording();
         }
@@ -560,7 +569,11 @@ export default function SolenceScreen() {
   };
 
   const stopRecording = async () => {
-    if (!isRecordingRef.current) return;
+    console.log("=== STOP RECORDING ===");
+    if (!isRecordingRef.current) {
+      console.log("Not recording, skipping stop");
+      return;
+    }
 
     clearAutoStopTimer();
     isRecordingRef.current = false;
@@ -569,9 +582,11 @@ export default function SolenceScreen() {
       setVoiceState("responding");
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
+      console.log("Stopping recorder...");
       await audioRecorder.stop();
+      console.log("Recorder stopped");
 
-      await new Promise(resolve => setTimeout(resolve, 300));
+      await new Promise(resolve => setTimeout(resolve, 500));
 
       await setAudioModeAsync({
         allowsRecording: false,
