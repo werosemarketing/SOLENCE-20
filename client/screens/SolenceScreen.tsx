@@ -32,7 +32,7 @@ import {
 import * as Haptics from "expo-haptics";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
-import { BlurView } from "expo-blur";
+import * as FileSystem from "expo-file-system";
 
 import { useTheme } from "@/hooks/useTheme";
 import { Spacing, BorderRadius } from "@/constants/theme";
@@ -553,10 +553,20 @@ export default function SolenceScreen() {
 
   const sendAudioToAPI = async (recordingUri: string) => {
     try {
-      const formData = new FormData();
+      const fileInfo = await FileSystem.getInfoAsync(recordingUri);
+      if (!fileInfo.exists) {
+        throw new Error("Recording file not found");
+      }
 
+      const stableUri = `${FileSystem.cacheDirectory}recording-${Date.now()}.m4a`;
+      await FileSystem.copyAsync({
+        from: recordingUri,
+        to: stableUri,
+      });
+
+      const formData = new FormData();
       formData.append("audio", {
-        uri: recordingUri,
+        uri: stableUri,
         type: "audio/m4a",
         name: "recording.m4a",
       } as any);
@@ -567,7 +577,11 @@ export default function SolenceScreen() {
         body: formData,
       });
 
+      await FileSystem.deleteAsync(stableUri, { idempotent: true });
+
       if (!response.ok) {
+        const errorText = await response.text();
+        console.log("API error:", errorText);
         throw new Error("API request failed");
       }
 
@@ -583,8 +597,8 @@ export default function SolenceScreen() {
       } else {
         setVoiceState("idle");
       }
-    } catch (e) {
-      console.log("Error sending audio:", e);
+    } catch (e: any) {
+      console.log("Error sending audio:", e?.message || e);
       setCurrentMessage("I had trouble hearing you. Please try again.");
       setVoiceState("idle");
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
