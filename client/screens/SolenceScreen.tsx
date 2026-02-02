@@ -19,11 +19,9 @@ import Animated, {
   Easing,
   cancelAnimation,
   interpolate,
-  withSpring,
   FadeIn,
   FadeInDown,
 } from "react-native-reanimated";
-import Svg, { Defs, RadialGradient, Stop, Ellipse, Circle } from "react-native-svg";
 import {
   useAudioRecorder,
   RecordingPresets,
@@ -34,12 +32,13 @@ import {
 import * as Haptics from "expo-haptics";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
+import { BlurView } from "expo-blur";
 
 import { useTheme } from "@/hooks/useTheme";
 import { Spacing, BorderRadius } from "@/constants/theme";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
-const ORB_SIZE = SCREEN_WIDTH * 0.55;
+const ORB_SIZE = SCREEN_WIDTH * 0.5;
 
 type VoiceState = "idle" | "listening" | "responding" | "speaking";
 
@@ -47,8 +46,6 @@ const API_BASE_URL = "https://solence-joelgarciamendez.replit.app";
 
 const FREE_MESSAGE_LIMIT = 5;
 const STORAGE_KEY = "solence_daily_usage";
-
-const AnimatedSvg = Animated.createAnimatedComponent(Svg);
 
 function AmbientParticle({ delay, size, startX, startY, isDark }: { 
   delay: number; 
@@ -66,7 +63,7 @@ function AmbientParticle({ delay, size, startX, startY, isDark }: {
       delay,
       withRepeat(
         withSequence(
-          withTiming(0.4, { duration: 3000, easing: Easing.inOut(Easing.ease) }),
+          withTiming(0.3, { duration: 3000, easing: Easing.inOut(Easing.ease) }),
           withTiming(0, { duration: 3000, easing: Easing.inOut(Easing.ease) })
         ),
         -1,
@@ -77,7 +74,7 @@ function AmbientParticle({ delay, size, startX, startY, isDark }: {
     translateY.value = withDelay(
       delay,
       withRepeat(
-        withTiming(-80, { duration: 8000, easing: Easing.inOut(Easing.ease) }),
+        withTiming(-100, { duration: 10000, easing: Easing.inOut(Easing.ease) }),
         -1,
         true
       )
@@ -87,8 +84,8 @@ function AmbientParticle({ delay, size, startX, startY, isDark }: {
       delay,
       withRepeat(
         withSequence(
-          withTiming(20, { duration: 4000, easing: Easing.inOut(Easing.ease) }),
-          withTiming(-20, { duration: 4000, easing: Easing.inOut(Easing.ease) })
+          withTiming(30, { duration: 5000, easing: Easing.inOut(Easing.ease) }),
+          withTiming(-30, { duration: 5000, easing: Easing.inOut(Easing.ease) })
         ),
         -1,
         false
@@ -114,7 +111,7 @@ function AmbientParticle({ delay, size, startX, startY, isDark }: {
           width: size,
           height: size,
           borderRadius: size / 2,
-          backgroundColor: isDark ? "rgba(196, 149, 108, 0.3)" : "rgba(157, 107, 83, 0.2)",
+          backgroundColor: isDark ? "rgba(196, 149, 108, 0.4)" : "rgba(157, 107, 83, 0.25)",
         },
         animatedStyle,
       ]}
@@ -122,131 +119,171 @@ function AmbientParticle({ delay, size, startX, startY, isDark }: {
   );
 }
 
-function InnerGlow({ voiceState, isDark }: { voiceState: VoiceState; isDark: boolean }) {
-  const glowOpacity = useSharedValue(0.3);
-  const glowScale = useSharedValue(1);
+function EtherealOrb({ voiceState, isDark }: { voiceState: VoiceState; isDark: boolean }) {
+  const layer1Scale = useSharedValue(1);
+  const layer2Scale = useSharedValue(1);
+  const layer3Scale = useSharedValue(1);
+  const layer1Opacity = useSharedValue(0.6);
+  const layer2Opacity = useSharedValue(0.4);
+  const layer3Opacity = useSharedValue(0.25);
+  const coreOpacity = useSharedValue(0.9);
 
   useEffect(() => {
     if (voiceState === "listening") {
-      glowOpacity.value = withRepeat(
+      layer1Scale.value = withRepeat(
         withSequence(
-          withTiming(0.7, { duration: 300, easing: Easing.inOut(Easing.ease) }),
-          withTiming(0.3, { duration: 300, easing: Easing.inOut(Easing.ease) })
+          withTiming(1.25, { duration: 400, easing: Easing.inOut(Easing.ease) }),
+          withTiming(0.9, { duration: 400, easing: Easing.inOut(Easing.ease) })
         ),
         -1,
         false
       );
-      glowScale.value = withRepeat(
+      layer2Scale.value = withRepeat(
         withSequence(
-          withTiming(1.3, { duration: 300, easing: Easing.inOut(Easing.ease) }),
-          withTiming(1, { duration: 300, easing: Easing.inOut(Easing.ease) })
+          withTiming(1.35, { duration: 450, easing: Easing.inOut(Easing.ease) }),
+          withTiming(0.85, { duration: 450, easing: Easing.inOut(Easing.ease) })
+        ),
+        -1,
+        false
+      );
+      layer3Scale.value = withRepeat(
+        withSequence(
+          withTiming(1.45, { duration: 500, easing: Easing.inOut(Easing.ease) }),
+          withTiming(0.8, { duration: 500, easing: Easing.inOut(Easing.ease) })
+        ),
+        -1,
+        false
+      );
+      layer1Opacity.value = withRepeat(
+        withSequence(
+          withTiming(0.8, { duration: 300 }),
+          withTiming(0.5, { duration: 300 })
+        ),
+        -1,
+        false
+      );
+      coreOpacity.value = withRepeat(
+        withSequence(
+          withTiming(1, { duration: 300 }),
+          withTiming(0.7, { duration: 300 })
         ),
         -1,
         false
       );
     } else if (voiceState === "responding") {
-      glowOpacity.value = withRepeat(
+      layer1Scale.value = withRepeat(
         withSequence(
-          withTiming(0.5, { duration: 800, easing: Easing.inOut(Easing.ease) }),
-          withTiming(0.2, { duration: 800, easing: Easing.inOut(Easing.ease) })
-        ),
-        -1,
-        false
-      );
-      glowScale.value = withRepeat(
-        withSequence(
-          withTiming(1.1, { duration: 800, easing: Easing.inOut(Easing.ease) }),
+          withTiming(1.08, { duration: 800, easing: Easing.inOut(Easing.ease) }),
           withTiming(0.95, { duration: 800, easing: Easing.inOut(Easing.ease) })
         ),
         -1,
         false
       );
+      layer2Scale.value = withRepeat(
+        withSequence(
+          withTiming(1.12, { duration: 900, easing: Easing.inOut(Easing.ease) }),
+          withTiming(0.92, { duration: 900, easing: Easing.inOut(Easing.ease) })
+        ),
+        -1,
+        false
+      );
+      layer3Scale.value = withRepeat(
+        withSequence(
+          withTiming(1.15, { duration: 1000, easing: Easing.inOut(Easing.ease) }),
+          withTiming(0.9, { duration: 1000, easing: Easing.inOut(Easing.ease) })
+        ),
+        -1,
+        false
+      );
+      layer1Opacity.value = 0.5;
+      coreOpacity.value = 0.85;
     } else if (voiceState === "speaking") {
-      glowOpacity.value = withRepeat(
+      layer1Scale.value = withRepeat(
         withSequence(
-          withTiming(0.6, { duration: 200, easing: Easing.inOut(Easing.ease) }),
-          withTiming(0.35, { duration: 200, easing: Easing.inOut(Easing.ease) })
+          withTiming(1.1, { duration: 200, easing: Easing.inOut(Easing.ease) }),
+          withTiming(0.95, { duration: 200, easing: Easing.inOut(Easing.ease) })
         ),
         -1,
         false
       );
-      glowScale.value = 1.05;
+      layer2Scale.value = withRepeat(
+        withSequence(
+          withTiming(1.15, { duration: 250, easing: Easing.inOut(Easing.ease) }),
+          withTiming(0.9, { duration: 250, easing: Easing.inOut(Easing.ease) })
+        ),
+        -1,
+        false
+      );
+      layer3Scale.value = withRepeat(
+        withSequence(
+          withTiming(1.2, { duration: 300, easing: Easing.inOut(Easing.ease) }),
+          withTiming(0.88, { duration: 300, easing: Easing.inOut(Easing.ease) })
+        ),
+        -1,
+        false
+      );
+      layer1Opacity.value = withRepeat(
+        withSequence(
+          withTiming(0.7, { duration: 150 }),
+          withTiming(0.4, { duration: 150 })
+        ),
+        -1,
+        false
+      );
+      coreOpacity.value = 0.95;
     } else {
-      glowOpacity.value = withRepeat(
+      layer1Scale.value = withRepeat(
         withSequence(
-          withTiming(0.35, { duration: 4000, easing: Easing.inOut(Easing.ease) }),
-          withTiming(0.2, { duration: 4000, easing: Easing.inOut(Easing.ease) })
-        ),
-        -1,
-        false
-      );
-      glowScale.value = withRepeat(
-        withSequence(
-          withTiming(1.02, { duration: 4000, easing: Easing.inOut(Easing.ease) }),
+          withTiming(1.06, { duration: 4000, easing: Easing.inOut(Easing.ease) }),
           withTiming(0.98, { duration: 4000, easing: Easing.inOut(Easing.ease) })
         ),
         -1,
         false
       );
-    }
-  }, [voiceState]);
-
-  const animatedStyle = useAnimatedStyle(() => ({
-    opacity: glowOpacity.value,
-    transform: [{ scale: glowScale.value }],
-  }));
-
-  return (
-    <Animated.View
-      style={[
-        {
-          position: "absolute",
-          width: ORB_SIZE * 1.6,
-          height: ORB_SIZE * 1.6,
-          borderRadius: ORB_SIZE * 0.8,
-          backgroundColor: isDark ? "rgba(196, 149, 108, 0.25)" : "rgba(196, 149, 108, 0.35)",
-        },
-        animatedStyle,
-      ]}
-    />
-  );
-}
-
-function OuterAura({ voiceState, isDark }: { voiceState: VoiceState; isDark: boolean }) {
-  const auraOpacity = useSharedValue(0.1);
-  const auraScale = useSharedValue(1);
-
-  useEffect(() => {
-    if (voiceState === "listening") {
-      auraOpacity.value = withRepeat(
+      layer2Scale.value = withRepeat(
         withSequence(
-          withTiming(0.25, { duration: 400, easing: Easing.inOut(Easing.ease) }),
-          withTiming(0.08, { duration: 400, easing: Easing.inOut(Easing.ease) })
+          withTiming(1.08, { duration: 4500, easing: Easing.inOut(Easing.ease) }),
+          withTiming(0.96, { duration: 4500, easing: Easing.inOut(Easing.ease) })
         ),
         -1,
         false
       );
-      auraScale.value = withRepeat(
+      layer3Scale.value = withRepeat(
         withSequence(
-          withTiming(1.15, { duration: 400, easing: Easing.inOut(Easing.ease) }),
-          withTiming(0.95, { duration: 400, easing: Easing.inOut(Easing.ease) })
+          withTiming(1.1, { duration: 5000, easing: Easing.inOut(Easing.ease) }),
+          withTiming(0.94, { duration: 5000, easing: Easing.inOut(Easing.ease) })
         ),
         -1,
         false
       );
-    } else {
-      auraOpacity.value = withRepeat(
+      layer1Opacity.value = withRepeat(
         withSequence(
-          withTiming(0.12, { duration: 6000, easing: Easing.inOut(Easing.ease) }),
-          withTiming(0.05, { duration: 6000, easing: Easing.inOut(Easing.ease) })
+          withTiming(0.65, { duration: 4000, easing: Easing.inOut(Easing.ease) }),
+          withTiming(0.5, { duration: 4000, easing: Easing.inOut(Easing.ease) })
         ),
         -1,
         false
       );
-      auraScale.value = withRepeat(
+      layer2Opacity.value = withRepeat(
         withSequence(
-          withTiming(1.03, { duration: 6000, easing: Easing.inOut(Easing.ease) }),
-          withTiming(0.97, { duration: 6000, easing: Easing.inOut(Easing.ease) })
+          withTiming(0.45, { duration: 4500, easing: Easing.inOut(Easing.ease) }),
+          withTiming(0.3, { duration: 4500, easing: Easing.inOut(Easing.ease) })
+        ),
+        -1,
+        false
+      );
+      layer3Opacity.value = withRepeat(
+        withSequence(
+          withTiming(0.3, { duration: 5000, easing: Easing.inOut(Easing.ease) }),
+          withTiming(0.15, { duration: 5000, easing: Easing.inOut(Easing.ease) })
+        ),
+        -1,
+        false
+      );
+      coreOpacity.value = withRepeat(
+        withSequence(
+          withTiming(0.95, { duration: 4000, easing: Easing.inOut(Easing.ease) }),
+          withTiming(0.8, { duration: 4000, easing: Easing.inOut(Easing.ease) })
         ),
         -1,
         false
@@ -254,24 +291,102 @@ function OuterAura({ voiceState, isDark }: { voiceState: VoiceState; isDark: boo
     }
   }, [voiceState]);
 
-  const animatedStyle = useAnimatedStyle(() => ({
-    opacity: auraOpacity.value,
-    transform: [{ scale: auraScale.value }],
+  const layer1Style = useAnimatedStyle(() => ({
+    transform: [{ scale: layer1Scale.value }],
+    opacity: layer1Opacity.value,
   }));
 
+  const layer2Style = useAnimatedStyle(() => ({
+    transform: [{ scale: layer2Scale.value }],
+    opacity: layer2Opacity.value,
+  }));
+
+  const layer3Style = useAnimatedStyle(() => ({
+    transform: [{ scale: layer3Scale.value }],
+    opacity: layer3Opacity.value,
+  }));
+
+  const coreStyle = useAnimatedStyle(() => ({
+    opacity: coreOpacity.value,
+  }));
+
+  const baseColor = isDark ? "rgba(196, 149, 108," : "rgba(180, 130, 95,";
+  const coreColor = isDark ? "#c4956c" : "#b8845a";
+
   return (
-    <Animated.View
-      style={[
-        {
-          position: "absolute",
-          width: ORB_SIZE * 2.2,
-          height: ORB_SIZE * 2.2,
-          borderRadius: ORB_SIZE * 1.1,
-          backgroundColor: isDark ? "rgba(196, 149, 108, 0.15)" : "rgba(157, 107, 83, 0.12)",
-        },
-        animatedStyle,
-      ]}
-    />
+    <View style={styles.etherealContainer}>
+      <Animated.View
+        style={[
+          styles.etherealLayer,
+          {
+            width: ORB_SIZE * 2.4,
+            height: ORB_SIZE * 2.4,
+            borderRadius: ORB_SIZE * 1.2,
+            backgroundColor: `${baseColor} 0.08)`,
+          },
+          layer3Style,
+        ]}
+      />
+      
+      <Animated.View
+        style={[
+          styles.etherealLayer,
+          {
+            width: ORB_SIZE * 1.8,
+            height: ORB_SIZE * 1.8,
+            borderRadius: ORB_SIZE * 0.9,
+            backgroundColor: `${baseColor} 0.12)`,
+          },
+          layer2Style,
+        ]}
+      />
+      
+      <Animated.View
+        style={[
+          styles.etherealLayer,
+          {
+            width: ORB_SIZE * 1.3,
+            height: ORB_SIZE * 1.3,
+            borderRadius: ORB_SIZE * 0.65,
+            backgroundColor: `${baseColor} 0.2)`,
+          },
+          layer1Style,
+        ]}
+      />
+
+      <Animated.View style={[styles.coreContainer, coreStyle]}>
+        <LinearGradient
+          colors={
+            isDark
+              ? ["#e8c9a8", "#c4956c", "#9d6b53", "#6b4a3a"] as const
+              : ["#dbb896", "#c4956c", "#a67850", "#7a5438"] as const
+          }
+          style={[
+            styles.coreGradient,
+            {
+              width: ORB_SIZE * 0.7,
+              height: ORB_SIZE * 0.7,
+              borderRadius: ORB_SIZE * 0.35,
+            },
+          ]}
+          start={{ x: 0.3, y: 0.2 }}
+          end={{ x: 0.8, y: 0.9 }}
+        />
+        
+        <View
+          style={[
+            styles.coreHighlight,
+            {
+              width: ORB_SIZE * 0.25,
+              height: ORB_SIZE * 0.15,
+              borderRadius: ORB_SIZE * 0.1,
+              top: ORB_SIZE * 0.12,
+              left: ORB_SIZE * 0.15,
+            },
+          ]}
+        />
+      </Animated.View>
+    </View>
   );
 }
 
@@ -288,9 +403,6 @@ export default function SolenceScreen() {
   const [permissionDenied, setPermissionDenied] = useState(false);
   const [audioUri, setAudioUri] = useState<string | null>(null);
 
-  const breatheScale = useSharedValue(1);
-  const pulseScale = useSharedValue(1);
-  const orbRotation = useSharedValue(0);
   const messageOpacity = useSharedValue(0);
 
   const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
@@ -299,12 +411,12 @@ export default function SolenceScreen() {
   const isRecordingRef = useRef(false);
 
   const particles = useRef(
-    Array.from({ length: 8 }, (_, i) => ({
+    Array.from({ length: 12 }, (_, i) => ({
       id: i,
-      delay: i * 800,
-      size: 4 + Math.random() * 6,
-      startX: SCREEN_WIDTH * 0.2 + Math.random() * SCREEN_WIDTH * 0.6,
-      startY: SCREEN_HEIGHT * 0.3 + Math.random() * SCREEN_HEIGHT * 0.4,
+      delay: i * 600,
+      size: 3 + Math.random() * 5,
+      startX: SCREEN_WIDTH * 0.15 + Math.random() * SCREEN_WIDTH * 0.7,
+      startY: SCREEN_HEIGHT * 0.25 + Math.random() * SCREEN_HEIGHT * 0.5,
     }))
   ).current;
 
@@ -312,73 +424,7 @@ export default function SolenceScreen() {
     const newSessionId = `mobile-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     setSessionId(newSessionId);
     checkDailyUsage();
-
-    orbRotation.value = withRepeat(
-      withTiming(360, { duration: 120000, easing: Easing.linear }),
-      -1,
-      false
-    );
   }, []);
-
-  useEffect(() => {
-    if (voiceState === "idle") {
-      cancelAnimation(pulseScale);
-      pulseScale.value = 1;
-      breatheScale.value = withRepeat(
-        withSequence(
-          withTiming(1.04, {
-            duration: 4000,
-            easing: Easing.inOut(Easing.ease),
-          }),
-          withTiming(1, {
-            duration: 4000,
-            easing: Easing.inOut(Easing.ease),
-          })
-        ),
-        -1,
-        false
-      );
-    } else if (voiceState === "listening") {
-      cancelAnimation(breatheScale);
-      breatheScale.value = 1;
-      pulseScale.value = withRepeat(
-        withSequence(
-          withTiming(1.12, {
-            duration: 500,
-            easing: Easing.inOut(Easing.ease),
-          }),
-          withTiming(0.92, {
-            duration: 500,
-            easing: Easing.inOut(Easing.ease),
-          })
-        ),
-        -1,
-        false
-      );
-    } else if (voiceState === "responding") {
-      cancelAnimation(breatheScale);
-      cancelAnimation(pulseScale);
-      breatheScale.value = withRepeat(
-        withSequence(
-          withTiming(1.02, { duration: 1000, easing: Easing.inOut(Easing.ease) }),
-          withTiming(0.98, { duration: 1000, easing: Easing.inOut(Easing.ease) })
-        ),
-        -1,
-        false
-      );
-    } else if (voiceState === "speaking") {
-      cancelAnimation(breatheScale);
-      cancelAnimation(pulseScale);
-      breatheScale.value = withRepeat(
-        withSequence(
-          withTiming(1.03, { duration: 300, easing: Easing.inOut(Easing.ease) }),
-          withTiming(0.97, { duration: 300, easing: Easing.inOut(Easing.ease) })
-        ),
-        -1,
-        false
-      );
-    }
-  }, [voiceState]);
 
   useEffect(() => {
     if (currentMessage) {
@@ -393,16 +439,6 @@ export default function SolenceScreen() {
       audioPlayer.play();
     }
   }, [audioUri]);
-
-  const animatedOrbStyle = useAnimatedStyle(() => {
-    const scale = voiceState === "listening" ? pulseScale.value : breatheScale.value;
-    return {
-      transform: [
-        { scale },
-        { rotate: `${orbRotation.value}deg` },
-      ],
-    };
-  });
 
   const animatedMessageStyle = useAnimatedStyle(() => ({
     opacity: messageOpacity.value,
@@ -590,8 +626,8 @@ export default function SolenceScreen() {
   };
 
   const gradientColors = isDark 
-    ? ["#1a1625", "#1f1a2e", "#251e35", "#1f1a2e", "#1a1625"] as const
-    : ["#faf8f5", "#f8f4ef", "#f5f0e8", "#f8f4ef", "#faf8f5"] as const;
+    ? ["#0f0c14", "#1a1625", "#1f1a2e", "#1a1625", "#0f0c14"] as const
+    : ["#f8f5f0", "#faf8f5", "#fcfaf7", "#faf8f5", "#f8f5f0"] as const;
 
   return (
     <View style={styles.container}>
@@ -649,54 +685,7 @@ export default function SolenceScreen() {
             accessibilityRole="button"
             testID="orb-button"
           >
-            <OuterAura voiceState={voiceState} isDark={isDark} />
-            <InnerGlow voiceState={voiceState} isDark={isDark} />
-            
-            <Animated.View style={[styles.orbWrapper, animatedOrbStyle]}>
-              <Svg
-                width={ORB_SIZE}
-                height={ORB_SIZE}
-                viewBox="0 0 200 200"
-              >
-                <Defs>
-                  <RadialGradient id="orbGradient" cx="40%" cy="35%" r="65%">
-                    <Stop
-                      offset="0%"
-                      stopColor="#d4a574"
-                      stopOpacity="1"
-                    />
-                    <Stop
-                      offset="35%"
-                      stopColor={theme.orbSecondary}
-                      stopOpacity="1"
-                    />
-                    <Stop
-                      offset="70%"
-                      stopColor={theme.orbPrimary}
-                      stopOpacity="1"
-                    />
-                    <Stop offset="100%" stopColor="#5a3d2b" stopOpacity="1" />
-                  </RadialGradient>
-                  <RadialGradient id="highlightGradient" cx="30%" cy="25%" r="40%">
-                    <Stop offset="0%" stopColor="#fff" stopOpacity="0.25" />
-                    <Stop offset="100%" stopColor="#fff" stopOpacity="0" />
-                  </RadialGradient>
-                </Defs>
-                <Circle
-                  cx="100"
-                  cy="100"
-                  r="80"
-                  fill="url(#orbGradient)"
-                />
-                <Ellipse
-                  cx="75"
-                  cy="70"
-                  rx="35"
-                  ry="25"
-                  fill="url(#highlightGradient)"
-                />
-              </Svg>
-            </Animated.View>
+            <EtherealOrb voiceState={voiceState} isDark={isDark} />
           </Pressable>
 
           <Animated.Text 
@@ -737,7 +726,7 @@ export default function SolenceScreen() {
             entering={FadeIn.duration(300)}
             style={[
               styles.subscriptionModal,
-              { backgroundColor: isDark ? "#252030" : "#fefefe" },
+              { backgroundColor: isDark ? "#1f1a2e" : "#fefefe" },
             ]}
           >
             <Text style={[styles.subscriptionTitle, { color: theme.text }]}>
@@ -822,13 +811,30 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  orbWrapper: {
+  etherealContainer: {
+    alignItems: "center",
+    justifyContent: "center",
+    width: ORB_SIZE * 2.5,
+    height: ORB_SIZE * 2.5,
+  },
+  etherealLayer: {
+    position: "absolute",
+  },
+  coreContainer: {
     alignItems: "center",
     justifyContent: "center",
   },
+  coreGradient: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  coreHighlight: {
+    position: "absolute",
+    backgroundColor: "rgba(255, 255, 255, 0.25)",
+  },
   stateText: {
     fontSize: 15,
-    marginTop: Spacing["3xl"],
+    marginTop: Spacing.xl,
     fontWeight: "300",
     letterSpacing: 2,
     textTransform: "uppercase",
