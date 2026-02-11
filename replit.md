@@ -9,20 +9,29 @@ Solence is a voice-first AI companion app for meditation, reflection, and emotio
 - Daily usage tracking (5 free messages per day)
 - Subscription prompt modal
 - Dark/light mode support
+- Disclaimer + Onboarding flow for new users
+- V1 Solence persona: calm, warm, grounded, emotionally intelligent AI companion
 
 ## Project Architecture
 
 ### Frontend (React Native/Expo)
+- **client/screens/DisclaimerScreen.tsx** - AI disclaimer/consent screen (shown first for new users)
+- **client/screens/OnboardingScreen.tsx** - 3-page swipeable onboarding explaining how to use Solence
 - **client/screens/SolenceScreen.tsx** - Main voice interface with orb
-- **client/navigation/RootStackNavigator.tsx** - Single-screen navigation
+- **client/navigation/RootStackNavigator.tsx** - Navigation with Disclaimer → Onboarding → Main flow
 - **client/constants/theme.ts** - Solence color palette (terracotta, warm neutrals)
 - **client/App.tsx** - App root with providers
 
 ### Backend (Express)
 - **server/index.ts** - Express server on port 5000
-- The app expects a voice chat API at `/api/chat/voice` that accepts:
-  - POST with FormData containing `audio` (m4a file) and `sessionId`
-  - Returns JSON with `text` (response text) and optional `audioUrl` (response audio)
+- **server/routes.ts** - Voice API with Solence V1 persona system prompt
+- **server/db.ts** - Database connection (Neon PostgreSQL)
+- **server/replit_integrations/audio/** - OpenAI audio integration (speech-to-text, text-to-speech)
+- **shared/schema.ts** - Database schema (conversations, messages tables)
+
+### Voice Chat API
+- POST `/api/chat/voice` with JSON body containing `audio` (base64) and `sessionId`
+- Returns JSON with `text`, `userTranscript`, `audioBase64`, `audioFormat`
 
 ### Key Features
 1. **Breathing Orb** - Animated SVG gradient sphere
