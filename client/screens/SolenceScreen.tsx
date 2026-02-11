@@ -37,6 +37,24 @@ import { useTheme } from "@/hooks/useTheme";
 import { Spacing, BorderRadius } from "@/constants/theme";
 import { getApiUrl } from "@/lib/query-client";
 
+const saveBase64Audio = async (base64: string): Promise<string> => {
+  if (Platform.OS === "web") {
+    const byteChars = atob(base64);
+    const byteNumbers = new Array(byteChars.length);
+    for (let i = 0; i < byteChars.length; i++) {
+      byteNumbers[i] = byteChars.charCodeAt(i);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
+    const blob = new Blob([byteArray], { type: "audio/mp3" });
+    return URL.createObjectURL(blob);
+  }
+  const audioFileUri = FileSystem.cacheDirectory + `solence_response_${Date.now()}.mp3`;
+  await FileSystem.writeAsStringAsync(audioFileUri, base64, {
+    encoding: FileSystem.EncodingType.Base64,
+  });
+  return audioFileUri;
+};
+
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 const ORB_SIZE = SCREEN_WIDTH * 0.5;
 
@@ -46,6 +64,13 @@ const FREE_MESSAGE_LIMIT = 5;
 const STORAGE_KEY = "solence_daily_usage";
 const STORAGE_KEY_DEVICE_ID = "solence_device_id";
 const AUTO_STOP_DELAY = 5000;
+
+const STARTER_PROMPTS = [
+  "I need to slow down for a moment",
+  "Something has been on my mind lately",
+  "I just want to talk",
+  "Help me process how I am feeling",
+];
 
 function AmbientParticle({ delay, size, startX, startY, isDark }: { 
   delay: number; 
@@ -402,6 +427,7 @@ export default function SolenceScreen() {
   const [permissionDenied, setPermissionDenied] = useState(false);
   const [audioUri, setAudioUri] = useState<string | null>(null);
   const [isConversationActive, setIsConversationActive] = useState(false);
+  const [showStarters, setShowStarters] = useState(true);
 
   const messageOpacity = useSharedValue(0);
 
@@ -665,10 +691,7 @@ export default function SolenceScreen() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
       if (data.audioBase64) {
-        const audioFileUri = FileSystem.cacheDirectory + `solence_response_${Date.now()}.mp3`;
-        await FileSystem.writeAsStringAsync(audioFileUri, data.audioBase64, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
+        const audioFileUri = await saveBase64Audio(data.audioBase64);
         console.log("Audio saved to:", audioFileUri);
         setAudioUri(audioFileUri);
         setVoiceState("speaking");
@@ -688,8 +711,51 @@ export default function SolenceScreen() {
     }
   };
 
+  const sendTextToAPI = async (text: string) => {
+    if (!canSendMessage()) {
+      setShowSubscriptionPrompt(true);
+      return;
+    }
+
+    setShowStarters(false);
+    setIsConversationActive(true);
+    setVoiceState("responding");
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+    try {
+      const apiUrl = getApiUrl();
+      const response = await fetch(`${apiUrl}/api/chat/voice`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, sessionId }),
+      });
+
+      if (!response.ok) throw new Error("API request failed");
+
+      const data = await response.json();
+      await incrementDailyUsage();
+      setCurrentMessage(data.text);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+
+      if (data.audioBase64) {
+        const audioFileUri = await saveBase64Audio(data.audioBase64);
+        setAudioUri(audioFileUri);
+        setVoiceState("speaking");
+        shouldContinueListeningRef.current = true;
+      } else {
+        setVoiceState("idle");
+      }
+    } catch (e: any) {
+      console.log("Error sending text:", e?.message || e);
+      setCurrentMessage("Something went wrong. Please try again.");
+      setVoiceState("idle");
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    }
+  };
+
   const handleOrbPress = () => {
     if (voiceState === "idle") {
+      setShowStarters(false);
       setIsConversationActive(true);
       shouldContinueListeningRef.current = true;
       startRecording();
@@ -845,13 +911,46 @@ export default function SolenceScreen() {
           ) : null}
         </View>
 
-        <Animated.View style={[styles.messageContainer, animatedMessageStyle]}>
-          {currentMessage ? (
-            <Text style={[styles.messageText, { color: theme.text }]}>
-              {currentMessage}
-            </Text>
-          ) : null}
-        </Animated.View>
+        {showStarters && voiceState === "idle" && !currentMessage ? (
+          <Animated.View
+            entering={FadeIn.duration(800).delay(800)}
+            style={styles.startersContainer}
+          >
+            {STARTER_PROMPTS.map((prompt, index) => (
+              <Pressable
+                key={index}
+                onPress={() => sendTextToAPI(prompt)}
+                style={({ pressed }) => [
+                  styles.starterChip,
+                  {
+                    backgroundColor: isDark
+                      ? "rgba(255,255,255,0.06)"
+                      : "rgba(0,0,0,0.04)",
+                    borderColor: isDark
+                      ? "rgba(255,255,255,0.08)"
+                      : "rgba(0,0,0,0.06)",
+                    opacity: pressed ? 0.7 : 1,
+                  },
+                ]}
+                testID={`starter-prompt-${index}`}
+              >
+                <Text
+                  style={[styles.starterText, { color: theme.textMuted }]}
+                >
+                  {prompt}
+                </Text>
+              </Pressable>
+            ))}
+          </Animated.View>
+        ) : (
+          <Animated.View style={[styles.messageContainer, animatedMessageStyle]}>
+            {currentMessage ? (
+              <Text style={[styles.messageText, { color: theme.text }]}>
+                {currentMessage}
+              </Text>
+            ) : null}
+          </Animated.View>
+        )}
       </View>
 
       {showSubscriptionPrompt ? (
@@ -995,6 +1094,25 @@ const styles = StyleSheet.create({
   settingsButtonText: {
     fontSize: 16,
     fontWeight: "500",
+  },
+  startersContainer: {
+    paddingHorizontal: Spacing["2xl"],
+    paddingBottom: Spacing["3xl"],
+    alignItems: "center",
+    gap: Spacing.sm,
+    minHeight: 80,
+  },
+  starterChip: {
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.xl,
+    borderRadius: BorderRadius.full,
+    borderWidth: 1,
+  },
+  starterText: {
+    fontSize: 14,
+    fontWeight: "300",
+    letterSpacing: 0.3,
+    textAlign: "center",
   },
   messageContainer: {
     paddingHorizontal: Spacing["2xl"],

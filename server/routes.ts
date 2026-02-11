@@ -74,16 +74,22 @@ After talking with you, users should feel a little calmer, a little clearer, and
 export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/chat/voice", audioBodyParser, async (req: Request, res: Response) => {
     try {
-      const { audio, sessionId } = req.body;
+      const { audio, sessionId, text } = req.body;
 
-      if (!audio) {
-        return res.status(400).json({ error: "Body Param [audio] is required" });
+      if (!audio && !text) {
+        return res.status(400).json({ error: "Either [audio] or [text] is required" });
       }
 
-      const rawBuffer = Buffer.from(audio, "base64");
-      const { buffer: audioBuffer, format: inputFormat } = await ensureCompatibleFormat(rawBuffer);
+      let userTranscript: string;
 
-      const userTranscript = await speechToText(audioBuffer, inputFormat);
+      if (text) {
+        userTranscript = text;
+      } else {
+        const rawBuffer = Buffer.from(audio, "base64");
+        const { buffer: audioBuffer, format: inputFormat } = await ensureCompatibleFormat(rawBuffer);
+        userTranscript = await speechToText(audioBuffer, inputFormat);
+      }
+
       console.log("User said:", userTranscript);
 
       const deviceId = sessionId || "anonymous";
