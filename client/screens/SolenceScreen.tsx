@@ -884,7 +884,9 @@ export default function SolenceScreen() {
           >
             <EtherealOrb voiceState={voiceState} isDark={isDark} />
           </Pressable>
+        </View>
 
+        <View style={styles.bottomSection}>
           <Animated.Text 
             entering={FadeIn.duration(600).delay(600)}
             style={[styles.stateText, { color: theme.textMuted }]}
@@ -921,48 +923,48 @@ export default function SolenceScreen() {
               </Text>
             </Pressable>
           ) : null}
-        </View>
 
-        {showStarters && voiceState === "idle" && !currentMessage ? (
-          <Animated.View
-            entering={FadeIn.duration(800).delay(800)}
-            style={styles.startersContainer}
-          >
-            {STARTER_PROMPTS.map((prompt, index) => (
-              <Pressable
-                key={index}
-                onPress={() => sendTextToAPI(prompt)}
-                style={({ pressed }) => [
-                  styles.starterChip,
-                  {
-                    backgroundColor: isDark
-                      ? "rgba(255,255,255,0.06)"
-                      : "rgba(0,0,0,0.04)",
-                    borderColor: isDark
-                      ? "rgba(255,255,255,0.08)"
-                      : "rgba(0,0,0,0.06)",
-                    opacity: pressed ? 0.7 : 1,
-                  },
-                ]}
-                testID={`starter-prompt-${index}`}
-              >
-                <Text
-                  style={[styles.starterText, { color: theme.textMuted }]}
+          {showStarters && voiceState === "idle" && !currentMessage ? (
+            <Animated.View
+              entering={FadeIn.duration(800).delay(800)}
+              style={styles.startersContainer}
+            >
+              {STARTER_PROMPTS.map((prompt, index) => (
+                <Pressable
+                  key={index}
+                  onPress={() => sendTextToAPI(prompt)}
+                  style={({ pressed }) => [
+                    styles.starterChip,
+                    {
+                      backgroundColor: isDark
+                        ? "rgba(255,255,255,0.06)"
+                        : "rgba(0,0,0,0.04)",
+                      borderColor: isDark
+                        ? "rgba(255,255,255,0.08)"
+                        : "rgba(0,0,0,0.06)",
+                      opacity: pressed ? 0.7 : 1,
+                    },
+                  ]}
+                  testID={`starter-prompt-${index}`}
                 >
-                  {prompt}
+                  <Text
+                    style={[styles.starterText, { color: theme.textMuted }]}
+                  >
+                    {prompt}
+                  </Text>
+                </Pressable>
+              ))}
+            </Animated.View>
+          ) : (
+            <Animated.View style={[styles.messageContainer, animatedMessageStyle]}>
+              {currentMessage ? (
+                <Text style={[styles.messageText, { color: theme.text }]}>
+                  {currentMessage}
                 </Text>
-              </Pressable>
-            ))}
-          </Animated.View>
-        ) : (
-          <Animated.View style={[styles.messageContainer, animatedMessageStyle]}>
-            {currentMessage ? (
-              <Text style={[styles.messageText, { color: theme.text }]}>
-                {currentMessage}
-              </Text>
-            ) : null}
-          </Animated.View>
-        )}
+              ) : null}
+            </Animated.View>
+          )}
+        </View>
       </View>
 
       {showSubscriptionPrompt ? (
@@ -1054,6 +1056,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     flex: 1,
+  },
+  bottomSection: {
+    alignItems: "center",
+    paddingBottom: Spacing.md,
   },
   orbPressable: {
     alignItems: "center",
