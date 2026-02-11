@@ -44,6 +44,7 @@ type VoiceState = "idle" | "listening" | "responding" | "speaking";
 
 const FREE_MESSAGE_LIMIT = 5;
 const STORAGE_KEY = "solence_daily_usage";
+const STORAGE_KEY_DEVICE_ID = "solence_device_id";
 const AUTO_STOP_DELAY = 5000;
 
 function AmbientParticle({ delay, size, startX, startY, isDark }: { 
@@ -422,10 +423,23 @@ export default function SolenceScreen() {
   ).current;
 
   useEffect(() => {
-    const newSessionId = `mobile-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    setSessionId(newSessionId);
+    initDeviceId();
     checkDailyUsage();
   }, []);
+
+  const initDeviceId = async () => {
+    try {
+      let deviceId = await AsyncStorage.getItem(STORAGE_KEY_DEVICE_ID);
+      if (!deviceId) {
+        deviceId = `device-${Date.now()}-${Math.random().toString(36).substr(2, 12)}`;
+        await AsyncStorage.setItem(STORAGE_KEY_DEVICE_ID, deviceId);
+      }
+      setSessionId(deviceId);
+    } catch {
+      const fallback = `device-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      setSessionId(fallback);
+    }
+  };
 
   useEffect(() => {
     if (currentMessage) {
