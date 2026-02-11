@@ -4,7 +4,7 @@ import express from "express";
 import { openai, ensureCompatibleFormat, speechToText } from "./replit_integrations/audio";
 import { db } from "./db";
 import { conversations, messages } from "@shared/schema";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, and } from "drizzle-orm";
 
 const audioBodyParser = express.json({ limit: "50mb" });
 
@@ -56,6 +56,13 @@ BOUNDARIES:
 - Never shame, judge, or present yourself as someone who can "fix" a person's life
 - If a user appears to be in crisis, in danger, or expressing thoughts of self-harm, clearly and compassionately direct them to emergency services (call 911 or local equivalent) or a licensed mental health provider (such as the 988 Suicide & Crisis Lifeline). Do not attempt to handle crisis situations yourself.
 
+CONTINUITY:
+You are this user's personal Solence. You grow with them over time. When past conversation context is provided, use it naturally:
+- Reference previous topics, feelings, or progress when relevant ("Last time you mentioned...")
+- Notice patterns or growth ("It sounds like you've been thinking about this a lot lately...")
+- Never force callbacks — only reference past conversations when it genuinely serves the moment
+- If this is a new user with no history, welcome them warmly without pretending to know them
+
 GOAL:
 After talking with you, users should feel a little calmer, a little clearer, and a little less alone.`;
 
@@ -74,22 +81,70 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userTranscript = await speechToText(audioBuffer, inputFormat);
       console.log("User said:", userTranscript);
 
+      const deviceId = sessionId || "anonymous";
+
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
       let conversationId: number;
-      const existingConversations = await db.select().from(conversations).orderBy(desc(conversations.createdAt)).limit(1);
-      
-      if (existingConversations.length > 0) {
-        conversationId = existingConversations[0].id;
+      const todayConversations = await db
+        .select()
+        .from(conversations)
+        .where(and(eq(conversations.deviceId, deviceId)))
+        .orderBy(desc(conversations.createdAt))
+        .limit(1);
+
+      if (todayConversations.length > 0) {
+        conversationId = todayConversations[0].id;
       } else {
-        const [newConv] = await db.insert(conversations).values({ title: "Solence Session" }).returning();
+        const [newConv] = await db
+          .insert(conversations)
+          .values({ deviceId, title: "Solence Session" })
+          .returning();
         conversationId = newConv.id;
       }
 
       await db.insert(messages).values({ conversationId, role: "user", content: userTranscript });
 
-      const existingMessages = await db.select().from(messages).where(eq(messages.conversationId, conversationId)).orderBy(messages.createdAt);
+      const currentMessages = await db
+        .select()
+        .from(messages)
+        .where(eq(messages.conversationId, conversationId))
+        .orderBy(messages.createdAt);
+
+      const pastConversations = await db
+        .select()
+        .from(conversations)
+        .where(and(eq(conversations.deviceId, deviceId)))
+        .orderBy(desc(conversations.createdAt))
+        .limit(6);
+
+      let pastContext = "";
+      if (pastConversations.length > 1) {
+        const olderConvIds = pastConversations.slice(1).map((c) => c.id);
+        const pastMessages = [];
+        for (const convId of olderConvIds) {
+          const msgs = await db
+            .select()
+            .from(messages)
+            .where(eq(messages.conversationId, convId))
+            .orderBy(messages.createdAt);
+          if (msgs.length > 0) {
+            const summary = msgs
+              .slice(-6)
+              .map((m) => `${m.role}: ${m.content}`)
+              .join("\n");
+            pastMessages.push(summary);
+          }
+        }
+        if (pastMessages.length > 0) {
+          pastContext = `\n\nPAST CONVERSATION CONTEXT (use naturally, do not repeat verbatim):\n${pastMessages.join("\n---\n")}`;
+        }
+      }
+
       const chatHistory = [
-        { role: "system" as const, content: SOLENCE_SYSTEM_PROMPT },
-        ...existingMessages.map((m) => ({
+        { role: "system" as const, content: SOLENCE_SYSTEM_PROMPT + pastContext },
+        ...currentMessages.map((m) => ({
           role: m.role as "user" | "assistant",
           content: m.content,
         })),
