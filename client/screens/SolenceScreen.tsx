@@ -425,14 +425,14 @@ export default function SolenceScreen() {
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [showSubscriptionPrompt, setShowSubscriptionPrompt] = useState(false);
   const [permissionDenied, setPermissionDenied] = useState(false);
-  const [audioUri, setAudioUri] = useState<string | null>(null);
   const [isConversationActive, setIsConversationActive] = useState(false);
   const [showStarters, setShowStarters] = useState(true);
 
   const messageOpacity = useSharedValue(0);
 
   const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
-  const audioPlayer = useAudioPlayer(audioUri || "");
+  const audioPlayer = useAudioPlayer("");
+  const audioPlayingRef = useRef(false);
 
   const isRecordingRef = useRef(false);
   const autoStopTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -476,25 +476,39 @@ export default function SolenceScreen() {
   }, [currentMessage]);
 
   useEffect(() => {
-    if (audioPlayer && audioUri) {
-      audioPlayer.play();
-    }
-  }, [audioUri]);
-
-  useEffect(() => {
-    if (audioPlayer) {
-      const subscription = audioPlayer.addListener("playbackStatusUpdate", (status) => {
-        if (status.didJustFinish && isConversationActive && shouldContinueListeningRef.current) {
+    const subscription = audioPlayer.addListener("playbackStatusUpdate", (status: any) => {
+      if (status.didJustFinish && audioPlayingRef.current) {
+        audioPlayingRef.current = false;
+        setVoiceState("idle");
+        if (shouldContinueListeningRef.current) {
           setTimeout(() => {
-            if (isConversationActive && canSendMessage()) {
+            if (canSendMessage()) {
               startRecording();
             }
           }, 500);
         }
+      }
+    });
+    return () => subscription.remove();
+  }, [audioPlayer]);
+
+  const playResponseAudio = async (uri: string) => {
+    try {
+      await setAudioModeAsync({
+        allowsRecording: false,
+        playsInSilentMode: true,
       });
-      return () => subscription.remove();
+
+      audioPlayingRef.current = true;
+      audioPlayer.replace(uri);
+      setVoiceState("speaking");
+      audioPlayer.play();
+    } catch (e: any) {
+      console.log("Audio playback error:", e?.message || e);
+      audioPlayingRef.current = false;
+      setVoiceState("idle");
     }
-  }, [audioPlayer, isConversationActive]);
+  };
 
   const animatedMessageStyle = useAnimatedStyle(() => ({
     opacity: messageOpacity.value,
@@ -693,9 +707,8 @@ export default function SolenceScreen() {
       if (data.audioBase64) {
         const audioFileUri = await saveBase64Audio(data.audioBase64);
         console.log("Audio saved to:", audioFileUri);
-        setAudioUri(audioFileUri);
-        setVoiceState("speaking");
         shouldContinueListeningRef.current = isConversationActive;
+        await playResponseAudio(audioFileUri);
       } else {
         if (isConversationActive && canSendMessage()) {
           setTimeout(() => startRecording(), 500);
@@ -739,9 +752,8 @@ export default function SolenceScreen() {
 
       if (data.audioBase64) {
         const audioFileUri = await saveBase64Audio(data.audioBase64);
-        setAudioUri(audioFileUri);
-        setVoiceState("speaking");
         shouldContinueListeningRef.current = true;
+        await playResponseAudio(audioFileUri);
       } else {
         setVoiceState("idle");
       }
