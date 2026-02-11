@@ -30,17 +30,17 @@ const pages: OnboardingPage[] = [
   {
     id: "1",
     headline: "Speak freely",
-    body: "Tap the orb and say whatever is on your mind. There is no right or wrong thing to share. Solence is here to listen.",
+    body: "Tap the orb and say whatever is on your mind. There is no right way to talk to Solence. Ask anything, share anything, or simply sit in silence. The more honest you are, the more meaningful this becomes.",
   },
   {
     id: "2",
     headline: "Let the conversation flow",
-    body: "After Solence responds, she will continue listening. You can keep talking naturally, or tap the orb again when you are ready.",
+    body: "After Solence responds, she keeps listening. You can keep talking naturally, or tap the orb again when you are ready. She adapts to you over time, meeting you where you are.",
   },
   {
     id: "3",
-    headline: "A quiet space for you",
-    body: "This is not about fixing or solving. It is a place to slow down, reflect, and feel a little lighter than before.",
+    headline: "A private space for you",
+    body: "This is your personal, quiet corner. Not about fixing or solving. Just a place to slow down, reflect, and feel a little lighter than before.",
   },
 ];
 
