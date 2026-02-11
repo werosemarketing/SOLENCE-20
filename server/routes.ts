@@ -95,33 +95,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "Either [audio] or [text] is required" });
       }
 
-      let userTranscript: string;
-
-      if (text) {
-        userTranscript = text;
-      } else {
-        const rawBuffer = Buffer.from(audio, "base64");
-        const { buffer: audioBuffer, format: inputFormat } = await ensureCompatibleFormat(rawBuffer);
-        userTranscript = await speechToText(audioBuffer, inputFormat);
-      }
-
-      console.log("User said:", userTranscript);
-
       const deviceId = sessionId || "anonymous";
 
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
+      let audioBuffer: Buffer | null = null;
+      let audioInputFormat: "wav" | "mp3" = "wav";
+
+      if (audio && !text) {
+        const rawBuffer = Buffer.from(audio, "base64");
+        const result = await ensureCompatibleFormat(rawBuffer);
+        audioBuffer = result.buffer;
+        audioInputFormat = result.format;
+      }
 
       let conversationId: number;
-      const todayConversations = await db
+      const recentConversations = await db
         .select()
         .from(conversations)
         .where(and(eq(conversations.deviceId, deviceId)))
         .orderBy(desc(conversations.createdAt))
         .limit(1);
 
-      if (todayConversations.length > 0) {
-        conversationId = todayConversations[0].id;
+      if (recentConversations.length > 0) {
+        conversationId = recentConversations[0].id;
       } else {
         const [newConv] = await db
           .insert(conversations)
@@ -130,7 +125,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         conversationId = newConv.id;
       }
 
-      await db.insert(messages).values({ conversationId, role: "user", content: userTranscript });
+      if (text) {
+        await db.insert(messages).values({ conversationId, role: "user", content: text });
+      }
 
       const currentMessages = await db
         .select()
@@ -168,27 +165,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      const chatHistory = [
-        { role: "system" as const, content: SOLENCE_SYSTEM_PROMPT + pastContext },
+      const chatHistory: any[] = [
+        { role: "system", content: SOLENCE_SYSTEM_PROMPT + pastContext },
         ...currentMessages.map((m) => ({
           role: m.role as "user" | "assistant",
           content: m.content,
         })),
       ];
 
-      const response = await openai.chat.completions.create({
+      if (audioBuffer) {
+        const audioBase64ForInput = audioBuffer.toString("base64");
+        chatHistory.push({
+          role: "user",
+          content: [
+            { type: "input_audio", input_audio: { data: audioBase64ForInput, format: audioInputFormat } },
+          ],
+        });
+      }
+
+      const sttPromise = audioBuffer
+        ? speechToText(audioBuffer, audioInputFormat).catch(() => "")
+        : Promise.resolve(text || "");
+
+      const responsePromise = openai.chat.completions.create({
         model: "gpt-audio",
         modalities: ["text", "audio"],
         audio: { voice: "nova", format: "mp3" },
         messages: chatHistory,
       });
 
+      const [userTranscript, response] = await Promise.all([sttPromise, responsePromise]);
+
       const message = response.choices[0]?.message as any;
       const assistantTranscript = message?.audio?.transcript || message?.content || "";
       const audioData = message?.audio?.data ?? "";
 
+      if (audioBuffer && userTranscript) {
+        await db.insert(messages).values({ conversationId, role: "user", content: userTranscript });
+      }
+
       await db.insert(messages).values({ conversationId, role: "assistant", content: assistantTranscript });
 
+      console.log("User said:", userTranscript);
       console.log("Solence response:", assistantTranscript);
 
       res.json({

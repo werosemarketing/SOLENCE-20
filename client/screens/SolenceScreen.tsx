@@ -1110,6 +1110,7 @@ const styles = StyleSheet.create({
   startersContainer: {
     paddingHorizontal: Spacing["2xl"],
     paddingBottom: Spacing["3xl"],
+    paddingTop: Spacing.md,
     alignItems: "center",
     gap: Spacing.sm,
     minHeight: 80,
