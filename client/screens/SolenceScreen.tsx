@@ -63,7 +63,7 @@ type VoiceState = "idle" | "listening" | "responding" | "speaking";
 const FREE_MESSAGE_LIMIT = 5;
 const STORAGE_KEY = "solence_daily_usage";
 const STORAGE_KEY_DEVICE_ID = "solence_device_id";
-const AUTO_STOP_DELAY = 5000;
+const AUTO_STOP_DELAY = 15000;
 
 const STARTER_PROMPTS = [
   "I need to slow down for a moment",
@@ -479,13 +479,10 @@ export default function SolenceScreen() {
     const subscription = audioPlayer.addListener("playbackStatusUpdate", (status: any) => {
       if (status.didJustFinish && audioPlayingRef.current) {
         audioPlayingRef.current = false;
-        setVoiceState("idle");
-        if (shouldContinueListeningRef.current) {
-          setTimeout(() => {
-            if (canSendMessage()) {
-              startRecording();
-            }
-          }, 500);
+        if (shouldContinueListeningRef.current && canSendMessage()) {
+          startRecording();
+        } else {
+          setVoiceState("idle");
         }
       }
     });
@@ -566,11 +563,28 @@ export default function SolenceScreen() {
     }
   };
 
+  const readRecordingAsBase64 = async (uri: string): Promise<string> => {
+    if (Platform.OS === "web") {
+      const response = await fetch(uri);
+      const blob = await response.blob();
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const dataUrl = reader.result as string;
+          const base64 = dataUrl.split(",")[1] || "";
+          resolve(base64);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+    }
+    return FileSystem.readAsStringAsync(uri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+  };
+
   const startRecording = async () => {
-    console.log("=== START RECORDING ===");
-    
     if (!canSendMessage()) {
-      console.log("Cannot send - limit reached");
       setShowSubscriptionPrompt(true);
       setIsConversationActive(false);
       shouldContinueListeningRef.current = false;
@@ -579,10 +593,7 @@ export default function SolenceScreen() {
     }
 
     try {
-      console.log("Requesting permissions...");
       const status = await AudioModule.requestRecordingPermissionsAsync();
-      console.log("Permission status:", status.granted);
-
       if (!status.granted) {
         if (!status.canAskAgain) {
           setPermissionDenied(true);
@@ -592,28 +603,19 @@ export default function SolenceScreen() {
         return;
       }
 
-      console.log("Setting audio mode...");
       await setAudioModeAsync({
         allowsRecording: true,
         playsInSilentMode: true,
       });
 
-      console.log("Preparing recorder...");
       await audioRecorder.prepareToRecordAsync();
-      console.log("Recorder prepared");
-      
-      console.log("Starting recorder...");
       isRecordingRef.current = true;
       audioRecorder.record();
-      
-      await new Promise(resolve => setTimeout(resolve, 100));
-      console.log("Recorder started, state:", audioRecorder.isRecording);
       setVoiceState("listening");
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
       clearAutoStopTimer();
       autoStopTimerRef.current = setTimeout(() => {
-        console.log("Auto-stop triggered");
         if (isRecordingRef.current) {
           stopRecording();
         }
@@ -628,11 +630,7 @@ export default function SolenceScreen() {
   };
 
   const stopRecording = async () => {
-    console.log("=== STOP RECORDING ===");
-    if (!isRecordingRef.current) {
-      console.log("Not recording, skipping stop");
-      return;
-    }
+    if (!isRecordingRef.current) return;
 
     clearAutoStopTimer();
     isRecordingRef.current = false;
@@ -641,11 +639,7 @@ export default function SolenceScreen() {
       setVoiceState("responding");
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
-      console.log("Stopping recorder...");
       await audioRecorder.stop();
-      console.log("Recorder stopped");
-
-      await new Promise(resolve => setTimeout(resolve, 500));
 
       await setAudioModeAsync({
         allowsRecording: false,
@@ -653,12 +647,9 @@ export default function SolenceScreen() {
       });
 
       const uri = audioRecorder.uri;
-      console.log("Recording URI:", uri);
-      
       if (uri) {
-        await sendAudioToAPI(uri);
+        sendAudioToAPI(uri);
       } else {
-        console.log("No recording URI available");
         setCurrentMessage("Recording was too short. Please try again.");
         setVoiceState("idle");
       }
@@ -670,21 +661,18 @@ export default function SolenceScreen() {
 
   const sendAudioToAPI = async (recordingUri: string) => {
     try {
-      console.log("Sending audio from:", recordingUri);
+      const audioBase64 = await readRecordingAsBase64(recordingUri);
 
-      const audioBase64 = await FileSystem.readAsStringAsync(recordingUri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-      console.log("Audio base64 length:", audioBase64.length);
+      if (audioBase64.length < 100) {
+        setCurrentMessage("Recording was too short. Please try again.");
+        setVoiceState("idle");
+        return;
+      }
 
       const apiUrl = getApiUrl();
-      console.log("API URL:", apiUrl);
-
       const response = await fetch(`${apiUrl}/api/chat/voice`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           audio: audioBase64,
           sessionId: sessionId,
@@ -692,26 +680,21 @@ export default function SolenceScreen() {
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
-        console.log("API error:", errorText);
         throw new Error("API request failed");
       }
 
       const data = await response.json();
-      console.log("API response received:", data.text?.substring(0, 50));
-
       await incrementDailyUsage();
       setCurrentMessage(data.text);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
       if (data.audioBase64) {
         const audioFileUri = await saveBase64Audio(data.audioBase64);
-        console.log("Audio saved to:", audioFileUri);
         shouldContinueListeningRef.current = isConversationActive;
         await playResponseAudio(audioFileUri);
       } else {
         if (isConversationActive && canSendMessage()) {
-          setTimeout(() => startRecording(), 500);
+          setTimeout(() => startRecording(), 300);
         } else {
           setVoiceState("idle");
         }
@@ -773,6 +756,13 @@ export default function SolenceScreen() {
       startRecording();
     } else if (voiceState === "listening") {
       stopRecording();
+    } else if (voiceState === "speaking") {
+      audioPlayingRef.current = false;
+      audioPlayer.pause();
+      setShowStarters(false);
+      setIsConversationActive(true);
+      shouldContinueListeningRef.current = true;
+      startRecording();
     }
   };
 
@@ -873,7 +863,7 @@ export default function SolenceScreen() {
         <View style={styles.orbContainer}>
           <Pressable
             onPress={handleOrbPress}
-            disabled={voiceState === "responding" || voiceState === "speaking"}
+            disabled={voiceState === "responding"}
             style={({ pressed }) => [
               styles.orbPressable,
               { opacity: pressed ? 0.95 : 1 },
