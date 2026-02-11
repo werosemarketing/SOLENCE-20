@@ -30,7 +30,8 @@ Solence is a voice-first AI companion app for meditation, reflection, and emotio
 - **shared/schema.ts** - Database schema (conversations, messages tables)
 
 ### Voice Chat API
-- POST `/api/chat/voice` with JSON body containing `audio` (base64) and `sessionId`
+- POST `/api/chat/voice` with JSON body containing `audio` (base64) and/or `text`, plus `sessionId`
+- When audio is provided: sends audio directly to gpt-audio as input_audio (single API call for response) while running STT in parallel for transcript storage
 - Returns JSON with `text`, `userTranscript`, `audioBase64`, `audioFormat`
 
 ### Key Features
@@ -57,22 +58,26 @@ Colors are defined in `client/constants/theme.ts`:
 - Orb secondary: #c4956c (warm tan)
 
 ## Backend API Configuration
-The app connects to the external Solence backend at: https://solence-joelgarciamendez.replit.app
 
 The voice chat endpoint expects:
 
 ```
 POST /api/chat/voice
-Content-Type: multipart/form-data
+Content-Type: application/json
 
-Request:
-- audio: Audio file (m4a)
-- sessionId: Session identifier
+Request body:
+{
+  "audio": "base64-encoded audio data",
+  "text": "optional text input",
+  "sessionId": "device identifier"
+}
 
 Response:
 {
-  "text": "AI response text",
-  "audioUrl": "/path/to/response.mp3" (optional)
+  "text": "AI response transcript",
+  "userTranscript": "user speech transcript",
+  "audioBase64": "base64-encoded mp3 response",
+  "audioFormat": "mp3"
 }
 ```
 
