@@ -482,7 +482,7 @@ export default function SolenceScreen() {
   }, [currentMessage]);
 
   useEffect(() => {
-    const subscription = audioPlayer.addListener("playbackStatusUpdate", (status: any) => {
+    const subscription = audioPlayer.addListener("playbackStatusUpdate", (status: { didJustFinish?: boolean }) => {
       if (status.didJustFinish && audioPlayingRef.current) {
         audioPlayingRef.current = false;
         if (shouldContinueListeningRef.current && canSendMessage()) {
@@ -533,8 +533,8 @@ export default function SolenceScreen() {
         audioPlayer.replace(uri);
         audioPlayer.play();
       }
-    } catch (e: any) {
-      console.log("Audio playback error:", e?.message || e);
+    } catch (e: unknown) {
+      console.log("Audio playback error:", e instanceof Error ? e.message : e);
       audioPlayingRef.current = false;
       setVoiceState("idle");
     }
@@ -653,8 +653,8 @@ export default function SolenceScreen() {
           stopRecording();
         }
       }, AUTO_STOP_DELAY);
-    } catch (e: any) {
-      console.log("Error starting recording:", e?.message || e);
+    } catch (e: unknown) {
+      console.log("Error starting recording:", e instanceof Error ? e.message : e);
       isRecordingRef.current = false;
       setVoiceState("idle");
       setIsConversationActive(false);
@@ -686,8 +686,8 @@ export default function SolenceScreen() {
         setCurrentMessage("Recording was too short. Please try again.");
         setVoiceState("idle");
       }
-    } catch (e: any) {
-      console.log("Error stopping recording:", e?.message || e);
+    } catch (e: unknown) {
+      console.log("Error stopping recording:", e instanceof Error ? e.message : e);
       setVoiceState("idle");
     }
   };
@@ -732,8 +732,8 @@ export default function SolenceScreen() {
           setVoiceState("idle");
         }
       }
-    } catch (e: any) {
-      console.log("Error sending audio:", e?.message || e);
+    } catch (e: unknown) {
+      console.log("Error sending audio:", e instanceof Error ? e.message : e);
       setCurrentMessage("I had trouble hearing you. Please try again.");
       setVoiceState("idle");
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -773,8 +773,8 @@ export default function SolenceScreen() {
       } else {
         setVoiceState("idle");
       }
-    } catch (e: any) {
-      console.log("Error sending text:", e?.message || e);
+    } catch (e: unknown) {
+      console.log("Error sending text:", e instanceof Error ? e.message : e);
       setCurrentMessage("Something went wrong. Please try again.");
       setVoiceState("idle");
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);

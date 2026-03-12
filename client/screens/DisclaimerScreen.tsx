@@ -107,8 +107,11 @@ export default function DisclaimerScreen({ onAccept, onViewAgreement }: Props) {
             <View style={styles.spacer} />
 
             <Text style={[styles.cardBody, { color: theme.textMuted }]}>
-              If you're in crisis or need professional help, please contact
-              emergency services or a licensed provider.
+              If you're in crisis or need immediate help:{"\n"}
+              {"\n"}National Suicide Prevention Lifeline: 988{"\n"}
+              Crisis Text Line: Text HOME to 741741{"\n"}
+              Emergency Services: 911{"\n"}
+              {"\n"}Please reach out to a licensed provider for professional care.
             </Text>
           </View>
         </Animated.View>
