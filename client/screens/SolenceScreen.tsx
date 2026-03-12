@@ -37,8 +37,13 @@ import { useTheme } from "@/hooks/useTheme";
 import { Spacing, BorderRadius } from "@/constants/theme";
 import { getApiUrl } from "@/lib/query-client";
 
+let currentBlobUrl: string | null = null;
+
 const saveBase64Audio = async (base64: string): Promise<string> => {
   if (Platform.OS === "web") {
+    if (currentBlobUrl) {
+      URL.revokeObjectURL(currentBlobUrl);
+    }
     const byteChars = atob(base64);
     const byteNumbers = new Array(byteChars.length);
     for (let i = 0; i < byteChars.length; i++) {
@@ -46,7 +51,8 @@ const saveBase64Audio = async (base64: string): Promise<string> => {
     }
     const byteArray = new Uint8Array(byteNumbers);
     const blob = new Blob([byteArray], { type: "audio/mp3" });
-    return URL.createObjectURL(blob);
+    currentBlobUrl = URL.createObjectURL(blob);
+    return currentBlobUrl;
   }
   const audioFileUri = FileSystem.cacheDirectory + `solence_response_${Date.now()}.mp3`;
   await FileSystem.writeAsStringAsync(audioFileUri, base64, {
@@ -66,10 +72,10 @@ const STORAGE_KEY_DEVICE_ID = "solence_device_id";
 const AUTO_STOP_DELAY = 15000;
 
 const STARTER_PROMPTS = [
-  "I need to slow down for a moment",
-  "Something has been on my mind lately",
-  "I just want to talk",
-  "Help me process how I am feeling",
+  "Can I tell you something real?",
+  "I don't even know where to start.",
+  "What do I do with this feeling?",
+  "Who are you, really?",
 ];
 
 function AmbientParticle({ delay, size, startX, startY, isDark }: { 
@@ -489,6 +495,8 @@ export default function SolenceScreen() {
     return () => subscription.remove();
   }, [audioPlayer]);
 
+  const webAudioRef = useRef<HTMLAudioElement | null>(null);
+
   const playResponseAudio = async (uri: string) => {
     try {
       await setAudioModeAsync({
@@ -496,10 +504,35 @@ export default function SolenceScreen() {
         playsInSilentMode: true,
       });
 
-      audioPlayingRef.current = true;
-      audioPlayer.replace(uri);
       setVoiceState("speaking");
-      audioPlayer.play();
+
+      if (Platform.OS === "web") {
+        if (webAudioRef.current) {
+          webAudioRef.current.pause();
+          webAudioRef.current.removeAttribute("src");
+        }
+        const audio = new Audio(uri);
+        webAudioRef.current = audio;
+        audioPlayingRef.current = true;
+        audio.onended = () => {
+          audioPlayingRef.current = false;
+          if (shouldContinueListeningRef.current && canSendMessage()) {
+            startRecording();
+          } else {
+            setVoiceState("idle");
+          }
+        };
+        audio.onerror = () => {
+          console.log("Web audio playback error");
+          audioPlayingRef.current = false;
+          setVoiceState("idle");
+        };
+        await audio.play();
+      } else {
+        audioPlayingRef.current = true;
+        audioPlayer.replace(uri);
+        audioPlayer.play();
+      }
     } catch (e: any) {
       console.log("Audio playback error:", e?.message || e);
       audioPlayingRef.current = false;
@@ -758,7 +791,12 @@ export default function SolenceScreen() {
       stopRecording();
     } else if (voiceState === "speaking") {
       audioPlayingRef.current = false;
-      audioPlayer.pause();
+      if (Platform.OS === "web" && webAudioRef.current) {
+        webAudioRef.current.pause();
+        webAudioRef.current.onended = null;
+      } else {
+        audioPlayer.pause();
+      }
       setShowStarters(false);
       setIsConversationActive(true);
       shouldContinueListeningRef.current = true;
@@ -776,7 +814,10 @@ export default function SolenceScreen() {
       isRecordingRef.current = false;
     }
     
-    if (audioPlayer) {
+    if (Platform.OS === "web" && webAudioRef.current) {
+      webAudioRef.current.pause();
+      webAudioRef.current.onended = null;
+    } else if (audioPlayer) {
       audioPlayer.pause();
     }
     
