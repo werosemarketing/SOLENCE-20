@@ -165,7 +165,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      const chatHistory: any[] = [
+      type ChatMessage =
+        | { role: "system"; content: string }
+        | { role: "user" | "assistant"; content: string }
+        | { role: "user"; content: Array<{ type: string; input_audio: { data: string; format: string } }> };
+
+      const chatHistory: ChatMessage[] = [
         { role: "system", content: SOLENCE_SYSTEM_PROMPT + pastContext },
         ...currentMessages.map((m) => ({
           role: m.role as "user" | "assistant",
@@ -191,14 +196,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         model: "gpt-audio",
         modalities: ["text", "audio"],
         audio: { voice: "nova", format: "mp3" },
-        messages: chatHistory,
+        messages: chatHistory as Parameters<typeof openai.chat.completions.create>[0]["messages"],
       });
 
       const [userTranscript, response] = await Promise.all([sttPromise, responsePromise]);
 
-      const message = response.choices[0]?.message as any;
-      const assistantTranscript = message?.audio?.transcript || message?.content || "";
-      const audioData = message?.audio?.data ?? "";
+      const message = response.choices[0]?.message;
+      const audioResponse = message && "audio" in message ? (message as { audio?: { transcript?: string; data?: string }; content?: string | null }).audio : undefined;
+      const assistantTranscript = audioResponse?.transcript || message?.content || "";
+      const audioData = audioResponse?.data ?? "";
 
       if (audioBuffer && userTranscript) {
         await db.insert(messages).values({ conversationId, role: "user", content: userTranscript });

@@ -18,6 +18,9 @@ type Props = {
   onBack: () => void;
 };
 
+const EFFECTIVE_DATE = "[Insert Launch Date]";
+const LAST_UPDATED = "[Insert Last Revision Date]";
+
 const AGREEMENT_SECTIONS = [
   {
     heading: "1. Description of Service",
@@ -57,7 +60,7 @@ const AGREEMENT_SECTIONS = [
   },
   {
     heading: "10. Contact",
-    body: "For questions or concerns about this agreement, contact:\n\nSolence, LLC",
+    body: "For questions or concerns about this agreement, contact:\n\nSolence, LLC\n[Insert Contact Email or Legal Contact Info]",
   },
 ];
 
@@ -110,6 +113,12 @@ export default function UserAgreementScreen({ onBack }: Props) {
           </Text>
           <Text style={[styles.subtitle, { color: theme.textMuted }]}>
             Solence
+          </Text>
+          <Text style={[styles.dateText, { color: theme.textMuted }]}>
+            Effective Date: {EFFECTIVE_DATE}
+          </Text>
+          <Text style={[styles.dateText, { color: theme.textMuted }]}>
+            Last Updated: {LAST_UPDATED}
           </Text>
         </Animated.View>
 
@@ -183,7 +192,14 @@ const styles = StyleSheet.create({
     fontWeight: "300",
     letterSpacing: 1,
     textAlign: "center",
-    marginBottom: Spacing["2xl"],
+    marginBottom: Spacing.sm,
+  },
+  dateText: {
+    fontSize: 12,
+    fontWeight: "300",
+    letterSpacing: 0.2,
+    textAlign: "center",
+    marginBottom: Spacing.xs,
   },
   introSection: {
     marginBottom: Spacing["2xl"],
