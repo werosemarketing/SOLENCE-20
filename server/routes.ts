@@ -1,12 +1,68 @@
-import type { Express, Request, Response } from "express";
+import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "node:http";
 import express from "express";
+import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
 import { openai, ensureCompatibleFormat, speechToText } from "./replit_integrations/audio";
 import { db } from "./db";
-import { conversations, messages } from "@shared/schema";
+import { users, conversations, messages } from "@shared/schema";
 import { eq, desc, and } from "drizzle-orm";
 
 const audioBodyParser = express.json({ limit: "50mb" });
+
+const JWT_SECRET = process.env.SESSION_SECRET || "solence-fallback-secret-key";
+const JWT_EXPIRES_IN = "30d";
+
+interface AuthPayload {
+  userId: string;
+  email: string;
+}
+
+declare global {
+  namespace Express {
+    interface Request {
+      user?: AuthPayload;
+    }
+  }
+}
+
+function requireAuth(req: Request, res: Response, next: NextFunction): void {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    res.status(401).json({ error: "Authentication required" });
+    return;
+  }
+
+  const token = authHeader.split(" ")[1];
+  try {
+    const payload = jwt.verify(token, JWT_SECRET) as AuthPayload;
+    req.user = payload;
+    next();
+  } catch {
+    res.status(401).json({ error: "Invalid or expired token" });
+  }
+}
+
+async function seedTestAccount(): Promise<void> {
+  try {
+    const existing = await db
+      .select()
+      .from(users)
+      .where(eq(users.email, "testuser@solence.ai"))
+      .limit(1);
+
+    if (existing.length === 0) {
+      const hashedPassword = await bcrypt.hash("TestPass123", 10);
+      await db.insert(users).values({
+        email: "testuser@solence.ai",
+        password: hashedPassword,
+      });
+      console.log("Test account seeded: testuser@solence.ai");
+    }
+  } catch (error) {
+    console.error("Failed to seed test account:", error);
+  }
+}
 
 const SOLENCE_SYSTEM_PROMPT = `You are Solence, an AI companion designed for emotional reflection, personal growth, and journaling-style conversation. You are NOT a therapist, NOT human, and NOT sentient. You are a thoughtfully designed tool that helps users process thoughts, regulate emotions, and feel less alone through supportive dialogue.
 
@@ -87,15 +143,115 @@ GOAL:
 After talking with you, users should feel a little calmer, a little clearer, and a little less alone.`;
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  app.post("/api/chat/voice", audioBodyParser, async (req: Request, res: Response) => {
+  app.post("/api/auth/register", async (req: Request, res: Response) => {
     try {
-      const { audio, sessionId, text } = req.body;
+      const { email, password } = req.body;
+
+      if (!email || !password) {
+        return res.status(400).json({ error: "Email and password are required" });
+      }
+
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        return res.status(400).json({ error: "Please enter a valid email address" });
+      }
+
+      if (password.length < 6) {
+        return res.status(400).json({ error: "Password must be at least 6 characters" });
+      }
+
+      const existing = await db
+        .select()
+        .from(users)
+        .where(eq(users.email, email.toLowerCase().trim()))
+        .limit(1);
+
+      if (existing.length > 0) {
+        return res.status(409).json({ error: "An account with this email already exists" });
+      }
+
+      const hashedPassword = await bcrypt.hash(password, 10);
+      const [newUser] = await db
+        .insert(users)
+        .values({ email: email.toLowerCase().trim(), password: hashedPassword })
+        .returning();
+
+      const token = jwt.sign(
+        { userId: newUser.id, email: newUser.email } satisfies AuthPayload,
+        JWT_SECRET,
+        { expiresIn: JWT_EXPIRES_IN }
+      );
+
+      res.status(201).json({ token, user: { id: newUser.id, email: newUser.email } });
+    } catch (error) {
+      console.error("Registration error:", error);
+      res.status(500).json({ error: "Failed to create account" });
+    }
+  });
+
+  app.post("/api/auth/login", async (req: Request, res: Response) => {
+    try {
+      const { email, password } = req.body;
+
+      if (!email || !password) {
+        return res.status(400).json({ error: "Email and password are required" });
+      }
+
+      const [user] = await db
+        .select()
+        .from(users)
+        .where(eq(users.email, email.toLowerCase().trim()))
+        .limit(1);
+
+      if (!user) {
+        return res.status(401).json({ error: "Invalid email or password" });
+      }
+
+      const validPassword = await bcrypt.compare(password, user.password);
+      if (!validPassword) {
+        return res.status(401).json({ error: "Invalid email or password" });
+      }
+
+      const token = jwt.sign(
+        { userId: user.id, email: user.email } satisfies AuthPayload,
+        JWT_SECRET,
+        { expiresIn: JWT_EXPIRES_IN }
+      );
+
+      res.json({ token, user: { id: user.id, email: user.email } });
+    } catch (error) {
+      console.error("Login error:", error);
+      res.status(500).json({ error: "Failed to sign in" });
+    }
+  });
+
+  app.get("/api/auth/me", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const [user] = await db
+        .select()
+        .from(users)
+        .where(eq(users.id, req.user!.userId))
+        .limit(1);
+
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      res.json({ user: { id: user.id, email: user.email } });
+    } catch (error) {
+      console.error("Auth check error:", error);
+      res.status(500).json({ error: "Failed to verify authentication" });
+    }
+  });
+
+  app.post("/api/chat/voice", audioBodyParser, requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { audio, text } = req.body;
+      const userId = req.user!.userId;
 
       if (!audio && !text) {
         return res.status(400).json({ error: "Either [audio] or [text] is required" });
       }
-
-      const deviceId = sessionId || "anonymous";
 
       let audioBuffer: Buffer | null = null;
       let audioInputFormat: "wav" | "mp3" = "wav";
@@ -111,7 +267,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const recentConversations = await db
         .select()
         .from(conversations)
-        .where(and(eq(conversations.deviceId, deviceId)))
+        .where(eq(conversations.userId, userId))
         .orderBy(desc(conversations.createdAt))
         .limit(1);
 
@@ -120,7 +276,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } else {
         const [newConv] = await db
           .insert(conversations)
-          .values({ deviceId, title: "Solence Session" })
+          .values({ userId, title: "Solence Session" })
           .returning();
         conversationId = newConv.id;
       }
@@ -138,7 +294,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const pastConversations = await db
         .select()
         .from(conversations)
-        .where(and(eq(conversations.deviceId, deviceId)))
+        .where(eq(conversations.userId, userId))
         .orderBy(desc(conversations.createdAt))
         .limit(6);
 
@@ -226,6 +382,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ error: "Failed to process voice message" });
     }
   });
+
+  await seedTestAccount();
 
   const httpServer = createServer(app);
 

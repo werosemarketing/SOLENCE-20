@@ -68,7 +68,6 @@ type VoiceState = "idle" | "listening" | "responding" | "speaking";
 
 const FREE_MESSAGE_LIMIT = 5;
 const STORAGE_KEY = "solence_daily_usage";
-const STORAGE_KEY_DEVICE_ID = "solence_device_id";
 const AUTO_STOP_DELAY = 15000;
 
 const STARTER_PROMPTS = [
@@ -420,13 +419,17 @@ function EtherealOrb({ voiceState, isDark }: { voiceState: VoiceState; isDark: b
   );
 }
 
-export default function SolenceScreen() {
+type SolenceScreenProps = {
+  authToken: string | null;
+  onSignOut: () => void;
+};
+
+export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenProps) {
   const insets = useSafeAreaInsets();
   const { theme, isDark } = useTheme();
 
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [currentMessage, setCurrentMessage] = useState<string>("");
-  const [sessionId, setSessionId] = useState<string>("");
   const [dailyMessageCount, setDailyMessageCount] = useState(0);
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [showSubscriptionPrompt, setShowSubscriptionPrompt] = useState(false);
@@ -455,23 +458,8 @@ export default function SolenceScreen() {
   ).current;
 
   useEffect(() => {
-    initDeviceId();
     checkDailyUsage();
   }, []);
-
-  const initDeviceId = async () => {
-    try {
-      let deviceId = await AsyncStorage.getItem(STORAGE_KEY_DEVICE_ID);
-      if (!deviceId) {
-        deviceId = `device-${Date.now()}-${Math.random().toString(36).substr(2, 12)}`;
-        await AsyncStorage.setItem(STORAGE_KEY_DEVICE_ID, deviceId);
-      }
-      setSessionId(deviceId);
-    } catch {
-      const fallback = `device-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-      setSessionId(fallback);
-    }
-  };
 
   useEffect(() => {
     if (currentMessage) {
@@ -703,13 +691,14 @@ export default function SolenceScreen() {
       }
 
       const apiUrl = getApiUrl();
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (authToken) {
+        headers["Authorization"] = `Bearer ${authToken}`;
+      }
       const response = await fetch(`${apiUrl}/api/chat/voice`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          audio: audioBase64,
-          sessionId: sessionId,
-        }),
+        headers,
+        body: JSON.stringify({ audio: audioBase64 }),
       });
 
       if (!response.ok) {
@@ -753,10 +742,14 @@ export default function SolenceScreen() {
 
     try {
       const apiUrl = getApiUrl();
+      const textHeaders: Record<string, string> = { "Content-Type": "application/json" };
+      if (authToken) {
+        textHeaders["Authorization"] = `Bearer ${authToken}`;
+      }
       const response = await fetch(`${apiUrl}/api/chat/voice`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, sessionId }),
+        headers: textHeaders,
+        body: JSON.stringify({ text }),
       });
 
       if (!response.ok) throw new Error("API request failed");
@@ -891,14 +884,23 @@ export default function SolenceScreen() {
           style={styles.header}
         >
           <Text style={[styles.title, { color: theme.text }]}>Solence</Text>
-          {!isSubscribed && (
+          {!isSubscribed ? (
             <Animated.Text 
               entering={FadeIn.duration(600).delay(400)}
               style={[styles.usageText, { color: theme.textMuted }]}
             >
               {remainingMessages} messages left today
             </Animated.Text>
-          )}
+          ) : null}
+          <Pressable
+            onPress={onSignOut}
+            style={styles.signOutButton}
+            testID="button-sign-out"
+          >
+            <Text style={[styles.signOutText, { color: theme.textMuted }]}>
+              Sign Out
+            </Text>
+          </Pressable>
         </Animated.View>
 
         <View style={styles.orbContainer}>
@@ -1084,6 +1086,17 @@ const styles = StyleSheet.create({
     fontWeight: "300",
     fontFamily: FontFamily.light,
     letterSpacing: 1,
+  },
+  signOutButton: {
+    marginTop: Spacing.sm,
+    paddingVertical: Spacing.xs,
+    paddingHorizontal: Spacing.md,
+  },
+  signOutText: {
+    fontSize: 13,
+    fontWeight: "400",
+    fontFamily: FontFamily.regular,
+    letterSpacing: 0.3,
   },
   orbContainer: {
     alignItems: "center",

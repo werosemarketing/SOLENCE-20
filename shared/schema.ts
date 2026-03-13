@@ -7,12 +7,13 @@ export const users = pgTable("users", {
   id: varchar("id")
     .primaryKey()
     .default(sql`gen_random_uuid()`),
-  username: text("username").notNull().unique(),
+  email: text("email").notNull().unique(),
   password: text("password").notNull(),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
 export const insertUserSchema = createInsertSchema(users).pick({
-  username: true,
+  email: true,
   password: true,
 });
 
@@ -21,7 +22,7 @@ export type User = typeof users.$inferSelect;
 
 export const conversations = pgTable("conversations", {
   id: serial("id").primaryKey(),
-  deviceId: text("device_id").notNull(),
+  userId: text("user_id").notNull(),
   title: text("title").notNull(),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
