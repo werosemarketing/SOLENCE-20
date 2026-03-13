@@ -1,0 +1,33 @@
+Apple App Store Screenshot Requirements
+You need 3-10 screenshots per device size
+iPhone 6.7" (1290 × 2796px) and 6.5" (1284 × 2778px) are required
+Screenshots can include device frames, text overlays, and background art
+Prompts for AI-Generated Marketing Backgrounds
+Use these with tools like Midjourney, DALL-E, or similar:
+
+Hero/Splash Screen Background:
+
+A dark ethereal abstract background with deep purple and charcoal tones, subtle golden light particles floating softly, a gentle glowing orb of warm bronze light at center, smooth organic gradients, calming and meditative atmosphere, ultra high resolution, minimal and luxurious feel. Absolutely no text, letters, numbers, or alphanumeric characters visible anywhere.
+
+Emotional Reflection Scene:
+
+Abstract dark cosmic landscape in deep violet and midnight purple hues, delicate streams of warm golden light weaving through darkness like gentle breath, soft bokeh light particles, tranquil and introspective mood, premium app marketing style, clean and spacious composition. Absolutely no text, letters, numbers, or alphanumeric characters visible anywhere.
+
+Voice/Connection Theme:
+
+Smooth flowing abstract waves in dark amethyst and soft bronze tones, luminous energy ripples radiating outward from a central warm glow, feeling of presence and connection, minimalist luxury aesthetic, dark background with warm accent lighting. Absolutely no text, letters, numbers, or alphanumeric characters visible anywhere.
+
+Growth/Journey Theme:
+
+Abstract aurora-like light formations in deep purple transitioning to warm gold, organic flowing shapes suggesting transformation and growth, dark atmospheric background, premium feel with subtle depth and dimension, serene and hopeful mood. Absolutely no text, letters, numbers, or alphanumeric characters visible anywhere.
+
+Suggested Screenshot Sequence (5 slides)
+"Meet Solence" — App icon + orb on dark background with tagline
+"Your Space to Reflect" — Show the main Solence screen with the orb
+"Speak Freely" — Show the voice recording interaction state
+"She Listens. She Evolves." — Show a response/conversation moment
+"Begin Your Journey" — Onboarding screen or call-to-action
+For Animated Previews (App Preview Videos)
+If you want a 15-30 second App Store preview video, here's a prompt for motion background generation (tools like Runway, Pika, or Kling):
+
+Slow cinematic animation of a softly glowing ethereal orb pulsing with warm bronze light against a deep purple-black background, gentle golden particles drifting upward like fireflies, smooth organic breathing motion, calming and meditative atmosphere, premium app aesthetic, ultra smooth motion. No text or characters visible.
