@@ -2,34 +2,34 @@ import { Platform } from "react-native";
 
 export const Colors = {
   light: {
-    text: "#2d2a26",
+    text: "#403E3E",
     textMuted: "#6b6560",
     buttonText: "#FFFFFF",
     tabIconDefault: "#687076",
-    tabIconSelected: "#9d6b53",
-    link: "#9d6b53",
-    backgroundRoot: "#faf8f5",
-    backgroundDefault: "#f5f2ed",
-    backgroundSecondary: "#efe9e2",
-    backgroundTertiary: "#e5ddd4",
-    orbPrimary: "#9d6b53",
-    orbSecondary: "#c4956c",
-    orbGlow: "rgba(196, 149, 108, 0.3)",
+    tabIconSelected: "#D66B32",
+    link: "#D66B32",
+    backgroundRoot: "#FAF1E7",
+    backgroundDefault: "#F5EBDD",
+    backgroundSecondary: "#EFE3D5",
+    backgroundTertiary: "#E5D9CC",
+    orbPrimary: "#D66B32",
+    orbSecondary: "#E8945E",
+    orbGlow: "rgba(214, 107, 50, 0.3)",
   },
   dark: {
     text: "#e8e4e0",
     textMuted: "#a09890",
     buttonText: "#FFFFFF",
     tabIconDefault: "#9BA1A6",
-    tabIconSelected: "#c4956c",
-    link: "#c4956c",
+    tabIconSelected: "#E8945E",
+    link: "#E8945E",
     backgroundRoot: "#1a1625",
     backgroundDefault: "#242030",
     backgroundSecondary: "#2e2a3a",
     backgroundTertiary: "#383444",
-    orbPrimary: "#9d6b53",
-    orbSecondary: "#c4956c",
-    orbGlow: "rgba(196, 149, 108, 0.3)",
+    orbPrimary: "#D66B32",
+    orbSecondary: "#E8945E",
+    orbGlow: "rgba(214, 107, 50, 0.3)",
   },
 };
 
@@ -106,24 +106,47 @@ export const Typography = {
   },
 };
 
+export const FontFamily = {
+  light: "MPLUSRounded1c_300Light",
+  regular: "MPLUSRounded1c_400Regular",
+  medium: "MPLUSRounded1c_500Medium",
+  bold: "MPLUSRounded1c_700Bold",
+};
+
+export const fontForWeight = (weight: string): string => {
+  switch (weight) {
+    case "200":
+    case "300":
+      return FontFamily.light;
+    case "500":
+      return FontFamily.medium;
+    case "600":
+    case "700":
+    case "800":
+    case "900":
+      return FontFamily.bold;
+    default:
+      return FontFamily.regular;
+  }
+};
+
 export const Fonts = Platform.select({
   ios: {
-    sans: "system-ui",
+    sans: FontFamily.regular,
     serif: "ui-serif",
-    rounded: "ui-rounded",
+    rounded: FontFamily.regular,
     mono: "ui-monospace",
   },
   default: {
-    sans: "normal",
+    sans: FontFamily.regular,
     serif: "serif",
-    rounded: "normal",
+    rounded: FontFamily.regular,
     mono: "monospace",
   },
   web: {
-    sans: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+    sans: "'M PLUS Rounded 1c', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
     serif: "Georgia, 'Times New Roman', serif",
-    rounded:
-      "'SF Pro Rounded', 'Hiragino Maru Gothic ProN', Meiryo, 'MS PGothic', sans-serif",
+    rounded: "'M PLUS Rounded 1c', system-ui, sans-serif",
     mono: "SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
   },
 });

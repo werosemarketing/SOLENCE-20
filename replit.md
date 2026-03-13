@@ -12,6 +12,7 @@ Solence is a voice-first AI companion app for meditation, reflection, and emotio
 - Disclaimer → User Agreement → Onboarding → Main flow for new users
 - V1 Solence persona: calm, warm, grounded, emotionally intelligent AI companion
 - Web audio playback uses native HTML5 Audio for reliability
+- Brand aligned with solence.ai (official icon, colors, font)
 
 ## Project Architecture
 
@@ -21,8 +22,9 @@ Solence is a voice-first AI companion app for meditation, reflection, and emotio
 - **client/screens/OnboardingScreen.tsx** - "Welcome to Solence" single-page welcome with conversation starters and "Grow your own Solence" tagline
 - **client/screens/SolenceScreen.tsx** - Main voice interface with orb
 - **client/navigation/RootStackNavigator.tsx** - Navigation with Disclaimer → (User Agreement) → Onboarding → Main flow
-- **client/constants/theme.ts** - Solence color palette (terracotta, warm neutrals)
-- **client/App.tsx** - App root with providers
+- **client/constants/theme.ts** - Solence brand colors (burnt orange #D66B32, warm cream #FAF1E7)
+- **client/App.tsx** - App root with providers, M PLUS Rounded 1c font loading
+- **metro.config.js** - Metro bundler config excluding .local and .git directories
 
 ### Backend (Express)
 - **server/index.ts** - Express server on port 5000
@@ -63,10 +65,18 @@ Solence is a voice-first AI companion app for meditation, reflection, and emotio
 
 ## Design System
 Colors are defined in `client/constants/theme.ts`:
-- Light background: #faf8f5 (warm off-white)
+- Light background: #FAF1E7 (warm cream, matching solence.ai)
 - Dark background: #1a1625 (deep purple-black)
-- Orb primary: #9d6b53 (terracotta)
-- Orb secondary: #c4956c (warm tan)
+- Orb/accent primary: #D66B32 (burnt orange, matching solence.ai)
+- Orb/accent secondary: #E8945E (warm orange)
+- Text: #403E3E (dark warm gray, matching solence.ai)
+
+Font: M PLUS Rounded 1c (via @expo-google-fonts/m-plus-rounded-1c)
+- Loaded in App.tsx with useFonts hook
+- Applied globally on web via CSS injection
+- Font weights: 300 Light, 400 Regular, 500 Medium, 700 Bold
+
+App icon: Official Solence sunrise/heart mark from solence.ai website
 
 ## Backend API Configuration
 
@@ -99,7 +109,8 @@ Response:
 
 ## User Preferences
 - Minimal, organic design aesthetic
-- Terracotta/warm neutral color palette
+- Burnt orange / warm cream color palette (from solence.ai brand)
+- M PLUS Rounded 1c font (from solence.ai brand)
 - No emojis in the app
 - Single-screen experience (no navigation tabs)
 - "Giga pet" companion concept: Solence grows with the user

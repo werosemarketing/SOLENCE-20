@@ -1,7 +1,7 @@
-import { Text, type TextProps } from "react-native";
+import { Text, type TextProps, Platform } from "react-native";
 
 import { useTheme } from "@/hooks/useTheme";
-import { Typography } from "@/constants/theme";
+import { Typography, Fonts, fontForWeight } from "@/constants/theme";
 
 export type ThemedTextProps = TextProps & {
   lightColor?: string;
@@ -55,7 +55,12 @@ export function ThemedText({
     }
   };
 
+  const typeStyle = getTypeStyle();
+  const fontFamily = Platform.OS === "web"
+    ? Fonts?.sans
+    : fontForWeight(typeStyle.fontWeight);
+
   return (
-    <Text style={[{ color: getColor() }, getTypeStyle(), style]} {...rest} />
+    <Text style={[{ color: getColor(), fontFamily }, typeStyle, style]} {...rest} />
   );
 }

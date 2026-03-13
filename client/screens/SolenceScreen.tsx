@@ -142,7 +142,7 @@ function AmbientParticle({ delay, size, startX, startY, isDark }: {
           width: size,
           height: size,
           borderRadius: size / 2,
-          backgroundColor: isDark ? "rgba(196, 149, 108, 0.4)" : "rgba(157, 107, 83, 0.25)",
+          backgroundColor: isDark ? "rgba(214, 107, 50, 0.4)" : "rgba(214, 107, 50, 0.25)",
         },
         animatedStyle,
       ]}
@@ -341,7 +341,7 @@ function EtherealOrb({ voiceState, isDark }: { voiceState: VoiceState; isDark: b
     opacity: coreOpacity.value,
   }));
 
-  const baseColor = isDark ? "rgba(196, 149, 108," : "rgba(180, 130, 95,";
+  const baseColor = isDark ? "rgba(214, 107, 50," : "rgba(214, 107, 50,";
 
   return (
     <View style={styles.etherealContainer}>
@@ -388,8 +388,8 @@ function EtherealOrb({ voiceState, isDark }: { voiceState: VoiceState; isDark: b
         <LinearGradient
           colors={
             isDark
-              ? ["#e8c9a8", "#c4956c", "#9d6b53", "#6b4a3a"] as const
-              : ["#dbb896", "#c4956c", "#a67850", "#7a5438"] as const
+              ? ["#F1B5A6", "#E8945E", "#D66B32", "#A04E1E"] as const
+              : ["#F1B5A6", "#E8945E", "#D66B32", "#A04E1E"] as const
           }
           style={[
             styles.coreGradient,
@@ -855,7 +855,7 @@ export default function SolenceScreen() {
 
   const gradientColors = isDark 
     ? ["#0f0c14", "#1a1625", "#1f1a2e", "#1a1625", "#0f0c14"] as const
-    : ["#f8f5f0", "#faf8f5", "#fcfaf7", "#faf8f5", "#f8f5f0"] as const;
+    : ["#F5EBDD", "#FAF1E7", "#FDF6F0", "#FAF1E7", "#F5EBDD"] as const;
 
   return (
     <View style={styles.container}>
