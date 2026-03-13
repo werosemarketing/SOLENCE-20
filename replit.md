@@ -4,15 +4,19 @@
 Solence is a voice-first AI companion app for meditation, reflection, and emotional support. Users interact with a calming breathing orb to have voice conversations with an AI assistant. Solence is positioned as an adaptive AI presence that grows and evolves with each user's input.
 
 ## Current State
-- MVP complete with voice recording UI
+- MVP complete with voice recording UI and text input
 - Breathing orb animation with idle/listening/responding/speaking states
+- Text input field for typing messages (like ChatGPT) with send button
+- Starter prompts populate text input on tap
 - Daily usage tracking (5 free messages per day)
 - Subscription prompt modal
 - Dark/light mode support
+- Email/password authentication with JWT (register/login/sign-out)
 - Disclaimer → User Agreement → Onboarding → Main flow for new users
 - V1 Solence persona: calm, warm, grounded, emotionally intelligent AI companion
-- Web audio playback uses native HTML5 Audio for reliability
+- Web audio playback uses native HTML5 Audio with safety timeout
 - Brand aligned with solence.ai (official icon, colors, font)
+- Test account for Apple review: testuser@solence.ai / TestPass123
 
 ## Project Architecture
 
@@ -20,8 +24,9 @@ Solence is a voice-first AI companion app for meditation, reflection, and emotio
 - **client/screens/DisclaimerScreen.tsx** - "Before You Begin" disclaimer with checkbox consent and link to User Agreement
 - **client/screens/UserAgreementScreen.tsx** - Full scrollable legal User Agreement (10 sections)
 - **client/screens/OnboardingScreen.tsx** - "Welcome to Solence" single-page welcome with conversation starters and "Grow your own Solence" tagline
-- **client/screens/SolenceScreen.tsx** - Main voice interface with orb
-- **client/navigation/RootStackNavigator.tsx** - Navigation with Disclaimer → (User Agreement) → Onboarding → Main flow
+- **client/screens/AuthScreen.tsx** - Email/password sign-in/sign-up screen
+- **client/screens/SolenceScreen.tsx** - Main voice interface with orb, text input, and audio playback
+- **client/navigation/RootStackNavigator.tsx** - Navigation with Auth → Disclaimer → (User Agreement) → Onboarding → Main flow
 - **client/constants/theme.ts** - Solence brand colors (burnt orange #D66B32, warm cream #FAF1E7)
 - **client/App.tsx** - App root with providers, M PLUS Rounded 1c font loading
 - **metro.config.js** - Metro bundler config excluding .local and .git directories

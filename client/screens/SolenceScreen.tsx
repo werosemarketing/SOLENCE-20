@@ -2,12 +2,15 @@ import React, { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
+  TextInput,
   StyleSheet,
   Pressable,
   Dimensions,
   Platform,
   Linking,
+  KeyboardAvoidingView,
 } from "react-native";
+import { Feather } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, {
   useSharedValue,
@@ -436,6 +439,7 @@ export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenPro
   const [permissionDenied, setPermissionDenied] = useState(false);
   const [isConversationActive, setIsConversationActive] = useState(false);
   const [showStarters, setShowStarters] = useState(true);
+  const [textInputValue, setTextInputValue] = useState("");
 
   const messageOpacity = useSharedValue(0);
 
@@ -502,7 +506,8 @@ export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenPro
         const audio = new Audio(uri);
         webAudioRef.current = audio;
         audioPlayingRef.current = true;
-        audio.onended = () => {
+
+        const onPlaybackEnd = () => {
           audioPlayingRef.current = false;
           if (shouldContinueListeningRef.current && canSendMessage()) {
             startRecording();
@@ -510,11 +515,27 @@ export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenPro
             setVoiceState("idle");
           }
         };
+
+        audio.onended = onPlaybackEnd;
         audio.onerror = () => {
           console.log("Web audio playback error");
           audioPlayingRef.current = false;
           setVoiceState("idle");
         };
+
+        audio.onloadedmetadata = () => {
+          const duration = audio.duration;
+          if (duration && isFinite(duration)) {
+            setTimeout(() => {
+              if (audioPlayingRef.current) {
+                console.log("Audio safety timeout triggered");
+                audio.pause();
+                onPlaybackEnd();
+              }
+            }, (duration + 2) * 1000);
+          }
+        };
+
         await audio.play();
       } else {
         audioPlayingRef.current = true;
@@ -761,7 +782,7 @@ export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenPro
 
       if (data.audioBase64) {
         const audioFileUri = await saveBase64Audio(data.audioBase64);
-        shouldContinueListeningRef.current = true;
+        shouldContinueListeningRef.current = false;
         await playResponseAudio(audioFileUri);
       } else {
         setVoiceState("idle");
@@ -772,6 +793,13 @@ export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenPro
       setVoiceState("idle");
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     }
+  };
+
+  const handleSendText = () => {
+    const trimmed = textInputValue.trim();
+    if (!trimmed) return;
+    setTextInputValue("");
+    sendTextToAPI(trimmed);
   };
 
   const handleOrbPress = () => {
@@ -850,6 +878,8 @@ export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenPro
     ? ["#0f0c14", "#1a1625", "#1f1a2e", "#1a1625", "#0f0c14"] as const
     : ["#F5EBDD", "#FAF1E7", "#FDF6F0", "#FAF1E7", "#F5EBDD"] as const;
 
+  const isInputDisabled = voiceState === "listening" || voiceState === "responding" || voiceState === "speaking";
+
   return (
     <View style={styles.container}>
       <LinearGradient
@@ -870,125 +900,100 @@ export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenPro
         />
       ))}
 
-      <View
-        style={[
-          styles.content,
-          {
-            paddingTop: insets.top + Spacing["4xl"],
-            paddingBottom: insets.bottom + Spacing["4xl"],
-          },
-        ]}
+      <KeyboardAvoidingView
+        style={styles.keyboardAvoid}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={0}
       >
-        <Animated.View 
-          entering={FadeInDown.duration(800).delay(200)}
-          style={styles.header}
+        <View
+          style={[
+            styles.content,
+            {
+              paddingTop: insets.top + Spacing.xl,
+              paddingBottom: insets.bottom + Spacing.sm,
+            },
+          ]}
         >
-          <Text style={[styles.title, { color: theme.text }]}>Solence</Text>
-          {!isSubscribed ? (
-            <Animated.Text 
-              entering={FadeIn.duration(600).delay(400)}
-              style={[styles.usageText, { color: theme.textMuted }]}
-            >
-              {remainingMessages} messages left today
-            </Animated.Text>
-          ) : null}
-          <Pressable
-            onPress={onSignOut}
-            style={styles.signOutButton}
-            testID="button-sign-out"
+          <Animated.View 
+            entering={FadeInDown.duration(800).delay(200)}
+            style={styles.header}
           >
-            <Text style={[styles.signOutText, { color: theme.textMuted }]}>
-              Sign Out
-            </Text>
-          </Pressable>
-        </Animated.View>
-
-        <View style={styles.orbContainer}>
-          <Pressable
-            onPress={handleOrbPress}
-            disabled={voiceState === "responding"}
-            style={({ pressed }) => [
-              styles.orbPressable,
-              { opacity: pressed ? 0.95 : 1 },
-            ]}
-            accessibilityLabel={getStateText()}
-            accessibilityRole="button"
-            testID="orb-button"
-          >
-            <EtherealOrb voiceState={voiceState} isDark={isDark} />
-          </Pressable>
-        </View>
-
-        <View style={styles.bottomSection}>
-          <Animated.Text 
-            entering={FadeIn.duration(600).delay(600)}
-            style={[styles.stateText, { color: theme.textMuted }]}
-          >
-            {getStateText()}
-          </Animated.Text>
-
-          {isConversationActive && voiceState !== "idle" ? (
-            <Pressable
-              onPress={endConversation}
-              style={({ pressed }) => [
-                styles.endButton,
-                { 
-                  backgroundColor: isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.05)",
-                  opacity: pressed ? 0.7 : 1 
-                },
-              ]}
-              testID="end-conversation-button"
-            >
-              <Text style={[styles.endButtonText, { color: theme.textMuted }]}>
-                End conversation
-              </Text>
-            </Pressable>
-          ) : null}
-
-          {permissionDenied && Platform.OS !== "web" ? (
-            <Pressable
-              onPress={openSettings}
-              style={styles.settingsButton}
-              testID="settings-button"
-            >
-              <Text style={[styles.settingsButtonText, { color: theme.link }]}>
-                Open Settings
-              </Text>
-            </Pressable>
-          ) : null}
-
-          {showStarters && voiceState === "idle" && !currentMessage ? (
-            <Animated.View
-              entering={FadeIn.duration(800).delay(800)}
-              style={styles.startersContainer}
-            >
-              {STARTER_PROMPTS.map((prompt, index) => (
-                <Pressable
-                  key={index}
-                  onPress={() => sendTextToAPI(prompt)}
-                  style={({ pressed }) => [
-                    styles.starterChip,
-                    {
-                      backgroundColor: isDark
-                        ? "rgba(255,255,255,0.06)"
-                        : "rgba(0,0,0,0.04)",
-                      borderColor: isDark
-                        ? "rgba(255,255,255,0.08)"
-                        : "rgba(0,0,0,0.06)",
-                      opacity: pressed ? 0.7 : 1,
-                    },
-                  ]}
-                  testID={`starter-prompt-${index}`}
+            <Text style={[styles.title, { color: theme.text }]}>Solence</Text>
+            <View style={styles.headerRow}>
+              {!isSubscribed ? (
+                <Animated.Text 
+                  entering={FadeIn.duration(600).delay(400)}
+                  style={[styles.usageText, { color: theme.textMuted }]}
                 >
-                  <Text
-                    style={[styles.starterText, { color: theme.textMuted }]}
-                  >
-                    {prompt}
-                  </Text>
-                </Pressable>
-              ))}
-            </Animated.View>
-          ) : (
+                  {remainingMessages} messages left today
+                </Animated.Text>
+              ) : null}
+              <Pressable
+                onPress={onSignOut}
+                style={styles.signOutButton}
+                testID="button-sign-out"
+              >
+                <Text style={[styles.signOutText, { color: theme.textMuted }]}>
+                  Sign Out
+                </Text>
+              </Pressable>
+            </View>
+          </Animated.View>
+
+          <View style={styles.orbContainer}>
+            <Pressable
+              onPress={handleOrbPress}
+              disabled={voiceState === "responding"}
+              style={({ pressed }) => [
+                styles.orbPressable,
+                { opacity: pressed ? 0.95 : 1 },
+              ]}
+              accessibilityLabel={getStateText()}
+              accessibilityRole="button"
+              testID="orb-button"
+            >
+              <EtherealOrb voiceState={voiceState} isDark={isDark} />
+            </Pressable>
+          </View>
+
+          <View style={styles.bottomSection}>
+            <Animated.Text 
+              entering={FadeIn.duration(600).delay(600)}
+              style={[styles.stateText, { color: theme.textMuted }]}
+            >
+              {getStateText()}
+            </Animated.Text>
+
+            {isConversationActive && voiceState !== "idle" ? (
+              <Pressable
+                onPress={endConversation}
+                style={({ pressed }) => [
+                  styles.endButton,
+                  { 
+                    backgroundColor: isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.05)",
+                    opacity: pressed ? 0.7 : 1 
+                  },
+                ]}
+                testID="end-conversation-button"
+              >
+                <Text style={[styles.endButtonText, { color: theme.textMuted }]}>
+                  End conversation
+                </Text>
+              </Pressable>
+            ) : null}
+
+            {permissionDenied && Platform.OS !== "web" ? (
+              <Pressable
+                onPress={openSettings}
+                style={styles.settingsButton}
+                testID="settings-button"
+              >
+                <Text style={[styles.settingsButtonText, { color: theme.link }]}>
+                  Open Settings
+                </Text>
+              </Pressable>
+            ) : null}
+
             <Animated.View style={[styles.messageContainer, animatedMessageStyle]}>
               {currentMessage ? (
                 <Text style={[styles.messageText, { color: theme.text }]}>
@@ -996,9 +1001,88 @@ export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenPro
                 </Text>
               ) : null}
             </Animated.View>
-          )}
+
+            {showStarters && voiceState === "idle" && !currentMessage ? (
+              <Animated.View
+                entering={FadeIn.duration(800).delay(800)}
+                style={styles.startersContainer}
+              >
+                {STARTER_PROMPTS.map((prompt, index) => (
+                  <Pressable
+                    key={index}
+                    onPress={() => {
+                      setTextInputValue(prompt);
+                    }}
+                    style={({ pressed }) => [
+                      styles.starterChip,
+                      {
+                        backgroundColor: isDark
+                          ? "rgba(255,255,255,0.06)"
+                          : "rgba(0,0,0,0.04)",
+                        borderColor: isDark
+                          ? "rgba(255,255,255,0.08)"
+                          : "rgba(0,0,0,0.06)",
+                        opacity: pressed ? 0.7 : 1,
+                      },
+                    ]}
+                    testID={`starter-prompt-${index}`}
+                  >
+                    <Text
+                      style={[styles.starterText, { color: theme.textMuted }]}
+                    >
+                      {prompt}
+                    </Text>
+                  </Pressable>
+                ))}
+              </Animated.View>
+            ) : null}
+          </View>
+
+          <View style={[
+            styles.inputRow,
+            {
+              backgroundColor: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.04)",
+              borderColor: isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.08)",
+            },
+          ]}>
+            <TextInput
+              style={[
+                styles.textInput,
+                { color: theme.text },
+              ]}
+              placeholder="Type a message..."
+              placeholderTextColor={isDark ? "rgba(255,255,255,0.3)" : "rgba(0,0,0,0.3)"}
+              value={textInputValue}
+              onChangeText={setTextInputValue}
+              editable={!isInputDisabled}
+              onSubmitEditing={handleSendText}
+              returnKeyType="send"
+              multiline={false}
+              testID="input-message"
+            />
+            <Pressable
+              onPress={handleSendText}
+              disabled={isInputDisabled || !textInputValue.trim()}
+              style={({ pressed }) => [
+                styles.sendButton,
+                {
+                  backgroundColor: textInputValue.trim() && !isInputDisabled
+                    ? theme.orbPrimary
+                    : isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.08)",
+                  opacity: pressed ? 0.8 : 1,
+                },
+              ]}
+              testID="button-send"
+            >
+              <Feather
+                name="arrow-up"
+                size={20}
+                color={textInputValue.trim() && !isInputDisabled ? "#fff" : theme.textMuted}
+              />
+            </Pressable>
+          </View>
         </View>
-      </View>
+      </KeyboardAvoidingView>
 
       {showSubscriptionPrompt ? (
         <Pressable
@@ -1064,14 +1148,23 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  keyboardAvoid: {
+    flex: 1,
+  },
   content: {
     flex: 1,
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: Spacing.xl,
+    paddingHorizontal: Spacing.lg,
   },
   header: {
     alignItems: "center",
+  },
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.lg,
+    marginTop: Spacing.xs,
   },
   title: {
     fontSize: 32,
@@ -1081,16 +1174,14 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
   },
   usageText: {
-    fontSize: 13,
-    marginTop: Spacing.md,
+    fontSize: 12,
     fontWeight: "300",
     fontFamily: FontFamily.light,
-    letterSpacing: 1,
+    letterSpacing: 0.5,
   },
   signOutButton: {
-    marginTop: Spacing.sm,
     paddingVertical: Spacing.xs,
-    paddingHorizontal: Spacing.md,
+    paddingHorizontal: Spacing.sm,
   },
   signOutText: {
     fontSize: 13,
@@ -1163,31 +1254,31 @@ const styles = StyleSheet.create({
     fontFamily: FontFamily.medium,
   },
   startersContainer: {
-    paddingHorizontal: Spacing["2xl"],
-    paddingBottom: Spacing["3xl"],
-    paddingTop: Spacing.md,
-    alignItems: "center",
-    gap: Spacing.sm,
-    minHeight: 80,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    paddingHorizontal: Spacing.md,
+    paddingBottom: Spacing.sm,
+    paddingTop: Spacing.xs,
+    gap: Spacing.xs,
   },
   starterChip: {
-    paddingVertical: Spacing.md,
-    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.lg,
     borderRadius: BorderRadius.full,
     borderWidth: 1,
   },
   starterText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: "300",
     fontFamily: FontFamily.light,
     letterSpacing: 0.3,
     textAlign: "center",
   },
   messageContainer: {
-    paddingHorizontal: Spacing["2xl"],
-    paddingBottom: Spacing["3xl"],
-    maxHeight: 200,
-    minHeight: 80,
+    paddingHorizontal: Spacing.lg,
+    maxHeight: 120,
+    minHeight: 40,
   },
   messageText: {
     fontSize: 17,
@@ -1250,5 +1341,31 @@ const styles = StyleSheet.create({
   cancelButtonText: {
     fontSize: 15,
     letterSpacing: 0.3,
+  },
+  inputRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: BorderRadius.full,
+    borderWidth: 1,
+    paddingLeft: Spacing.lg,
+    paddingRight: Spacing.xs,
+    paddingVertical: Platform.OS === "ios" ? Spacing.sm : Spacing.xs,
+    gap: Spacing.sm,
+    width: "100%",
+  },
+  textInput: {
+    flex: 1,
+    fontSize: 16,
+    fontFamily: FontFamily.regular,
+    fontWeight: "400",
+    paddingVertical: Spacing.xs,
+    minHeight: 24,
+  },
+  sendButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
   },
 });
