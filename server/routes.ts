@@ -10,10 +10,10 @@ import { eq, desc, and } from "drizzle-orm";
 
 const audioBodyParser = express.json({ limit: "50mb" });
 
-const JWT_SECRET = process.env.SESSION_SECRET;
-if (!JWT_SECRET) {
+if (!process.env.SESSION_SECRET) {
   throw new Error("SESSION_SECRET environment variable is required");
 }
+const JWT_SECRET: string = process.env.SESSION_SECRET;
 const JWT_EXPIRES_IN = "30d";
 
 interface AuthPayload {
