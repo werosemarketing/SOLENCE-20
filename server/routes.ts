@@ -10,7 +10,10 @@ import { eq, desc, and } from "drizzle-orm";
 
 const audioBodyParser = express.json({ limit: "50mb" });
 
-const JWT_SECRET = process.env.SESSION_SECRET || "solence-fallback-secret-key";
+const JWT_SECRET = process.env.SESSION_SECRET;
+if (!JWT_SECRET) {
+  throw new Error("SESSION_SECRET environment variable is required");
+}
 const JWT_EXPIRES_IN = "30d";
 
 interface AuthPayload {
