@@ -20,8 +20,8 @@ function applyWebFont() {
   if (Platform.OS !== "web") return;
   const style = document.createElement("style");
   style.textContent = `
-    * {
-      font-family: 'MPLUSRounded1c_400Regular', 'M PLUS Rounded 1c', system-ui, sans-serif !important;
+    body, [data-testid], [role], div[dir], span[dir] {
+      font-family: 'M PLUS Rounded 1c', system-ui, sans-serif;
     }
   `;
   document.head.appendChild(style);

@@ -13,7 +13,7 @@ import * as Haptics from "expo-haptics";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { useTheme } from "@/hooks/useTheme";
-import { Spacing, BorderRadius } from "@/constants/theme";
+import { Spacing, BorderRadius, FontFamily } from "@/constants/theme";
 
 const STORAGE_KEY_ONBOARDING = "solence_onboarding_complete";
 
@@ -33,7 +33,7 @@ export default function OnboardingScreen({ onComplete }: Props) {
 
   const gradientColors = isDark
     ? (["#0f0c14", "#1a1625", "#1f1a2e", "#1a1625", "#0f0c14"] as const)
-    : (["#f8f5f0", "#faf8f5", "#fcfaf7", "#faf8f5", "#f8f5f0"] as const);
+    : (["#F5EBDD", "#FAF1E7", "#FDF6F0", "#FAF1E7", "#F5EBDD"] as const);
 
   return (
     <View style={styles.container}>
@@ -146,6 +146,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 28,
     fontWeight: "200",
+    fontFamily: FontFamily.light,
     letterSpacing: 4,
     textTransform: "uppercase",
     textAlign: "center",
@@ -159,6 +160,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 26,
     fontWeight: "300",
+    fontFamily: FontFamily.light,
     letterSpacing: 0.3,
     textAlign: "center",
   },
@@ -170,12 +172,14 @@ const styles = StyleSheet.create({
   promptLabel: {
     fontSize: 16,
     fontWeight: "500",
+    fontFamily: FontFamily.medium,
     letterSpacing: 0.5,
     marginBottom: Spacing.xs,
   },
   promptText: {
     fontSize: 15,
     fontWeight: "300",
+    fontFamily: FontFamily.light,
     fontStyle: "italic",
     letterSpacing: 0.2,
   },
@@ -183,12 +187,14 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 26,
     fontWeight: "400",
+    fontFamily: FontFamily.regular,
     letterSpacing: 0.3,
     textAlign: "center",
   },
   tagline: {
     fontSize: 18,
     fontWeight: "500",
+    fontFamily: FontFamily.medium,
     letterSpacing: 1,
     textAlign: "center",
   },
@@ -209,6 +215,7 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 17,
     fontWeight: "600",
+    fontFamily: FontFamily.bold,
     letterSpacing: 0.5,
   },
 });

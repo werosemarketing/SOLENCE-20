@@ -34,7 +34,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import * as FileSystem from "expo-file-system/legacy";
 
 import { useTheme } from "@/hooks/useTheme";
-import { Spacing, BorderRadius } from "@/constants/theme";
+import { Spacing, BorderRadius, FontFamily } from "@/constants/theme";
 import { getApiUrl } from "@/lib/query-client";
 
 let currentBlobUrl: string | null = null;
@@ -1074,6 +1074,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 32,
     fontWeight: "200",
+    fontFamily: FontFamily.light,
     letterSpacing: 6,
     textTransform: "uppercase",
   },
@@ -1081,6 +1082,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginTop: Spacing.md,
     fontWeight: "300",
+    fontFamily: FontFamily.light,
     letterSpacing: 1,
   },
   orbContainer: {
@@ -1121,6 +1123,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
     marginTop: Spacing.xl,
     fontWeight: "300",
+    fontFamily: FontFamily.light,
     letterSpacing: 2,
     textTransform: "uppercase",
   },
@@ -1133,6 +1136,7 @@ const styles = StyleSheet.create({
   endButtonText: {
     fontSize: 14,
     fontWeight: "400",
+    fontFamily: FontFamily.regular,
     letterSpacing: 1,
   },
   settingsButton: {
@@ -1143,6 +1147,7 @@ const styles = StyleSheet.create({
   settingsButtonText: {
     fontSize: 16,
     fontWeight: "500",
+    fontFamily: FontFamily.medium,
   },
   startersContainer: {
     paddingHorizontal: Spacing["2xl"],
@@ -1161,6 +1166,7 @@ const styles = StyleSheet.create({
   starterText: {
     fontSize: 14,
     fontWeight: "300",
+    fontFamily: FontFamily.light,
     letterSpacing: 0.3,
     textAlign: "center",
   },
@@ -1175,6 +1181,7 @@ const styles = StyleSheet.create({
     lineHeight: 28,
     textAlign: "center",
     fontWeight: "300",
+    fontFamily: FontFamily.light,
     letterSpacing: 0.3,
   },
   subscriptionOverlay: {
@@ -1198,6 +1205,7 @@ const styles = StyleSheet.create({
   subscriptionTitle: {
     fontSize: 22,
     fontWeight: "600",
+    fontFamily: FontFamily.bold,
     textAlign: "center",
     marginBottom: Spacing.md,
     letterSpacing: 0.5,
@@ -1220,6 +1228,7 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 17,
     fontWeight: "600",
+    fontFamily: FontFamily.bold,
     letterSpacing: 0.5,
   },
   cancelButton: {

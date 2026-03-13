@@ -12,7 +12,7 @@ import Animated, { FadeIn, FadeInDown } from "react-native-reanimated";
 import * as Haptics from "expo-haptics";
 
 import { useTheme } from "@/hooks/useTheme";
-import { Spacing, BorderRadius } from "@/constants/theme";
+import { Spacing, BorderRadius, FontFamily } from "@/constants/theme";
 
 type Props = {
   onBack: () => void;
@@ -70,7 +70,7 @@ export default function UserAgreementScreen({ onBack }: Props) {
 
   const gradientColors = isDark
     ? (["#0f0c14", "#1a1625", "#1f1a2e", "#1a1625", "#0f0c14"] as const)
-    : (["#f8f5f0", "#faf8f5", "#fcfaf7", "#faf8f5", "#f8f5f0"] as const);
+    : (["#F5EBDD", "#FAF1E7", "#FDF6F0", "#FAF1E7", "#F5EBDD"] as const);
 
   return (
     <View style={styles.container}>
@@ -178,11 +178,13 @@ const styles = StyleSheet.create({
   backText: {
     fontSize: 16,
     fontWeight: "400",
+    fontFamily: FontFamily.regular,
     letterSpacing: 0.3,
   },
   title: {
     fontSize: 24,
     fontWeight: "300",
+    fontFamily: FontFamily.light,
     letterSpacing: 2,
     textAlign: "center",
     marginBottom: Spacing.xs,
@@ -190,6 +192,7 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 14,
     fontWeight: "300",
+    fontFamily: FontFamily.light,
     letterSpacing: 1,
     textAlign: "center",
     marginBottom: Spacing.sm,
@@ -197,6 +200,7 @@ const styles = StyleSheet.create({
   dateText: {
     fontSize: 12,
     fontWeight: "300",
+    fontFamily: FontFamily.light,
     letterSpacing: 0.2,
     textAlign: "center",
     marginBottom: Spacing.xs,
@@ -208,6 +212,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 24,
     fontWeight: "300",
+    fontFamily: FontFamily.light,
     letterSpacing: 0.2,
     textAlign: "center",
   },
@@ -217,6 +222,7 @@ const styles = StyleSheet.create({
   sectionHeading: {
     fontSize: 16,
     fontWeight: "500",
+    fontFamily: FontFamily.medium,
     letterSpacing: 0.3,
     marginBottom: Spacing.sm,
   },
@@ -224,6 +230,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 22,
     fontWeight: "300",
+    fontFamily: FontFamily.light,
     letterSpacing: 0.2,
   },
   closingSection: {
@@ -236,6 +243,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 22,
     fontWeight: "400",
+    fontFamily: FontFamily.regular,
     letterSpacing: 0.2,
     textAlign: "center",
   },
