@@ -236,12 +236,15 @@ export async function textToSpeechStream(
 /**
  * Speech-to-Text: Transcribes audio using dedicated transcription model.
  * Uses gpt-4o-mini-transcribe for accurate transcription.
+ * The transcription API natively supports: mp3, mp4, mpeg, mpga, m4a, wav, webm
  */
 export async function speechToText(
   audioBuffer: Buffer,
-  format: "wav" | "mp3" | "webm" = "wav"
+  format: "wav" | "mp3" | "webm" = "wav",
+  fileExtension?: string
 ): Promise<string> {
-  const file = await toFile(audioBuffer, `audio.${format}`);
+  const ext = fileExtension || format;
+  const file = await toFile(audioBuffer, `audio.${ext}`);
   const response = await openai.audio.transcriptions.create({
     file,
     model: "gpt-4o-mini-transcribe",

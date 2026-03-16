@@ -3,7 +3,7 @@ import { createServer, type Server } from "node:http";
 import express from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import { openai, ensureCompatibleFormat, speechToText } from "./replit_integrations/audio";
+import { openai, detectAudioFormat, speechToText } from "./replit_integrations/audio";
 import { db } from "./db";
 import { users, conversations, messages, tokenUsage, FREE_TOKEN_LIMIT } from "@shared/schema";
 import { eq, desc, and, gte } from "drizzle-orm";
@@ -311,14 +311,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       await reserveAndRecordTokens(userId, MIN_TOKENS_FOR_REQUEST);
 
-      let audioBuffer: Buffer | null = null;
-      let audioInputFormat: "wav" | "mp3" = "wav";
+      let userTranscript = text || "";
 
       if (audio && !text) {
         const rawBuffer = Buffer.from(audio, "base64");
-        const result = await ensureCompatibleFormat(rawBuffer);
-        audioBuffer = result.buffer;
-        audioInputFormat = result.format;
+        const detected = detectAudioFormat(rawBuffer);
+        const sttFormat = detected === "mp3" ? "mp3" : detected === "webm" ? "webm" : "wav";
+        const fileExt = detected === "unknown" ? "m4a" : detected;
+        console.log("Audio format detected:", detected, "| Buffer size:", rawBuffer.length);
+
+        try {
+          userTranscript = await speechToText(rawBuffer, sttFormat, fileExt);
+        } catch (sttError: unknown) {
+          console.error("STT error:", sttError instanceof Error ? sttError.message : sttError);
+          userTranscript = "";
+        }
+
+        if (!userTranscript || userTranscript.trim().length === 0) {
+          return res.status(400).json({
+            error: "Could not understand audio. Please try again.",
+            tokensUsed: tokensUsedSoFar + MIN_TOKENS_FOR_REQUEST,
+            tokensRemaining: Math.max(0, tokensLeft - MIN_TOKENS_FOR_REQUEST),
+            tokenLimit: FREE_TOKEN_LIMIT,
+          });
+        }
       }
 
       let conversationId: number;
@@ -339,9 +355,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         conversationId = newConv.id;
       }
 
-      if (text) {
-        await db.insert(messages).values({ conversationId, role: "user", content: text });
-      }
+      await db.insert(messages).values({ conversationId, role: "user", content: userTranscript });
 
       const currentMessages = await db
         .select()
@@ -381,8 +395,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       type ChatMessage =
         | { role: "system"; content: string }
-        | { role: "user" | "assistant"; content: string }
-        | { role: "user"; content: Array<{ type: string; input_audio: { data: string; format: string } }> };
+        | { role: "user" | "assistant"; content: string };
 
       const chatHistory: ChatMessage[] = [
         { role: "system", content: SOLENCE_SYSTEM_PROMPT + pastContext },
@@ -392,28 +405,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         })),
       ];
 
-      if (audioBuffer) {
-        const audioBase64ForInput = audioBuffer.toString("base64");
-        chatHistory.push({
-          role: "user",
-          content: [
-            { type: "input_audio", input_audio: { data: audioBase64ForInput, format: audioInputFormat } },
-          ],
-        });
-      }
-
-      const sttPromise = audioBuffer
-        ? speechToText(audioBuffer, audioInputFormat).catch(() => "")
-        : Promise.resolve(text || "");
-
-      const responsePromise = openai.chat.completions.create({
+      const response = await openai.chat.completions.create({
         model: "gpt-audio",
         modalities: ["text", "audio"],
         audio: { voice: "nova", format: "mp3" },
         messages: chatHistory as Parameters<typeof openai.chat.completions.create>[0]["messages"],
       });
-
-      const [userTranscript, response] = await Promise.all([sttPromise, responsePromise]);
 
       const message = response.choices[0]?.message;
       const audioResponse = message && "audio" in message ? (message as { audio?: { transcript?: string; data?: string }; content?: string | null }).audio : undefined;
@@ -428,10 +425,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const updatedTokensUsed = tokensUsedSoFar + MIN_TOKENS_FOR_REQUEST + additionalTokens;
       const tokensRemaining = Math.max(0, FREE_TOKEN_LIMIT - updatedTokensUsed);
-
-      if (audioBuffer && userTranscript) {
-        await db.insert(messages).values({ conversationId, role: "user", content: userTranscript });
-      }
 
       await db.insert(messages).values({ conversationId, role: "assistant", content: assistantTranscript });
 

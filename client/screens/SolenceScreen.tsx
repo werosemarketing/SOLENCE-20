@@ -720,6 +720,16 @@ export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenPro
           shouldContinueListeningRef.current = false;
           return;
         }
+        if (response.status === 400) {
+          const errData = await response.json();
+          updateTokensFromResponse(errData);
+          setCurrentMessage(errData.error || "Could not understand audio. Please try again.");
+          setVoiceState("idle");
+          if (isConversationActive && canSendMessage()) {
+            setTimeout(() => startRecording(), 1000);
+          }
+          return;
+        }
         console.log("Voice API error:", response.status, response.statusText);
         throw new Error(`API request failed: ${response.status}`);
       }

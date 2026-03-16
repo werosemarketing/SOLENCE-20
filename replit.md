@@ -40,8 +40,10 @@ Solence is a voice-first AI companion app for meditation, reflection, and emotio
 
 ### Voice Chat API
 - POST `/api/chat/voice` with JSON body containing `audio` (base64) and/or `text`, plus `sessionId`
-- When audio is provided: sends audio directly to gpt-audio as input_audio (single API call for response) while running STT in parallel for transcript storage
-- Returns JSON with `text`, `userTranscript`, `audioBase64`, `audioFormat`
+- When audio is provided: transcribes via STT first (supports all mobile formats: m4a, mp4, webm, wav, mp3), then sends transcribed text to gpt-audio for response
+- No ffmpeg dependency - uses OpenAI transcription API which natively handles all audio formats
+- Returns JSON with `text`, `userTranscript`, `audioBase64`, `audioFormat`, `tokensUsed`, `tokensRemaining`, `tokenLimit`
+- GET `/api/tokens` returns current token usage balance
 - Audio playback: Uses native HTML5 Audio on web, expo-audio useAudioPlayer on native
 
 ### Key Features
