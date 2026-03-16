@@ -49,3 +49,15 @@ export type Conversation = typeof conversations.$inferSelect;
 export type InsertConversation = z.infer<typeof insertConversationSchema>;
 export type Message = typeof messages.$inferSelect;
 export type InsertMessage = z.infer<typeof insertMessageSchema>;
+
+export const tokenUsage = pgTable("token_usage", {
+  id: serial("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  tokensUsed: integer("tokens_used").notNull().default(0),
+  periodStart: timestamp("period_start").notNull(),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export type TokenUsage = typeof tokenUsage.$inferSelect;
+
+export const FREE_TOKEN_LIMIT = 50000;

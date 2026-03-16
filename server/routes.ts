@@ -5,8 +5,8 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { openai, ensureCompatibleFormat, speechToText } from "./replit_integrations/audio";
 import { db } from "./db";
-import { users, conversations, messages } from "@shared/schema";
-import { eq, desc, and } from "drizzle-orm";
+import { users, conversations, messages, tokenUsage, FREE_TOKEN_LIMIT } from "@shared/schema";
+import { eq, desc, and, gte } from "drizzle-orm";
 
 const audioBodyParser = express.json({ limit: "50mb" });
 
@@ -44,6 +44,36 @@ function requireAuth(req: Request, res: Response, next: NextFunction): void {
   } catch {
     res.status(401).json({ error: "Invalid or expired token" });
   }
+}
+
+const MIN_TOKENS_FOR_REQUEST = 500;
+
+function getCurrentPeriodStart(): Date {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), 1);
+}
+
+async function getTokensUsed(userId: string): Promise<number> {
+  const periodStart = getCurrentPeriodStart();
+  const records = await db
+    .select()
+    .from(tokenUsage)
+    .where(
+      and(
+        eq(tokenUsage.userId, userId),
+        gte(tokenUsage.periodStart, periodStart)
+      )
+    );
+  return records.reduce((sum, r) => sum + r.tokensUsed, 0);
+}
+
+async function reserveAndRecordTokens(userId: string, tokens: number): Promise<void> {
+  const periodStart = getCurrentPeriodStart();
+  await db.insert(tokenUsage).values({
+    userId,
+    tokensUsed: tokens,
+    periodStart,
+  });
 }
 
 async function seedTestAccount(): Promise<void> {
@@ -247,6 +277,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/tokens", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.user!.userId;
+      const used = await getTokensUsed(userId);
+      const remaining = Math.max(0, FREE_TOKEN_LIMIT - used);
+      res.json({ tokensUsed: used, tokensRemaining: remaining, tokenLimit: FREE_TOKEN_LIMIT });
+    } catch (error) {
+      console.error("Token check error:", error);
+      res.status(500).json({ error: "Failed to check token usage" });
+    }
+  });
+
   app.post("/api/chat/voice", audioBodyParser, requireAuth, async (req: Request, res: Response) => {
     try {
       const { audio, text } = req.body;
@@ -255,6 +297,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!audio && !text) {
         return res.status(400).json({ error: "Either [audio] or [text] is required" });
       }
+
+      const tokensUsedSoFar = await getTokensUsed(userId);
+      const tokensLeft = FREE_TOKEN_LIMIT - tokensUsedSoFar;
+      if (tokensLeft < MIN_TOKENS_FOR_REQUEST) {
+        return res.status(429).json({
+          error: "Token limit reached",
+          tokensUsed: tokensUsedSoFar,
+          tokensRemaining: Math.max(0, tokensLeft),
+          tokenLimit: FREE_TOKEN_LIMIT,
+        });
+      }
+
+      await reserveAndRecordTokens(userId, MIN_TOKENS_FOR_REQUEST);
 
       let audioBuffer: Buffer | null = null;
       let audioInputFormat: "wav" | "mp3" = "wav";
@@ -365,6 +420,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const assistantTranscript = audioResponse?.transcript || message?.content || "";
       const audioData = audioResponse?.data ?? "";
 
+      const totalTokens = response.usage?.total_tokens || 0;
+      const additionalTokens = Math.max(0, totalTokens - MIN_TOKENS_FOR_REQUEST);
+      if (additionalTokens > 0) {
+        await reserveAndRecordTokens(userId, additionalTokens);
+      }
+
+      const updatedTokensUsed = tokensUsedSoFar + MIN_TOKENS_FOR_REQUEST + additionalTokens;
+      const tokensRemaining = Math.max(0, FREE_TOKEN_LIMIT - updatedTokensUsed);
+
       if (audioBuffer && userTranscript) {
         await db.insert(messages).values({ conversationId, role: "user", content: userTranscript });
       }
@@ -373,12 +437,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       console.log("User said:", userTranscript);
       console.log("Solence response:", assistantTranscript);
+      console.log("Tokens used this request:", totalTokens, "| Total this period:", updatedTokensUsed);
 
       res.json({
         text: assistantTranscript,
         userTranscript,
         audioBase64: audioData,
         audioFormat: "mp3",
+        tokensUsed: updatedTokensUsed,
+        tokensRemaining,
+        tokenLimit: FREE_TOKEN_LIMIT,
       });
     } catch (error) {
       console.error("Voice API error:", error);

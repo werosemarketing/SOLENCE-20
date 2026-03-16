@@ -57,11 +57,17 @@ Solence is a voice-first AI companion app for meditation, reflection, and emotio
    - 15-second auto-stop timer
    - Interrupt playback by tapping orb
 
-3. **Usage Tracking** - AsyncStorage-based daily limit
-   - 5 free messages per day
-   - Resets at midnight
+3. **Token-Based Usage Tracking** - Server-side monthly token limit
+   - 50,000 free tokens per month (FREE_TOKEN_LIMIT in shared/schema.ts)
+   - Tracked via `token_usage` table in PostgreSQL
+   - GET /api/tokens returns current usage and remaining balance
+   - Each request reserves 500 tokens upfront to prevent concurrent overshoot
+   - Actual token usage from OpenAI response is recorded after each call
+   - Frontend displays remaining tokens (formatted as "XX.Xk tokens remaining")
+   - Token count turns orange when below 5,000 tokens
+   - Resets monthly (first of each month)
 
-4. **Subscription Modal** - Triggered when daily limit reached
+4. **Subscription Modal** - Triggered when token limit reached (429 from server)
 
 5. **Onboarding Flow** - Three-stage flow for new users:
    - Disclaimer with checkbox consent

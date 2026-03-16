@@ -32,7 +32,6 @@ import {
   setAudioModeAsync,
 } from "expo-audio";
 import * as Haptics from "expo-haptics";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
 import * as FileSystem from "expo-file-system/legacy";
 
@@ -69,8 +68,6 @@ const ORB_SIZE = SCREEN_WIDTH * 0.5;
 
 type VoiceState = "idle" | "listening" | "responding" | "speaking";
 
-const FREE_MESSAGE_LIMIT = 5;
-const STORAGE_KEY = "solence_daily_usage";
 const AUTO_STOP_DELAY = 15000;
 
 const STARTER_PROMPTS = [
@@ -433,7 +430,8 @@ export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenPro
 
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [currentMessage, setCurrentMessage] = useState<string>("");
-  const [dailyMessageCount, setDailyMessageCount] = useState(0);
+  const [tokensRemaining, setTokensRemaining] = useState(50000);
+  const [tokenLimit, setTokenLimit] = useState(50000);
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [showSubscriptionPrompt, setShowSubscriptionPrompt] = useState(false);
   const [permissionDenied, setPermissionDenied] = useState(false);
@@ -462,7 +460,7 @@ export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenPro
   ).current;
 
   useEffect(() => {
-    checkDailyUsage();
+    fetchTokenUsage();
   }, []);
 
   useEffect(() => {
@@ -556,46 +554,36 @@ export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenPro
     ],
   }));
 
-  const checkDailyUsage = async () => {
+  const fetchTokenUsage = async () => {
     try {
-      const today = new Date().toDateString();
-      const stored = await AsyncStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        const { date, count } = JSON.parse(stored);
-        if (date === today) {
-          setDailyMessageCount(count);
-        } else {
-          await AsyncStorage.setItem(
-            STORAGE_KEY,
-            JSON.stringify({ date: today, count: 0 })
-          );
-          setDailyMessageCount(0);
-        }
+      const apiUrl = getApiUrl();
+      const headers: Record<string, string> = {};
+      if (authToken) {
+        headers["Authorization"] = `Bearer ${authToken}`;
+      }
+      const response = await fetch(`${apiUrl}/api/tokens`, { headers });
+      if (response.ok) {
+        const data = await response.json();
+        setTokensRemaining(data.tokensRemaining);
+        setTokenLimit(data.tokenLimit);
       }
     } catch (e) {
-      console.log("Error checking daily usage:", e);
+      console.log("Error fetching token usage:", e);
     }
   };
 
-  const incrementDailyUsage = async () => {
-    try {
-      const today = new Date().toDateString();
-      const newCount = dailyMessageCount + 1;
-      await AsyncStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify({ date: today, count: newCount })
-      );
-      setDailyMessageCount(newCount);
-      return newCount;
-    } catch (e) {
-      console.log("Error incrementing usage:", e);
-      return dailyMessageCount + 1;
+  const updateTokensFromResponse = (data: { tokensRemaining?: number; tokenLimit?: number }) => {
+    if (data.tokensRemaining !== undefined) {
+      setTokensRemaining(data.tokensRemaining);
+    }
+    if (data.tokenLimit !== undefined) {
+      setTokenLimit(data.tokenLimit);
     }
   };
 
   const canSendMessage = () => {
     if (isSubscribed) return true;
-    return dailyMessageCount < FREE_MESSAGE_LIMIT;
+    return tokensRemaining > 0;
   };
 
   const clearAutoStopTimer = () => {
@@ -723,11 +711,20 @@ export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenPro
       });
 
       if (!response.ok) {
+        if (response.status === 429) {
+          const errData = await response.json();
+          updateTokensFromResponse(errData);
+          setShowSubscriptionPrompt(true);
+          setVoiceState("idle");
+          setIsConversationActive(false);
+          shouldContinueListeningRef.current = false;
+          return;
+        }
         throw new Error("API request failed");
       }
 
       const data = await response.json();
-      await incrementDailyUsage();
+      updateTokensFromResponse(data);
       setCurrentMessage(data.text);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
@@ -773,10 +770,19 @@ export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenPro
         body: JSON.stringify({ text }),
       });
 
-      if (!response.ok) throw new Error("API request failed");
+      if (!response.ok) {
+        if (response.status === 429) {
+          const errData = await response.json();
+          updateTokensFromResponse(errData);
+          setShowSubscriptionPrompt(true);
+          setVoiceState("idle");
+          return;
+        }
+        throw new Error("API request failed");
+      }
 
       const data = await response.json();
-      await incrementDailyUsage();
+      updateTokensFromResponse(data);
       setCurrentMessage(data.text);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
@@ -856,7 +862,14 @@ export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenPro
     }
   };
 
-  const remainingMessages = Math.max(0, FREE_MESSAGE_LIMIT - dailyMessageCount);
+  const formatTokens = (tokens: number) => {
+    if (tokens >= 1000) {
+      return `${(tokens / 1000).toFixed(1)}k`;
+    }
+    return `${tokens}`;
+  };
+
+  const tokenPercentUsed = Math.round(((tokenLimit - tokensRemaining) / tokenLimit) * 100);
 
   const getStateText = () => {
     if (permissionDenied) return "Microphone access required";
@@ -923,9 +936,9 @@ export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenPro
               {!isSubscribed ? (
                 <Animated.Text 
                   entering={FadeIn.duration(600).delay(400)}
-                  style={[styles.usageText, { color: theme.textMuted }]}
+                  style={[styles.usageText, { color: tokensRemaining <= 5000 ? "#D66B32" : theme.textMuted }]}
                 >
-                  {remainingMessages} messages left today
+                  {formatTokens(tokensRemaining)} tokens remaining
                 </Animated.Text>
               ) : null}
               <Pressable
@@ -1105,7 +1118,7 @@ export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenPro
                 { color: theme.textMuted },
               ]}
             >
-              You've used your 5 free messages today. Subscribe for unlimited
+              You've used all your free tokens this month. Subscribe for unlimited
               access to Solence.
             </Text>
             <Pressable
