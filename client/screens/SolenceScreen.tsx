@@ -720,7 +720,8 @@ export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenPro
           shouldContinueListeningRef.current = false;
           return;
         }
-        throw new Error("API request failed");
+        console.log("Voice API error:", response.status, response.statusText);
+        throw new Error(`API request failed: ${response.status}`);
       }
 
       const data = await response.json();
@@ -741,8 +742,10 @@ export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenPro
       }
     } catch (e: unknown) {
       console.log("Error sending audio:", e instanceof Error ? e.message : e);
-      setCurrentMessage("I had trouble hearing you. Please try again.");
+      setCurrentMessage("Something went wrong. Please try again.");
       setVoiceState("idle");
+      setIsConversationActive(false);
+      shouldContinueListeningRef.current = false;
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     }
   };
