@@ -84,13 +84,19 @@ async function seedTestAccount(): Promise<void> {
       .where(eq(users.email, "testuser@solence.ai"))
       .limit(1);
 
+    const hashedPassword = await bcrypt.hash("testuser123", 10);
     if (existing.length === 0) {
-      const hashedPassword = await bcrypt.hash("TestPass123", 10);
       await db.insert(users).values({
         email: "testuser@solence.ai",
         password: hashedPassword,
       });
       console.log("Test account seeded: testuser@solence.ai");
+    } else {
+      await db
+        .update(users)
+        .set({ password: hashedPassword })
+        .where(eq(users.email, "testuser@solence.ai"));
+      console.log("Test account password updated: testuser@solence.ai");
     }
   } catch (error) {
     console.error("Failed to seed test account:", error);
