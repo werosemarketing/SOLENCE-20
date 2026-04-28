@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -10,8 +11,10 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useHeaderHeight } from "@react-navigation/elements";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
+import { Feather } from "@expo/vector-icons";
 
 import { Card } from "@/components/Card";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
 import {
@@ -62,10 +65,66 @@ export default function ConversationDetailScreen({ route, navigation }: Props) {
   const [data, setData] = useState<ConversationResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [confirmVisible, setConfirmVisible] = useState(false);
+  const [deleteSubmitting, setDeleteSubmitting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useLayoutEffect(() => {
-    navigation.setOptions({ title: title ?? "Conversation" });
-  }, [navigation, title]);
+    navigation.setOptions({
+      title: title ?? "Conversation",
+      headerRight: () => (
+        <Pressable
+          onPress={() => {
+            setDeleteError(null);
+            setConfirmVisible(true);
+          }}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel="Delete this conversation"
+          testID="conversation-detail-delete-button"
+          style={({ pressed }) => [
+            styles.headerActionButton,
+            pressed && { opacity: 0.6 },
+          ]}
+        >
+          <Feather name="trash-2" size={20} color={theme.text} />
+        </Pressable>
+      ),
+    });
+  }, [navigation, title, theme.text]);
+
+  const handleConfirmDelete = async () => {
+    if (deleteSubmitting) return;
+    try {
+      setDeleteSubmitting(true);
+      setDeleteError(null);
+      const token = await AsyncStorage.getItem(STORAGE_KEY_AUTH_TOKEN);
+      const headers: Record<string, string> = {};
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const apiUrl = getApiUrl();
+      const response = await fetch(
+        `${apiUrl}/api/conversations/${conversationId}`,
+        { method: "DELETE", headers },
+      );
+      if (!response.ok) {
+        throw new Error(`Request failed (${response.status})`);
+      }
+      setConfirmVisible(false);
+      navigation.goBack();
+    } catch (e) {
+      const message =
+        e instanceof Error ? e.message : "Could not delete this conversation";
+      setDeleteError(message);
+    } finally {
+      setDeleteSubmitting(false);
+    }
+  };
+
+  const handleCancelDelete = () => {
+    if (deleteSubmitting) return;
+    setConfirmVisible(false);
+    setDeleteError(null);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -193,6 +252,23 @@ export default function ConversationDetailScreen({ route, navigation }: Props) {
           </ThemedText>
         </Card>
       )}
+
+      <ConfirmDialog
+        visible={confirmVisible}
+        title="Delete this conversation?"
+        message={
+          deleteError
+            ? deleteError
+            : `"${title ?? "This conversation"}" and all of its messages will be permanently removed. This can't be undone.`
+        }
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        destructive
+        loading={deleteSubmitting}
+        onConfirm={handleConfirmDelete}
+        onCancel={handleCancelDelete}
+        testID="conversation-detail-delete-confirm"
+      />
     </ScrollView>
   );
 }
@@ -234,4 +310,8 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.xs,
   },
   emptyDescription: {},
+  headerActionButton: {
+    paddingHorizontal: Spacing.xs,
+    paddingVertical: Spacing.xs,
+  },
 });

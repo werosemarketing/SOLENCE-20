@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -10,11 +10,13 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useHeaderHeight } from "@react-navigation/elements";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
-import { useNavigation } from "@react-navigation/native";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { Feather } from "@expo/vector-icons";
 
 import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
 import { Card } from "@/components/Card";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
 import {
@@ -116,6 +118,10 @@ export default function ProfileScreen() {
   const [conversationsError, setConversationsError] = useState<string | null>(
     null,
   );
+  const [pendingDelete, setPendingDelete] =
+    useState<ConversationListItem | null>(null);
+  const [deleteSubmitting, setDeleteSubmitting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -155,42 +161,86 @@ export default function ProfileScreen() {
     };
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      try {
-        setConversationsLoading(true);
-        setConversationsError(null);
-        const token = await AsyncStorage.getItem(STORAGE_KEY_AUTH_TOKEN);
-        const headers: Record<string, string> = {};
-        if (token) headers["Authorization"] = `Bearer ${token}`;
-        const apiUrl = getApiUrl();
-        const response = await fetch(
-          `${apiUrl}/api/conversations?limit=${RECENT_CONVERSATIONS_LIMIT}`,
-          { headers },
-        );
-        if (!response.ok) {
-          throw new Error(`Request failed (${response.status})`);
-        }
-        const data = (await response.json()) as ConversationsResponse;
-        if (cancelled) return;
-        setConversations(data.conversations);
-      } catch (e) {
-        if (cancelled) return;
-        const message =
-          e instanceof Error
-            ? e.message
-            : "Could not load recent conversations";
-        setConversationsError(message);
-      } finally {
-        if (!cancelled) setConversationsLoading(false);
+  const loadConversations = useCallback(async (signal?: AbortSignal) => {
+    try {
+      setConversationsLoading(true);
+      setConversationsError(null);
+      const token = await AsyncStorage.getItem(STORAGE_KEY_AUTH_TOKEN);
+      const headers: Record<string, string> = {};
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const apiUrl = getApiUrl();
+      const response = await fetch(
+        `${apiUrl}/api/conversations?limit=${RECENT_CONVERSATIONS_LIMIT}`,
+        { headers, signal },
+      );
+      if (!response.ok) {
+        throw new Error(`Request failed (${response.status})`);
       }
-    };
-    load();
-    return () => {
-      cancelled = true;
-    };
+      const data = (await response.json()) as ConversationsResponse;
+      if (signal?.aborted) return;
+      setConversations(data.conversations);
+    } catch (e) {
+      if (signal?.aborted) return;
+      const message =
+        e instanceof Error
+          ? e.message
+          : "Could not load recent conversations";
+      setConversationsError(message);
+    } finally {
+      if (!signal?.aborted) setConversationsLoading(false);
+    }
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      const controller = new AbortController();
+      loadConversations(controller.signal);
+      return () => {
+        controller.abort();
+      };
+    }, [loadConversations]),
+  );
+
+  const requestDeleteConversation = (conversation: ConversationListItem) => {
+    setDeleteError(null);
+    setPendingDelete(conversation);
+  };
+
+  const cancelDeleteConversation = () => {
+    if (deleteSubmitting) return;
+    setPendingDelete(null);
+    setDeleteError(null);
+  };
+
+  const confirmDeleteConversation = async () => {
+    if (!pendingDelete || deleteSubmitting) return;
+    const target = pendingDelete;
+    try {
+      setDeleteSubmitting(true);
+      setDeleteError(null);
+      const token = await AsyncStorage.getItem(STORAGE_KEY_AUTH_TOKEN);
+      const headers: Record<string, string> = {};
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const apiUrl = getApiUrl();
+      const response = await fetch(
+        `${apiUrl}/api/conversations/${target.id}`,
+        { method: "DELETE", headers },
+      );
+      if (!response.ok) {
+        throw new Error(`Request failed (${response.status})`);
+      }
+      setConversations((current) =>
+        current ? current.filter((c) => c.id !== target.id) : current,
+      );
+      setPendingDelete(null);
+    } catch (e) {
+      const message =
+        e instanceof Error ? e.message : "Could not delete this conversation";
+      setDeleteError(message);
+    } finally {
+      setDeleteSubmitting(false);
+    }
+  };
 
   const totalUsed = history
     ? history.reduce((sum, day) => sum + day.tokensUsed, 0)
@@ -362,51 +412,78 @@ export default function ProfileScreen() {
                     ? "You: "
                     : "";
               return (
-                <Pressable
+                <View
                   key={conversation.id}
-                  onPress={() => handleOpenConversation(conversation)}
-                  style={({ pressed }) => [
+                  style={[
                     styles.conversationRow,
                     !isLast && {
                       borderBottomColor: theme.backgroundSecondary,
                       borderBottomWidth: StyleSheet.hairlineWidth,
                     },
-                    pressed && { opacity: 0.6 },
                   ]}
-                  testID={`profile-conversation-row-${conversation.id}`}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Open conversation ${conversation.title}`}
                 >
-                  <View style={styles.conversationHeader}>
-                    <Text
-                      style={[styles.conversationTitle, { color: theme.text }]}
-                      numberOfLines={1}
-                      testID={`profile-conversation-title-${conversation.id}`}
-                    >
-                      {conversation.title}
-                    </Text>
+                  <Pressable
+                    onPress={() => handleOpenConversation(conversation)}
+                    style={({ pressed }) => [
+                      styles.conversationContent,
+                      pressed && { opacity: 0.6 },
+                    ]}
+                    testID={`profile-conversation-row-${conversation.id}`}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Open conversation ${conversation.title}`}
+                  >
+                    <View style={styles.conversationHeader}>
+                      <Text
+                        style={[
+                          styles.conversationTitle,
+                          { color: theme.text },
+                        ]}
+                        numberOfLines={1}
+                        testID={`profile-conversation-title-${conversation.id}`}
+                      >
+                        {conversation.title}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.conversationTime,
+                          { color: theme.textMuted },
+                        ]}
+                        numberOfLines={1}
+                        testID={`profile-conversation-time-${conversation.id}`}
+                      >
+                        {formatRelativeTime(stampSource)}
+                      </Text>
+                    </View>
                     <Text
                       style={[
-                        styles.conversationTime,
+                        styles.conversationPreview,
                         { color: theme.textMuted },
                       ]}
-                      numberOfLines={1}
-                      testID={`profile-conversation-time-${conversation.id}`}
+                      numberOfLines={2}
+                      testID={`profile-conversation-preview-${conversation.id}`}
                     >
-                      {formatRelativeTime(stampSource)}
+                      {`${rolePrefix}${previewLabel}`}
                     </Text>
-                  </View>
-                  <Text
-                    style={[
-                      styles.conversationPreview,
-                      { color: theme.textMuted },
+                  </Pressable>
+                  <Pressable
+                    onPress={() => requestDeleteConversation(conversation)}
+                    hitSlop={8}
+                    style={({ pressed }) => [
+                      styles.conversationDeleteButton,
+                      { backgroundColor: theme.backgroundSecondary },
+                      pressed && { opacity: 0.6 },
                     ]}
-                    numberOfLines={2}
-                    testID={`profile-conversation-preview-${conversation.id}`}
+                    testID={`profile-conversation-delete-${conversation.id}`}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Delete conversation ${conversation.title}`}
                   >
-                    {`${rolePrefix}${previewLabel}`}
-                  </Text>
-                </Pressable>
+                    <Feather
+                      name="trash-2"
+                      size={18}
+                      color={theme.textMuted}
+                    />
+                  </Pressable>
+                </View>
               );
             })}
           </View>
@@ -421,6 +498,25 @@ export default function ProfileScreen() {
           </View>
         )}
       </Card>
+
+      <ConfirmDialog
+        visible={pendingDelete !== null}
+        title="Delete this conversation?"
+        message={
+          deleteError
+            ? deleteError
+            : pendingDelete
+              ? `"${pendingDelete.title}" and all of its messages will be permanently removed. This can't be undone.`
+              : undefined
+        }
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        destructive
+        loading={deleteSubmitting}
+        onConfirm={confirmDeleteConversation}
+        onCancel={cancelDeleteConversation}
+        testID="profile-delete-confirm"
+      />
     </KeyboardAwareScrollViewCompat>
   );
 }
@@ -521,7 +617,20 @@ const styles = StyleSheet.create({
     marginTop: Spacing.xs,
   },
   conversationRow: {
+    flexDirection: "row",
+    alignItems: "center",
     paddingVertical: Spacing.md,
+    gap: Spacing.md,
+  },
+  conversationContent: {
+    flex: 1,
+  },
+  conversationDeleteButton: {
+    width: 36,
+    height: 36,
+    borderRadius: BorderRadius.full,
+    alignItems: "center",
+    justifyContent: "center",
   },
   conversationHeader: {
     flexDirection: "row",

@@ -426,6 +426,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
     },
   );
 
+  app.delete(
+    "/api/conversations/:id",
+    requireAuth,
+    async (req: Request, res: Response) => {
+      try {
+        const userId = req.user!.userId;
+        const id = Number(req.params.id);
+        if (!Number.isFinite(id) || id <= 0) {
+          return res.status(400).json({ error: "Invalid conversation id" });
+        }
+
+        const [conversation] = await db
+          .select()
+          .from(conversations)
+          .where(
+            and(eq(conversations.id, id), eq(conversations.userId, userId)),
+          )
+          .limit(1);
+
+        if (!conversation) {
+          return res.status(404).json({ error: "Conversation not found" });
+        }
+
+        // Messages are removed automatically via the FK cascade defined in
+        // shared/schema.ts.
+        await db.delete(conversations).where(eq(conversations.id, id));
+
+        res.json({ success: true, id });
+      } catch (error) {
+        console.error("Conversation delete error:", error);
+        res.status(500).json({ error: "Failed to delete conversation" });
+      }
+    },
+  );
+
   app.post("/api/chat/voice", audioBodyParser, requireAuth, async (req: Request, res: Response) => {
     let reservationActive = false;
     let reservedPeriodStart: Date | null = null;
