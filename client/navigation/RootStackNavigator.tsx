@@ -7,6 +7,7 @@ import DisclaimerScreen from "@/screens/DisclaimerScreen";
 import OnboardingScreen from "@/screens/OnboardingScreen";
 import UserAgreementScreen from "@/screens/UserAgreementScreen";
 import AuthScreen from "@/screens/AuthScreen";
+import UpgradeScreen from "@/screens/UpgradeScreen";
 import { useScreenOptions } from "@/hooks/useScreenOptions";
 import { getApiUrl } from "@/lib/query-client";
 
@@ -18,6 +19,7 @@ type AppStage = "loading" | "auth" | "disclaimer" | "agreement" | "onboarding" |
 
 export type RootStackParamList = {
   Solence: undefined;
+  Upgrade: { tokenLimit?: number; resetLabel?: string } | undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -138,6 +140,16 @@ export default function RootStackNavigator() {
       >
         {() => <SolenceScreen authToken={authToken} onSignOut={handleSignOut} />}
       </Stack.Screen>
+      <Stack.Screen
+        name="Upgrade"
+        component={UpgradeScreen}
+        options={{
+          headerShown: false,
+          presentation: "modal",
+          animation: "slide_from_bottom",
+          gestureEnabled: true,
+        }}
+      />
     </Stack.Navigator>
   );
 }

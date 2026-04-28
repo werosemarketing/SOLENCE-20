@@ -37,9 +37,13 @@ import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import * as FileSystem from "expo-file-system/legacy";
 
+import { useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+
 import { useTheme } from "@/hooks/useTheme";
 import { Spacing, BorderRadius, FontFamily } from "@/constants/theme";
 import { getApiUrl } from "@/lib/query-client";
+import type { RootStackParamList } from "@/navigation/RootStackNavigator";
 
 let currentBlobUrl: string | null = null;
 
@@ -429,6 +433,7 @@ type SolenceScreenProps = {
 export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenProps) {
   const insets = useSafeAreaInsets();
   const { theme, isDark } = useTheme();
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [currentMessage, setCurrentMessage] = useState<string>("");
@@ -1319,8 +1324,8 @@ export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenPro
                 { color: theme.textMuted },
               ]}
             >
-              You've used all your free tokens for today. Solence comes back{" "}
-              {formatResetTime(nextResetAt)}, or you can unlock unlimited
+              You've reached today's limit. Solence comes back{" "}
+              {formatResetTime(nextResetAt)}, or you can upgrade for unlimited
               conversations now.
             </Text>
             <Pressable
@@ -1331,11 +1336,15 @@ export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenPro
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                 setShowSubscriptionPrompt(false);
+                navigation.navigate("Upgrade", {
+                  tokenLimit,
+                  resetLabel: formatResetTime(nextResetAt),
+                });
               }}
               testID="subscribe-button"
             >
               <Text style={styles.subscribeButtonText}>
-                Subscribe - $15.99/month
+                Upgrade
               </Text>
             </Pressable>
             <Pressable
