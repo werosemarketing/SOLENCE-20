@@ -17,6 +17,7 @@ import { Feather } from "@expo/vector-icons";
 import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
 import { Card } from "@/components/Card";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { RenameDialog } from "@/components/RenameDialog";
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
 import {
@@ -122,6 +123,10 @@ export default function ProfileScreen() {
     useState<ConversationListItem | null>(null);
   const [deleteSubmitting, setDeleteSubmitting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [pendingRename, setPendingRename] =
+    useState<ConversationListItem | null>(null);
+  const [renameSubmitting, setRenameSubmitting] = useState(false);
+  const [renameError, setRenameError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -210,6 +215,80 @@ export default function ProfileScreen() {
     if (deleteSubmitting) return;
     setPendingDelete(null);
     setDeleteError(null);
+  };
+
+  const requestRenameConversation = (conversation: ConversationListItem) => {
+    setRenameError(null);
+    setPendingRename(conversation);
+  };
+
+  const cancelRenameConversation = () => {
+    if (renameSubmitting) return;
+    setPendingRename(null);
+    setRenameError(null);
+  };
+
+  const confirmRenameConversation = async (nextTitle: string) => {
+    if (!pendingRename || renameSubmitting) return;
+    const target = pendingRename;
+    const trimmed = nextTitle.trim();
+    if (trimmed.length === 0) {
+      setRenameError("Please enter a title.");
+      return;
+    }
+    if (trimmed === target.title) {
+      setPendingRename(null);
+      setRenameError(null);
+      return;
+    }
+    try {
+      setRenameSubmitting(true);
+      setRenameError(null);
+      const token = await AsyncStorage.getItem(STORAGE_KEY_AUTH_TOKEN);
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const apiUrl = getApiUrl();
+      const response = await fetch(
+        `${apiUrl}/api/conversations/${target.id}`,
+        {
+          method: "PATCH",
+          headers,
+          body: JSON.stringify({ title: trimmed }),
+        },
+      );
+      if (!response.ok) {
+        let serverMessage: string | null = null;
+        try {
+          const data = await response.json();
+          if (data && typeof data.error === "string") {
+            serverMessage = data.error;
+          }
+        } catch {
+          // ignore body parse errors
+        }
+        throw new Error(serverMessage ?? `Request failed (${response.status})`);
+      }
+      const payload = (await response.json()) as {
+        conversation: { id: number; title: string };
+      };
+      const updatedTitle = payload.conversation?.title ?? trimmed;
+      setConversations((current) =>
+        current
+          ? current.map((c) =>
+              c.id === target.id ? { ...c, title: updatedTitle } : c,
+            )
+          : current,
+      );
+      setPendingRename(null);
+    } catch (e) {
+      const message =
+        e instanceof Error ? e.message : "Could not rename this conversation";
+      setRenameError(message);
+    } finally {
+      setRenameSubmitting(false);
+    }
   };
 
   const confirmDeleteConversation = async () => {
@@ -466,10 +545,28 @@ export default function ProfileScreen() {
                     </Text>
                   </Pressable>
                   <Pressable
+                    onPress={() => requestRenameConversation(conversation)}
+                    hitSlop={8}
+                    style={({ pressed }) => [
+                      styles.conversationActionButton,
+                      { backgroundColor: theme.backgroundSecondary },
+                      pressed && { opacity: 0.6 },
+                    ]}
+                    testID={`profile-conversation-rename-${conversation.id}`}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Rename conversation ${conversation.title}`}
+                  >
+                    <Feather
+                      name="edit-2"
+                      size={16}
+                      color={theme.textMuted}
+                    />
+                  </Pressable>
+                  <Pressable
                     onPress={() => requestDeleteConversation(conversation)}
                     hitSlop={8}
                     style={({ pressed }) => [
-                      styles.conversationDeleteButton,
+                      styles.conversationActionButton,
                       { backgroundColor: theme.backgroundSecondary },
                       pressed && { opacity: 0.6 },
                     ]}
@@ -498,6 +595,20 @@ export default function ProfileScreen() {
           </View>
         )}
       </Card>
+
+      <RenameDialog
+        visible={pendingRename !== null}
+        title="Rename conversation"
+        description="Give this session a name that will help you find it later."
+        initialValue={pendingRename?.title ?? ""}
+        placeholder="Conversation title"
+        confirmLabel="Save"
+        loading={renameSubmitting}
+        errorMessage={renameError}
+        onConfirm={confirmRenameConversation}
+        onCancel={cancelRenameConversation}
+        testID="profile-rename-dialog"
+      />
 
       <ConfirmDialog
         visible={pendingDelete !== null}
@@ -620,12 +731,12 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingVertical: Spacing.md,
-    gap: Spacing.md,
+    gap: Spacing.sm,
   },
   conversationContent: {
     flex: 1,
   },
-  conversationDeleteButton: {
+  conversationActionButton: {
     width: 36,
     height: 36,
     borderRadius: BorderRadius.full,

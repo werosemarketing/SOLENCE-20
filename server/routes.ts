@@ -461,6 +461,65 @@ export async function registerRoutes(app: Express): Promise<Server> {
     },
   );
 
+  const CONVERSATION_TITLE_MAX_LENGTH = 80;
+
+  app.patch(
+    "/api/conversations/:id",
+    requireAuth,
+    async (req: Request, res: Response) => {
+      try {
+        const userId = req.user!.userId;
+        const id = Number(req.params.id);
+        if (!Number.isFinite(id) || id <= 0) {
+          return res.status(400).json({ error: "Invalid conversation id" });
+        }
+
+        const rawTitle = (req.body ?? {}).title;
+        if (typeof rawTitle !== "string") {
+          return res.status(400).json({ error: "Title is required" });
+        }
+        const title = rawTitle.trim();
+        if (title.length === 0) {
+          return res.status(400).json({ error: "Title cannot be empty" });
+        }
+        if (title.length > CONVERSATION_TITLE_MAX_LENGTH) {
+          return res.status(400).json({
+            error: `Title must be ${CONVERSATION_TITLE_MAX_LENGTH} characters or fewer`,
+          });
+        }
+
+        const [conversation] = await db
+          .select()
+          .from(conversations)
+          .where(
+            and(eq(conversations.id, id), eq(conversations.userId, userId)),
+          )
+          .limit(1);
+
+        if (!conversation) {
+          return res.status(404).json({ error: "Conversation not found" });
+        }
+
+        const [updated] = await db
+          .update(conversations)
+          .set({ title })
+          .where(eq(conversations.id, id))
+          .returning();
+
+        res.json({
+          conversation: {
+            id: updated.id,
+            title: updated.title,
+            createdAt: updated.createdAt,
+          },
+        });
+      } catch (error) {
+        console.error("Conversation rename error:", error);
+        res.status(500).json({ error: "Failed to rename conversation" });
+      }
+    },
+  );
+
   app.post("/api/chat/voice", audioBodyParser, requireAuth, async (req: Request, res: Response) => {
     let reservationActive = false;
     let reservedPeriodStart: Date | null = null;

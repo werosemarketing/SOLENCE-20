@@ -16,6 +16,7 @@ import { Feather } from "@expo/vector-icons";
 
 import { Card } from "@/components/Card";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { RenameDialog } from "@/components/RenameDialog";
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
 import {
@@ -85,30 +86,129 @@ export default function ConversationDetailScreen({ route, navigation }: Props) {
   const [confirmVisible, setConfirmVisible] = useState(false);
   const [deleteSubmitting, setDeleteSubmitting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [currentTitle, setCurrentTitle] = useState<string>(
+    title ?? "Conversation",
+  );
+  const [renameVisible, setRenameVisible] = useState(false);
+  const [renameSubmitting, setRenameSubmitting] = useState(false);
+  const [renameError, setRenameError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setCurrentTitle(title ?? "Conversation");
+  }, [title]);
 
   useLayoutEffect(() => {
     navigation.setOptions({
-      title: title ?? "Conversation",
+      title: currentTitle,
       headerRight: () => (
-        <Pressable
-          onPress={() => {
-            setDeleteError(null);
-            setConfirmVisible(true);
-          }}
-          hitSlop={10}
-          accessibilityRole="button"
-          accessibilityLabel="Delete this conversation"
-          testID="conversation-detail-delete-button"
-          style={({ pressed }) => [
-            styles.headerActionButton,
-            pressed && { opacity: 0.6 },
-          ]}
-        >
-          <Feather name="trash-2" size={20} color={theme.text} />
-        </Pressable>
+        <View style={styles.headerActions}>
+          <Pressable
+            onPress={() => {
+              setRenameError(null);
+              setRenameVisible(true);
+            }}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel="Rename this conversation"
+            testID="conversation-detail-rename-button"
+            style={({ pressed }) => [
+              styles.headerActionButton,
+              pressed && { opacity: 0.6 },
+            ]}
+          >
+            <Feather name="edit-2" size={18} color={theme.text} />
+          </Pressable>
+          <Pressable
+            onPress={() => {
+              setDeleteError(null);
+              setConfirmVisible(true);
+            }}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel="Delete this conversation"
+            testID="conversation-detail-delete-button"
+            style={({ pressed }) => [
+              styles.headerActionButton,
+              pressed && { opacity: 0.6 },
+            ]}
+          >
+            <Feather name="trash-2" size={20} color={theme.text} />
+          </Pressable>
+        </View>
       ),
     });
-  }, [navigation, title, theme.text]);
+  }, [navigation, currentTitle, theme.text]);
+
+  const handleConfirmRename = async (nextTitle: string) => {
+    if (renameSubmitting) return;
+    const trimmed = nextTitle.trim();
+    if (trimmed.length === 0) {
+      setRenameError("Please enter a title.");
+      return;
+    }
+    if (trimmed === currentTitle) {
+      setRenameVisible(false);
+      setRenameError(null);
+      return;
+    }
+    try {
+      setRenameSubmitting(true);
+      setRenameError(null);
+      const token = await AsyncStorage.getItem(STORAGE_KEY_AUTH_TOKEN);
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const apiUrl = getApiUrl();
+      const response = await fetch(
+        `${apiUrl}/api/conversations/${conversationId}`,
+        {
+          method: "PATCH",
+          headers,
+          body: JSON.stringify({ title: trimmed }),
+        },
+      );
+      if (!response.ok) {
+        let serverMessage: string | null = null;
+        try {
+          const body = await response.json();
+          if (body && typeof body.error === "string") {
+            serverMessage = body.error;
+          }
+        } catch {
+          // ignore body parse errors
+        }
+        throw new Error(serverMessage ?? `Request failed (${response.status})`);
+      }
+      const payload = (await response.json()) as {
+        conversation: { id: number; title: string };
+      };
+      const updatedTitle = payload.conversation?.title ?? trimmed;
+      setCurrentTitle(updatedTitle);
+      setData((prev) =>
+        prev
+          ? {
+              ...prev,
+              conversation: { ...prev.conversation, title: updatedTitle },
+            }
+          : prev,
+      );
+      navigation.setParams({ title: updatedTitle });
+      setRenameVisible(false);
+    } catch (e) {
+      const message =
+        e instanceof Error ? e.message : "Could not rename this conversation";
+      setRenameError(message);
+    } finally {
+      setRenameSubmitting(false);
+    }
+  };
+
+  const handleCancelRename = () => {
+    if (renameSubmitting) return;
+    setRenameVisible(false);
+    setRenameError(null);
+  };
 
   const handleConfirmDelete = async () => {
     if (deleteSubmitting) return;
@@ -297,7 +397,7 @@ export default function ConversationDetailScreen({ route, navigation }: Props) {
         message={
           deleteError
             ? deleteError
-            : `"${title ?? "This conversation"}" and all of its messages will be permanently removed. This can't be undone.`
+            : `"${currentTitle}" and all of its messages will be permanently removed. This can't be undone.`
         }
         confirmLabel="Delete"
         cancelLabel="Cancel"
@@ -306,6 +406,20 @@ export default function ConversationDetailScreen({ route, navigation }: Props) {
         onConfirm={handleConfirmDelete}
         onCancel={handleCancelDelete}
         testID="conversation-detail-delete-confirm"
+      />
+
+      <RenameDialog
+        visible={renameVisible}
+        title="Rename conversation"
+        description="Give this session a name that will help you find it later."
+        initialValue={currentTitle}
+        placeholder="Conversation title"
+        confirmLabel="Save"
+        loading={renameSubmitting}
+        errorMessage={renameError}
+        onConfirm={handleConfirmRename}
+        onCancel={handleCancelRename}
+        testID="conversation-detail-rename-dialog"
       />
     </ScrollView>
   );
@@ -348,6 +462,11 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.xs,
   },
   emptyDescription: {},
+  headerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+  },
   headerActionButton: {
     paddingHorizontal: Spacing.xs,
     paddingVertical: Spacing.xs,
