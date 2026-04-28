@@ -2,12 +2,12 @@ import React, { useState, useEffect, useCallback } from "react";
 import { BackHandler, Platform } from "react-native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import SolenceScreen from "@/screens/SolenceScreen";
 import DisclaimerScreen from "@/screens/DisclaimerScreen";
 import OnboardingScreen from "@/screens/OnboardingScreen";
 import UserAgreementScreen from "@/screens/UserAgreementScreen";
 import AuthScreen from "@/screens/AuthScreen";
 import UpgradeScreen from "@/screens/UpgradeScreen";
+import MainTabNavigator from "@/navigation/MainTabNavigator";
 import { useScreenOptions } from "@/hooks/useScreenOptions";
 import { getApiUrl } from "@/lib/query-client";
 
@@ -18,7 +18,7 @@ const STORAGE_KEY_AUTH_TOKEN = "solence_auth_token";
 type AppStage = "loading" | "auth" | "disclaimer" | "agreement" | "onboarding" | "main";
 
 export type RootStackParamList = {
-  Solence: undefined;
+  Main: undefined;
   Upgrade: { tokenLimit?: number; resetLabel?: string } | undefined;
 };
 
@@ -135,10 +135,12 @@ export default function RootStackNavigator() {
   return (
     <Stack.Navigator screenOptions={screenOptions}>
       <Stack.Screen
-        name="Solence"
+        name="Main"
         options={{ headerShown: false }}
       >
-        {() => <SolenceScreen authToken={authToken} onSignOut={handleSignOut} />}
+        {() => (
+          <MainTabNavigator authToken={authToken} onSignOut={handleSignOut} />
+        )}
       </Stack.Screen>
       <Stack.Screen
         name="Upgrade"

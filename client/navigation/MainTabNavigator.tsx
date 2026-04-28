@@ -3,7 +3,7 @@ import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { Feather } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
 import { Platform, StyleSheet } from "react-native";
-import HomeStackNavigator from "@/navigation/HomeStackNavigator";
+import SolenceScreen from "@/screens/SolenceScreen";
 import ProfileStackNavigator from "@/navigation/ProfileStackNavigator";
 import { useTheme } from "@/hooks/useTheme";
 
@@ -12,9 +12,17 @@ export type MainTabParamList = {
   ProfileTab: undefined;
 };
 
+export type MainTabNavigatorProps = {
+  authToken: string | null;
+  onSignOut: () => void;
+};
+
 const Tab = createBottomTabNavigator<MainTabParamList>();
 
-export default function MainTabNavigator() {
+export default function MainTabNavigator({
+  authToken,
+  onSignOut,
+}: MainTabNavigatorProps) {
   const { theme, isDark } = useTheme();
 
   return (
@@ -45,14 +53,15 @@ export default function MainTabNavigator() {
     >
       <Tab.Screen
         name="HomeTab"
-        component={HomeStackNavigator}
         options={{
-          title: "Home",
+          title: "Solence",
           tabBarIcon: ({ color, size }) => (
-            <Feather name="home" size={size} color={color} />
+            <Feather name="circle" size={size} color={color} />
           ),
         }}
-      />
+      >
+        {() => <SolenceScreen authToken={authToken} onSignOut={onSignOut} />}
+      </Tab.Screen>
       <Tab.Screen
         name="ProfileTab"
         component={ProfileStackNavigator}

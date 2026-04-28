@@ -39,6 +39,7 @@ import * as FileSystem from "expo-file-system/legacy";
 
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 
 import { useTheme } from "@/hooks/useTheme";
 import { Spacing, BorderRadius, FontFamily } from "@/constants/theme";
@@ -432,6 +433,7 @@ type SolenceScreenProps = {
 
 export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenProps) {
   const insets = useSafeAreaInsets();
+  const tabBarHeight = useBottomTabBarHeight();
   const { theme, isDark } = useTheme();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
@@ -1118,7 +1120,7 @@ export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenPro
             styles.content,
             {
               paddingTop: insets.top + Spacing.xl,
-              paddingBottom: insets.bottom + Spacing.sm,
+              paddingBottom: tabBarHeight + Spacing.sm,
             },
           ]}
         >
