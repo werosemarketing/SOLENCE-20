@@ -8,6 +8,7 @@ import OnboardingScreen from "@/screens/OnboardingScreen";
 import UserAgreementScreen from "@/screens/UserAgreementScreen";
 import AuthScreen from "@/screens/AuthScreen";
 import UpgradeScreen from "@/screens/UpgradeScreen";
+import ConversationDetailScreen from "@/screens/ConversationDetailScreen";
 import MainTabNavigator, { type MainTabParamList } from "@/navigation/MainTabNavigator";
 import { useScreenOptions } from "@/hooks/useScreenOptions";
 import { getApiUrl } from "@/lib/query-client";
@@ -21,6 +22,7 @@ type AppStage = "loading" | "auth" | "disclaimer" | "agreement" | "onboarding" |
 export type RootStackParamList = {
   Main: NavigatorScreenParams<MainTabParamList> | undefined;
   Upgrade: { tokenLimit?: number; resetLabel?: string } | undefined;
+  ConversationDetail: { conversationId: number; title?: string };
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -151,6 +153,13 @@ export default function RootStackNavigator() {
           presentation: "modal",
           animation: "slide_from_bottom",
           gestureEnabled: true,
+        }}
+      />
+      <Stack.Screen
+        name="ConversationDetail"
+        component={ConversationDetailScreen}
+        options={{
+          title: "Conversation",
         }}
       />
     </Stack.Navigator>

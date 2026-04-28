@@ -28,7 +28,7 @@ import {
 } from "@/constants/theme";
 import { getApiUrl } from "@/lib/query-client";
 import { displayConversationTitle } from "@/lib/conversation-title";
-import type { ProfileStackParamList } from "@/navigation/ProfileStackNavigator";
+import type { RootStackParamList } from "@/navigation/RootStackNavigator";
 
 const STORAGE_KEY_AUTH_TOKEN = "solence_auth_token";
 const HISTORY_DAYS = 7;
@@ -106,7 +106,7 @@ export default function ProfileScreen() {
   const tabBarHeight = useBottomTabBarHeight();
   const { theme } = useTheme();
   const navigation =
-    useNavigation<NativeStackNavigationProp<ProfileStackParamList>>();
+    useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
   const [history, setHistory] = useState<HistoryEntry[] | null>(null);
   const [tokenLimit, setTokenLimit] = useState<number>(DEFAULT_TOKEN_LIMIT);

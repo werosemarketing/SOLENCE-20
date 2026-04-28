@@ -1098,23 +1098,20 @@ export default function SolenceScreen({
     Haptics.selectionAsync().catch(() => {});
   };
 
-  // Tapping the body of the resumed-conversation pill jumps into the
-  // Profile tab's conversation detail screen so the user can re-read the
-  // earlier exchange. We deliberately do NOT clear `activeConversationId`
-  // here — when the user navigates back, the pill is still active so the
-  // next message keeps appending to the same thread.
+  // Tapping the body of the resumed-conversation pill pushes the
+  // ConversationDetail screen onto the root stack so the user can re-read
+  // the earlier exchange. ConversationDetail lives at the root level (not
+  // inside a tab), so pressing back returns to whichever tab the user came
+  // from — Home in this case — instead of jumping to the Profile tab.
+  // We deliberately do NOT clear `activeConversationId` here — when the
+  // user navigates back, the pill is still active so the next message
+  // keeps appending to the same thread.
   const openResumedConversation = () => {
     if (activeConversationId == null) return;
     Haptics.selectionAsync().catch(() => {});
-    navigation.navigate("Main", {
-      screen: "ProfileTab",
-      params: {
-        screen: "ConversationDetail",
-        params: {
-          conversationId: activeConversationId,
-          title: activeConversationTitle ?? undefined,
-        },
-      },
+    navigation.navigate("ConversationDetail", {
+      conversationId: activeConversationId,
+      title: activeConversationTitle ?? undefined,
     });
   };
 

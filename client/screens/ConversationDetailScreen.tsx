@@ -28,9 +28,7 @@ import {
 } from "@/constants/theme";
 import { getApiUrl } from "@/lib/query-client";
 import { displayConversationTitle } from "@/lib/conversation-title";
-import type { ProfileStackParamList } from "@/navigation/ProfileStackNavigator";
-import type { MainTabParamList } from "@/navigation/MainTabNavigator";
-import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
+import type { RootStackParamList } from "@/navigation/RootStackNavigator";
 
 const STORAGE_KEY_AUTH_TOKEN = "solence_auth_token";
 
@@ -50,7 +48,7 @@ type ConversationResponse = {
   messages: Message[];
 };
 
-type Props = NativeStackScreenProps<ProfileStackParamList, "ConversationDetail">;
+type Props = NativeStackScreenProps<RootStackParamList, "ConversationDetail">;
 
 function formatTimestamp(iso: string): string {
   const d = new Date(iso);
@@ -70,21 +68,19 @@ export default function ConversationDetailScreen({ route, navigation }: Props) {
 
   const handleContinue = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-    // ConversationDetail sits in the Profile stack which is itself a screen
-    // inside the bottom tab navigator. Navigating from the tab navigator to
-    // HomeTab both switches tabs and forwards the param to SolenceScreen.
-    const tabNav = navigation.getParent<
-      BottomTabNavigationProp<MainTabParamList>
-    >();
-    if (tabNav) {
-      // Forward the human-readable title so SolenceScreen can show a
-      // "Continuing {title}" pill — otherwise the home screen would only
-      // know an opaque numeric id.
-      tabNav.navigate("HomeTab", {
+    // ConversationDetail lives at the root stack level, with the bottom tab
+    // navigator (`Main`) as a sibling route. Navigating to Main pops this
+    // screen off the stack, switches to the HomeTab, and forwards the
+    // active-conversation params so SolenceScreen can show a
+    // "Continuing {title}" pill — otherwise the home screen would only
+    // know an opaque numeric id.
+    navigation.navigate("Main", {
+      screen: "HomeTab",
+      params: {
         activeConversationId: conversationId,
         activeConversationTitle: data?.conversation.title ?? title,
-      });
-    }
+      },
+    });
   };
 
   const [data, setData] = useState<ConversationResponse | null>(null);
