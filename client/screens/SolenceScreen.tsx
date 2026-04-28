@@ -620,12 +620,23 @@ export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenPro
     try {
       const reset = new Date(iso);
       const now = new Date();
-      const sameDay =
-        reset.toDateString() === now.toDateString();
+      const diffMs = reset.getTime() - now.getTime();
+      const diffMin = Math.round(diffMs / 60000);
       const time = reset.toLocaleTimeString(undefined, {
         hour: "numeric",
         minute: "2-digit",
       });
+      // Prefer relative wording when refresh is reasonably soon, since
+      // "in 4 hours" is more actionable than a clock time the user has to
+      // mentally compare against the current time.
+      if (diffMin > 0 && diffMin < 60) {
+        return `in ${diffMin} minute${diffMin === 1 ? "" : "s"}`;
+      }
+      const diffHr = Math.round(diffMin / 60);
+      if (diffMin > 0 && diffHr <= 12) {
+        return `in about ${diffHr} hour${diffHr === 1 ? "" : "s"}`;
+      }
+      const sameDay = reset.toDateString() === now.toDateString();
       if (sameDay) return `at ${time}`;
       const tomorrow = new Date(now);
       tomorrow.setDate(now.getDate() + 1);
@@ -827,7 +838,9 @@ export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenPro
       console.log("Error sending audio:", e instanceof Error ? e.message : e);
       setCurrentMessage("Something went wrong. Tap retry to try again.");
       setVoiceState("idle");
-      setIsConversationActive(false);
+      // Pause the auto-listen loop, but keep the conversation active so the
+      // retry pill resumes the same session seamlessly. The user can tap
+      // "End conversation" if they want to fully tear down.
       shouldContinueListeningRef.current = false;
       if (audioBase64.length >= 100) {
         setLastVoiceError({ kind: "audio", payload: audioBase64 });
@@ -1164,6 +1177,15 @@ export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenPro
                   Open Settings
                 </Text>
               </Pressable>
+            ) : null}
+
+            {permissionDenied && Platform.OS === "web" ? (
+              <Text
+                style={[styles.settingsButtonText, { color: theme.textMuted, textAlign: "center", paddingHorizontal: 24 }]}
+                testID="text-permission-web-help"
+              >
+                Allow microphone access from your browser&apos;s address bar, then tap the orb again.
+              </Text>
             ) : null}
 
             {lastVoiceError && voiceState === "idle" ? (
