@@ -1043,7 +1043,25 @@ export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenPro
     return `${tokens}`;
   };
 
-  const tokenPercentUsed = Math.round(((tokenLimit - tokensRemaining) / tokenLimit) * 100);
+  // Clamp the visible bar between 0 and 100 in case the server briefly reports
+  // numbers outside the expected range (e.g. an over-spend that pushes
+  // tokensRemaining negative). Without clamping the bar would either disappear
+  // or overflow its track.
+  const tokensUsed = Math.max(0, tokenLimit - tokensRemaining);
+  const usageBarPercent = tokenLimit > 0
+    ? Math.max(0, Math.min(100, Math.round((tokensUsed / tokenLimit) * 100)))
+    : 0;
+  const isLowOnTokens =
+    tokenLimit > 0 && tokensRemaining > 0 && tokensRemaining / tokenLimit < 0.2;
+  const isOutOfTokens = tokensRemaining <= 0;
+  const usageAccentColor = isOutOfTokens || isLowOnTokens
+    ? theme.orbPrimary
+    : isDark
+      ? "rgba(232, 228, 224, 0.55)"
+      : "rgba(64, 62, 62, 0.45)";
+  const usageTrackColor = isDark
+    ? "rgba(255, 255, 255, 0.08)"
+    : "rgba(0, 0, 0, 0.06)";
 
   const getStateText = () => {
     if (permissionDenied) return "Microphone access required";
@@ -1111,12 +1129,48 @@ export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenPro
             <Text style={[styles.title, { color: theme.text }]}>Solence</Text>
             <View style={styles.headerRow}>
               {!isSubscribed ? (
-                <Animated.Text 
+                <Animated.View
                   entering={FadeIn.duration(600).delay(400)}
-                  style={[styles.usageText, { color: tokensRemaining <= 5000 ? "#D66B32" : theme.textMuted }]}
+                  style={styles.usageBlock}
+                  testID="usage-indicator"
+                  accessibilityLabel={
+                    isOutOfTokens
+                      ? `Daily limit reached. Resets ${formatResetTime(nextResetAt)}.`
+                      : `${formatTokens(tokensUsed)} of ${formatTokens(tokenLimit)} tokens used today. Resets ${formatResetTime(nextResetAt)}.`
+                  }
                 >
-                  {formatTokens(tokensRemaining)} tokens remaining
-                </Animated.Text>
+                  <Text
+                    style={[
+                      styles.usageLabel,
+                      { color: isLowOnTokens || isOutOfTokens ? theme.orbPrimary : theme.textMuted },
+                    ]}
+                    testID="text-usage-label"
+                  >
+                    {formatTokens(tokensUsed)} of {formatTokens(tokenLimit)} used today
+                  </Text>
+                  <View
+                    style={[styles.usageTrack, { backgroundColor: usageTrackColor }]}
+                    accessibilityRole="progressbar"
+                    accessibilityValue={{ min: 0, max: 100, now: usageBarPercent }}
+                  >
+                    <View
+                      style={[
+                        styles.usageFill,
+                        {
+                          width: `${usageBarPercent}%`,
+                          backgroundColor: usageAccentColor,
+                        },
+                      ]}
+                      testID="usage-fill"
+                    />
+                  </View>
+                  <Text
+                    style={[styles.usageReset, { color: theme.textMuted }]}
+                    testID="text-usage-reset"
+                  >
+                    Resets {formatResetTime(nextResetAt)}
+                  </Text>
+                </Animated.View>
               ) : null}
               <Pressable
                 onPress={onSignOut}
@@ -1387,8 +1441,8 @@ const styles = StyleSheet.create({
   headerRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: Spacing.lg,
-    marginTop: Spacing.xs,
+    gap: Spacing.md,
+    marginTop: Spacing.sm,
   },
   title: {
     fontSize: 32,
@@ -1397,11 +1451,33 @@ const styles = StyleSheet.create({
     letterSpacing: 6,
     textTransform: "uppercase",
   },
-  usageText: {
-    fontSize: 12,
+  usageBlock: {
+    alignItems: "center",
+    gap: 4,
+    minWidth: 160,
+  },
+  usageLabel: {
+    fontSize: 11,
+    fontWeight: "400",
+    fontFamily: FontFamily.regular,
+    letterSpacing: 0.4,
+  },
+  usageTrack: {
+    width: 160,
+    height: 4,
+    borderRadius: 2,
+    overflow: "hidden",
+  },
+  usageFill: {
+    height: "100%",
+    borderRadius: 2,
+  },
+  usageReset: {
+    fontSize: 10,
     fontWeight: "300",
     fontFamily: FontFamily.light,
-    letterSpacing: 0.5,
+    letterSpacing: 0.3,
+    opacity: 0.85,
   },
   signOutButton: {
     paddingVertical: Spacing.xs,

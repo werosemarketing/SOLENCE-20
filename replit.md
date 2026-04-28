@@ -68,8 +68,11 @@ Solence is a voice-first AI companion app for meditation, reflection, and emotio
    - Actual token usage from OpenAI response is recorded after each call
    - Failed STT (no transcript) refunds the 500-token reservation
    - Server errors before the LLM call also refund the reservation
-   - Frontend displays remaining tokens (formatted as "XX.Xk tokens remaining")
-   - Token count turns orange when below 5,000 tokens
+   - Frontend header shows a daily-usage progress indicator: "X of 15.0k used today",
+     a thin progress bar (track + fill), and a secondary line "Resets ..." with
+     the relative or local-time reset moment
+   - The label and bar fill switch from a muted neutral to the orange brand color
+     when remaining drops below ~20% of the daily cap (or hits zero)
    - Frontend refreshes the balance on app foreground and shortly after the
      next reset moment so the new day's quota appears automatically
    - Resets daily at 00:00 UTC; UI shows local time ("Comes back tomorrow at 5:00 PM")
