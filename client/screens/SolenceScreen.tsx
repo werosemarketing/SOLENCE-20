@@ -449,9 +449,14 @@ export default function SolenceScreen({
   const { theme, isDark } = useTheme();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const routeActiveConversationId = route?.params?.activeConversationId ?? null;
+  const routeActiveConversationTitle =
+    route?.params?.activeConversationTitle ?? null;
   const [activeConversationId, setActiveConversationId] = useState<number | null>(
     routeActiveConversationId,
   );
+  const [activeConversationTitle, setActiveConversationTitle] = useState<
+    string | null
+  >(routeActiveConversationTitle);
 
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [currentMessage, setCurrentMessage] = useState<string>("");
@@ -507,13 +512,17 @@ export default function SolenceScreen({
   useEffect(() => {
     if (routeActiveConversationId == null) return;
     setActiveConversationId(routeActiveConversationId);
+    setActiveConversationTitle(routeActiveConversationTitle);
     setShowStarters(false);
     setCurrentMessage("");
     setLastVoiceError(null);
     if (tabNavigation) {
-      tabNavigation.setParams({ activeConversationId: undefined });
+      tabNavigation.setParams({
+        activeConversationId: undefined,
+        activeConversationTitle: undefined,
+      });
     }
-  }, [routeActiveConversationId, tabNavigation]);
+  }, [routeActiveConversationId, routeActiveConversationTitle, tabNavigation]);
 
   // Auto-refresh token balance shortly after the daily reset moment so the
   // UI reflects the new quota without needing a manual reload.
@@ -1076,7 +1085,17 @@ export default function SolenceScreen({
     // the next interaction resumes the default (most-recent) target instead
     // of silently continuing to append to the old thread.
     setActiveConversationId(null);
+    setActiveConversationTitle(null);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  };
+
+  // Dismissing the resumed-conversation pill clears the override but leaves
+  // any in-progress voice/audio state alone — the user is just saying "next
+  // message goes to a fresh thread, not this old one".
+  const dismissResumedConversation = () => {
+    setActiveConversationId(null);
+    setActiveConversationTitle(null);
+    Haptics.selectionAsync().catch(() => {});
   };
 
   const openSettings = async () => {
@@ -1236,6 +1255,56 @@ export default function SolenceScreen({
               </Pressable>
             </View>
           </Animated.View>
+
+          {activeConversationId != null ? (
+            <Animated.View
+              entering={FadeIn.duration(400)}
+              style={[
+                styles.resumedBanner,
+                {
+                  backgroundColor: isDark
+                    ? "rgba(255,255,255,0.08)"
+                    : "rgba(0,0,0,0.05)",
+                  borderColor: isDark
+                    ? "rgba(255,255,255,0.1)"
+                    : "rgba(0,0,0,0.08)",
+                },
+              ]}
+              testID="resumed-conversation-banner"
+            >
+              <Feather
+                name="message-circle"
+                size={13}
+                color={theme.textMuted}
+              />
+              <Text
+                style={[
+                  styles.resumedBannerText,
+                  { color: theme.textMuted },
+                ]}
+                numberOfLines={1}
+                testID="text-resumed-conversation"
+              >
+                Continuing{" "}
+                {activeConversationTitle && activeConversationTitle.trim()
+                  ? activeConversationTitle.trim()
+                  : "your last conversation"}
+              </Text>
+              <Pressable
+                onPress={dismissResumedConversation}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Start a new conversation instead"
+                testID="dismiss-resumed-conversation-button"
+                style={({ pressed }) => [
+                  styles.resumedBannerClose,
+                  { opacity: pressed ? 0.5 : 1 },
+                ]}
+              >
+                <Feather name="x" size={14} color={theme.textMuted} />
+              </Pressable>
+            </Animated.View>
+          ) : null}
 
           <View style={styles.orbContainer}>
             <Pressable
@@ -1546,6 +1615,33 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     flex: 1,
+  },
+  resumedBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "center",
+    gap: Spacing.xs,
+    marginTop: Spacing.lg,
+    paddingVertical: Spacing.xs,
+    paddingLeft: Spacing.md,
+    paddingRight: Spacing.xs,
+    borderRadius: BorderRadius.full,
+    borderWidth: 1,
+    maxWidth: "90%",
+  },
+  resumedBannerText: {
+    fontSize: 12,
+    fontWeight: "400",
+    fontFamily: FontFamily.regular,
+    letterSpacing: 0.3,
+    flexShrink: 1,
+  },
+  resumedBannerClose: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: "center",
+    justifyContent: "center",
   },
   bottomSection: {
     alignItems: "center",

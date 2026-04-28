@@ -8,7 +8,12 @@ import ProfileStackNavigator from "@/navigation/ProfileStackNavigator";
 import { useTheme } from "@/hooks/useTheme";
 
 export type MainTabParamList = {
-  HomeTab: { activeConversationId?: number } | undefined;
+  HomeTab:
+    | {
+        activeConversationId?: number;
+        activeConversationTitle?: string;
+      }
+    | undefined;
   ProfileTab: undefined;
 };
 

@@ -76,7 +76,13 @@ export default function ConversationDetailScreen({ route, navigation }: Props) {
       BottomTabNavigationProp<MainTabParamList>
     >();
     if (tabNav) {
-      tabNav.navigate("HomeTab", { activeConversationId: conversationId });
+      // Forward the human-readable title so SolenceScreen can show a
+      // "Continuing {title}" pill — otherwise the home screen would only
+      // know an opaque numeric id.
+      tabNav.navigate("HomeTab", {
+        activeConversationId: conversationId,
+        activeConversationTitle: data?.conversation.title ?? title,
+      });
     }
   };
 
