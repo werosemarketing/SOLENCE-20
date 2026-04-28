@@ -1,20 +1,35 @@
 import { useEffect, useState } from "react";
-import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useHeaderHeight } from "@react-navigation/elements";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
+import { useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 
 import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
 import { Card } from "@/components/Card";
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
-import { Spacing, BorderRadius, Typography, fontForWeight } from "@/constants/theme";
+import {
+  Spacing,
+  BorderRadius,
+  Typography,
+  fontForWeight,
+} from "@/constants/theme";
 import { getApiUrl } from "@/lib/query-client";
+import type { ProfileStackParamList } from "@/navigation/ProfileStackNavigator";
 
 const STORAGE_KEY_AUTH_TOKEN = "solence_auth_token";
 const HISTORY_DAYS = 7;
 const DEFAULT_TOKEN_LIMIT = 15000;
+const RECENT_CONVERSATIONS_LIMIT = 10;
 
 type HistoryEntry = {
   periodStart: string;
@@ -26,6 +41,22 @@ type HistoryResponse = {
   tokenLimit: number;
   period: string;
   history: HistoryEntry[];
+};
+
+type ConversationListItem = {
+  id: number;
+  title: string;
+  createdAt: string;
+  messageCount: number;
+  lastMessage: {
+    role: string;
+    content: string;
+    createdAt: string;
+  } | null;
+};
+
+type ConversationsResponse = {
+  conversations: ConversationListItem[];
 };
 
 function formatTokens(value: number): string {
@@ -49,16 +80,42 @@ function formatFullDate(iso: string): string {
   });
 }
 
+function formatRelativeTime(iso: string): string {
+  const then = new Date(iso).getTime();
+  const now = Date.now();
+  const diffMs = Math.max(0, now - then);
+  const diffSec = Math.round(diffMs / 1000);
+  if (diffSec < 60) return "just now";
+  const diffMin = Math.round(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.round(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDay = Math.round(diffHr / 24);
+  if (diffDay < 7) return `${diffDay}d ago`;
+  const d = new Date(iso);
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const headerHeight = useHeaderHeight();
   const tabBarHeight = useBottomTabBarHeight();
   const { theme } = useTheme();
+  const navigation =
+    useNavigation<NativeStackNavigationProp<ProfileStackParamList>>();
 
   const [history, setHistory] = useState<HistoryEntry[] | null>(null);
   const [tokenLimit, setTokenLimit] = useState<number>(DEFAULT_TOKEN_LIMIT);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const [conversations, setConversations] = useState<
+    ConversationListItem[] | null
+  >(null);
+  const [conversationsLoading, setConversationsLoading] = useState(true);
+  const [conversationsError, setConversationsError] = useState<string | null>(
+    null,
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -98,12 +155,56 @@ export default function ProfileScreen() {
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        setConversationsLoading(true);
+        setConversationsError(null);
+        const token = await AsyncStorage.getItem(STORAGE_KEY_AUTH_TOKEN);
+        const headers: Record<string, string> = {};
+        if (token) headers["Authorization"] = `Bearer ${token}`;
+        const apiUrl = getApiUrl();
+        const response = await fetch(
+          `${apiUrl}/api/conversations?limit=${RECENT_CONVERSATIONS_LIMIT}`,
+          { headers },
+        );
+        if (!response.ok) {
+          throw new Error(`Request failed (${response.status})`);
+        }
+        const data = (await response.json()) as ConversationsResponse;
+        if (cancelled) return;
+        setConversations(data.conversations);
+      } catch (e) {
+        if (cancelled) return;
+        const message =
+          e instanceof Error
+            ? e.message
+            : "Could not load recent conversations";
+        setConversationsError(message);
+      } finally {
+        if (!cancelled) setConversationsLoading(false);
+      }
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const totalUsed = history
     ? history.reduce((sum, day) => sum + day.tokensUsed, 0)
     : 0;
   const dailyAverage = history && history.length > 0
     ? Math.round(totalUsed / history.length)
     : 0;
+
+  const handleOpenConversation = (conversation: ConversationListItem) => {
+    navigation.navigate("ConversationDetail", {
+      conversationId: conversation.id,
+      title: conversation.title,
+    });
+  };
 
   return (
     <KeyboardAwareScrollViewCompat
@@ -218,12 +319,118 @@ export default function ProfileScreen() {
           </View>
         ) : null}
       </Card>
+
+      <Card elevation={1} style={styles.conversationsCard}>
+        <ThemedText type="h4" style={styles.cardTitle}>
+          Recent conversations
+        </ThemedText>
+        <ThemedText
+          type="small"
+          style={[styles.cardDescription, { color: theme.textMuted }]}
+        >
+          Tap any session to revisit what you talked about with Solence.
+        </ThemedText>
+
+        {conversationsLoading ? (
+          <View
+            style={styles.loadingContainer}
+            testID="profile-conversations-loading"
+          >
+            <ActivityIndicator color={theme.orbPrimary} />
+          </View>
+        ) : conversationsError ? (
+          <View
+            style={styles.errorContainer}
+            testID="profile-conversations-error"
+          >
+            <Text style={[styles.errorText, { color: theme.textMuted }]}>
+              {conversationsError}
+            </Text>
+          </View>
+        ) : conversations && conversations.length > 0 ? (
+          <View testID="profile-conversations-list">
+            {conversations.map((conversation, index) => {
+              const isLast = index === conversations.length - 1;
+              const preview = conversation.lastMessage?.content?.trim() ?? "";
+              const previewLabel = preview.length > 0 ? preview : "No messages yet";
+              const stampSource =
+                conversation.lastMessage?.createdAt ?? conversation.createdAt;
+              const rolePrefix =
+                conversation.lastMessage?.role === "assistant"
+                  ? "Solence: "
+                  : conversation.lastMessage?.role === "user"
+                    ? "You: "
+                    : "";
+              return (
+                <Pressable
+                  key={conversation.id}
+                  onPress={() => handleOpenConversation(conversation)}
+                  style={({ pressed }) => [
+                    styles.conversationRow,
+                    !isLast && {
+                      borderBottomColor: theme.backgroundSecondary,
+                      borderBottomWidth: StyleSheet.hairlineWidth,
+                    },
+                    pressed && { opacity: 0.6 },
+                  ]}
+                  testID={`profile-conversation-row-${conversation.id}`}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Open conversation ${conversation.title}`}
+                >
+                  <View style={styles.conversationHeader}>
+                    <Text
+                      style={[styles.conversationTitle, { color: theme.text }]}
+                      numberOfLines={1}
+                      testID={`profile-conversation-title-${conversation.id}`}
+                    >
+                      {conversation.title}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.conversationTime,
+                        { color: theme.textMuted },
+                      ]}
+                      numberOfLines={1}
+                      testID={`profile-conversation-time-${conversation.id}`}
+                    >
+                      {formatRelativeTime(stampSource)}
+                    </Text>
+                  </View>
+                  <Text
+                    style={[
+                      styles.conversationPreview,
+                      { color: theme.textMuted },
+                    ]}
+                    numberOfLines={2}
+                    testID={`profile-conversation-preview-${conversation.id}`}
+                  >
+                    {`${rolePrefix}${previewLabel}`}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        ) : (
+          <View
+            style={styles.emptyContainer}
+            testID="profile-conversations-empty"
+          >
+            <Text style={[styles.errorText, { color: theme.textMuted }]}>
+              You haven&rsquo;t had any sessions yet. Open Solence to start one.
+            </Text>
+          </View>
+        )}
+      </Card>
     </KeyboardAwareScrollViewCompat>
   );
 }
 
 const styles = StyleSheet.create({
   headerCard: {
+    paddingVertical: Spacing.xl,
+  },
+  conversationsCard: {
+    marginTop: Spacing.lg,
     paddingVertical: Spacing.xl,
   },
   cardTitle: {
@@ -238,6 +445,11 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   errorContainer: {
+    paddingVertical: Spacing["2xl"],
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  emptyContainer: {
     paddingVertical: Spacing["2xl"],
     alignItems: "center",
     justifyContent: "center",
@@ -307,5 +519,30 @@ const styles = StyleSheet.create({
     ...Typography.small,
     fontFamily: fontForWeight("400"),
     marginTop: Spacing.xs,
+  },
+  conversationRow: {
+    paddingVertical: Spacing.md,
+  },
+  conversationHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: Spacing.xs,
+  },
+  conversationTitle: {
+    ...Typography.body,
+    fontFamily: fontForWeight("600"),
+    flex: 1,
+    marginRight: Spacing.sm,
+  },
+  conversationTime: {
+    ...Typography.small,
+    fontSize: 12,
+    lineHeight: 16,
+    fontFamily: fontForWeight("400"),
+  },
+  conversationPreview: {
+    ...Typography.small,
+    fontFamily: fontForWeight("400"),
   },
 });

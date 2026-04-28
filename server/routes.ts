@@ -6,7 +6,7 @@ import jwt from "jsonwebtoken";
 import { openai, detectAudioFormat, speechToText } from "./replit_integrations/audio";
 import { db } from "./db";
 import { users, conversations, messages, FREE_TOKEN_LIMIT } from "@shared/schema";
-import { eq, desc, inArray } from "drizzle-orm";
+import { eq, desc, inArray, and } from "drizzle-orm";
 import {
   MIN_TOKENS_FOR_REQUEST,
   getCurrentPeriodStart,
@@ -300,6 +300,131 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ error: "Failed to fetch token history" });
     }
   });
+
+  app.get("/api/conversations", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.user!.userId;
+      const rawLimit = Number(req.query.limit ?? 10);
+      const limit =
+        Number.isFinite(rawLimit) && rawLimit > 0
+          ? Math.min(50, Math.floor(rawLimit))
+          : 10;
+
+      // Over-fetch a bit so sorting by last-activity (below) doesn't miss
+      // older conversations whose last message is more recent than newly
+      // created but unused ones. Realistically users have a handful of
+      // conversations, so capping at 5x the requested limit is plenty.
+      const fetchLimit = Math.max(limit * 5, 50);
+      const candidates = await db
+        .select()
+        .from(conversations)
+        .where(eq(conversations.userId, userId))
+        .orderBy(desc(conversations.createdAt))
+        .limit(fetchLimit);
+
+      if (candidates.length === 0) {
+        return res.json({ conversations: [] });
+      }
+
+      const convIds = candidates.map((c) => c.id);
+      const allMessages = await db
+        .select()
+        .from(messages)
+        .where(inArray(messages.conversationId, convIds))
+        .orderBy(desc(messages.createdAt));
+
+      const lastByConv = new Map<number, (typeof allMessages)[number]>();
+      const countByConv = new Map<number, number>();
+      for (const m of allMessages) {
+        if (!lastByConv.has(m.conversationId)) {
+          lastByConv.set(m.conversationId, m);
+        }
+        countByConv.set(
+          m.conversationId,
+          (countByConv.get(m.conversationId) ?? 0) + 1,
+        );
+      }
+
+      // Sort by most recent activity (latest message), falling back to
+      // conversation createdAt for empty conversations.
+      const sorted = [...candidates].sort((a, b) => {
+        const ta = (lastByConv.get(a.id)?.createdAt ?? a.createdAt).getTime();
+        const tb = (lastByConv.get(b.id)?.createdAt ?? b.createdAt).getTime();
+        return tb - ta;
+      });
+
+      res.json({
+        conversations: sorted.slice(0, limit).map((c) => {
+          const last = lastByConv.get(c.id);
+          return {
+            id: c.id,
+            title: c.title,
+            createdAt: c.createdAt,
+            messageCount: countByConv.get(c.id) ?? 0,
+            lastMessage: last
+              ? {
+                  role: last.role,
+                  content: last.content,
+                  createdAt: last.createdAt,
+                }
+              : null,
+          };
+        }),
+      });
+    } catch (error) {
+      console.error("Conversations list error:", error);
+      res.status(500).json({ error: "Failed to fetch conversations" });
+    }
+  });
+
+  app.get(
+    "/api/conversations/:id/messages",
+    requireAuth,
+    async (req: Request, res: Response) => {
+      try {
+        const userId = req.user!.userId;
+        const id = Number(req.params.id);
+        if (!Number.isFinite(id) || id <= 0) {
+          return res.status(400).json({ error: "Invalid conversation id" });
+        }
+
+        const [conversation] = await db
+          .select()
+          .from(conversations)
+          .where(
+            and(eq(conversations.id, id), eq(conversations.userId, userId)),
+          )
+          .limit(1);
+
+        if (!conversation) {
+          return res.status(404).json({ error: "Conversation not found" });
+        }
+
+        const conversationMessages = await db
+          .select()
+          .from(messages)
+          .where(eq(messages.conversationId, id))
+          .orderBy(messages.createdAt);
+
+        res.json({
+          conversation: {
+            id: conversation.id,
+            title: conversation.title,
+            createdAt: conversation.createdAt,
+          },
+          messages: conversationMessages.map((m) => ({
+            id: m.id,
+            role: m.role,
+            content: m.content,
+            createdAt: m.createdAt,
+          })),
+        });
+      } catch (error) {
+        console.error("Conversation messages error:", error);
+        res.status(500).json({ error: "Failed to fetch conversation" });
+      }
+    },
+  );
 
   app.post("/api/chat/voice", audioBodyParser, requireAuth, async (req: Request, res: Response) => {
     let reservationActive = false;
