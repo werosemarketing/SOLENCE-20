@@ -5,8 +5,16 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { openai, detectAudioFormat, speechToText } from "./replit_integrations/audio";
 import { db } from "./db";
-import { users, conversations, messages, tokenUsage, FREE_TOKEN_LIMIT } from "@shared/schema";
-import { eq, desc, and, gte, inArray, sql } from "drizzle-orm";
+import { users, conversations, messages, FREE_TOKEN_LIMIT } from "@shared/schema";
+import { eq, desc, inArray } from "drizzle-orm";
+import {
+  MIN_TOKENS_FOR_REQUEST,
+  getCurrentPeriodStart,
+  getNextPeriodStart,
+  getTokensUsed,
+  tryReserveTokens,
+  recordTokens,
+} from "./tokens";
 
 const audioBodyParser = express.json({ limit: "50mb" });
 
@@ -44,87 +52,6 @@ function requireAuth(req: Request, res: Response, next: NextFunction): void {
   } catch {
     res.status(401).json({ error: "Invalid or expired token" });
   }
-}
-
-const MIN_TOKENS_FOR_REQUEST = 500;
-
-function getCurrentPeriodStart(): Date {
-  const now = new Date();
-  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-}
-
-function getNextPeriodStart(): Date {
-  const start = getCurrentPeriodStart();
-  return new Date(start.getTime() + 24 * 60 * 60 * 1000);
-}
-
-async function getTokensUsed(userId: string): Promise<number> {
-  const periodStart = getCurrentPeriodStart();
-  const result = await db
-    .select({ total: sql<number>`COALESCE(SUM(${tokenUsage.tokensUsed}), 0)::int` })
-    .from(tokenUsage)
-    .where(
-      and(
-        eq(tokenUsage.userId, userId),
-        gte(tokenUsage.periodStart, periodStart),
-      ),
-    );
-  return result[0]?.total ?? 0;
-}
-
-/**
- * Atomically check the user's daily quota and reserve tokens. We acquire a
- * transaction-scoped Postgres advisory lock keyed on the user id so that
- * concurrent requests for the same user are serialized; this prevents the
- * SELECT SUM + INSERT pair from racing and overshooting the daily cap.
- *
- * Returns the periodStart used for the reservation so the caller can record
- * any later refund or additional usage against the same day, even if the
- * request straddles UTC midnight.
- */
-async function tryReserveTokens(
-  userId: string,
-  tokens: number,
-): Promise<
-  | { ok: true; newTotal: number; periodStart: Date }
-  | { ok: false; tokensUsed: number }
-> {
-  const periodStart = getCurrentPeriodStart();
-  return await db.transaction(async (tx) => {
-    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${userId}))`);
-    const result = await tx
-      .select({ total: sql<number>`COALESCE(SUM(${tokenUsage.tokensUsed}), 0)::int` })
-      .from(tokenUsage)
-      .where(
-        and(
-          eq(tokenUsage.userId, userId),
-          gte(tokenUsage.periodStart, periodStart),
-        ),
-      );
-    const current = result[0]?.total ?? 0;
-    if (current + tokens > FREE_TOKEN_LIMIT) {
-      return { ok: false as const, tokensUsed: current };
-    }
-    await tx.insert(tokenUsage).values({
-      userId,
-      tokensUsed: tokens,
-      periodStart,
-    });
-    return { ok: true as const, newTotal: current + tokens, periodStart };
-  });
-}
-
-async function recordTokens(
-  userId: string,
-  tokens: number,
-  periodStart: Date = getCurrentPeriodStart(),
-): Promise<void> {
-  if (tokens === 0) return;
-  await db.insert(tokenUsage).values({
-    userId,
-    tokensUsed: tokens,
-    periodStart,
-  });
 }
 
 async function seedTestAccount(): Promise<void> {
