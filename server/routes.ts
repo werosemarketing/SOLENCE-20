@@ -6,7 +6,7 @@ import jwt from "jsonwebtoken";
 import { openai, detectAudioFormat, speechToText } from "./replit_integrations/audio";
 import { db } from "./db";
 import { users, conversations, messages, FREE_TOKEN_LIMIT } from "@shared/schema";
-import { eq, desc, inArray, and } from "drizzle-orm";
+import { eq, desc, inArray, and, lt } from "drizzle-orm";
 import {
   MIN_TOKENS_FOR_REQUEST,
   getCurrentPeriodStart,
@@ -61,6 +61,30 @@ function sanitizeSmartTitle(raw: string): string {
   return title;
 }
 
+// How many of the user's conversations we examine per /api/conversations
+// request when looking for smart-title backfill candidates. This is a
+// rolling window: we walk the user's full history one batch at a time
+// using a per-user cursor (see `smartTitleBackfillCursor`).
+const SMART_TITLE_BACKFILL_SCAN_BATCH_SIZE = 25;
+
+// Cap on how many backfill jobs we actually kick off per request — even
+// if the scan window contains more candidates. Keeps OpenAI fan-out
+// bounded so a Profile refresh can't trigger a stampede on first visit.
+const SMART_TITLE_BACKFILLS_PER_REQUEST = 5;
+
+// Module-level dedupe set: which conversation IDs already have a smart-title
+// backfill job in flight. Cleared on completion so a job that fails or
+// returns null can be retried on the next list refresh.
+const smartTitleBackfillInFlight = new Set<number>();
+
+// Per-user cursor (conversation id) for the rolling backfill scan. The
+// scan walks downward (newest -> oldest) by id; the cursor stores the
+// lowest id we examined last time. When the walk reaches the bottom of
+// a user's history we delete the cursor so the next request starts over
+// from the top — this lets conversations that didn't qualify earlier
+// (e.g. no assistant reply yet) get rechecked over time.
+const smartTitleBackfillCursor = new Map<string, number>();
+
 // Ask a lightweight chat model to summarize the first user/assistant
 // exchange into a 3–6 word title for the Profile list. Returns null on any
 // failure so the caller can keep the existing first-message truncation.
@@ -97,6 +121,176 @@ async function generateSmartConversationTitle(
       error instanceof Error ? error.message : error,
     );
     return null;
+  }
+}
+
+// Fire-and-forget backfill: if `currentTitle` still looks auto-generated
+// (legacy "Solence Session" placeholder, empty, or a verbatim match for the
+// first-message truncation we'd produce ourselves) AND the conversation has
+// at least one user + one assistant message, ask the model for a smart
+// summary title and conditionally update the row.
+//
+// Returns true when a job was actually scheduled, false otherwise — callers
+// use this to enforce a per-request cap.
+//
+// Safety properties:
+//   * Manual renames are skipped: if the title doesn't match either the
+//     legacy default or the deterministic first-message truncation, we
+//     leave it alone.
+//   * The UPDATE is gated on `title = currentTitle`, so a manual rename
+//     that lands while the LLM call is in flight isn't clobbered.
+//   * Failures are logged and swallowed — never surface to the list
+//     response or break the UI.
+//   * Dedup via `smartTitleBackfillInFlight` prevents repeat work when the
+//     Profile screen refreshes the list rapidly.
+function scheduleSmartTitleBackfill(
+  conversationId: number,
+  currentTitle: string,
+  firstUserContent: string | null | undefined,
+  firstAssistantContent: string | null | undefined,
+): boolean {
+  if (!firstUserContent || !firstAssistantContent) return false;
+  const userTrimmed = firstUserContent.trim();
+  const assistantTrimmed = firstAssistantContent.trim();
+  if (userTrimmed.length === 0 || assistantTrimmed.length === 0) return false;
+
+  const trimmedTitle = currentTitle.trim();
+  const looksLikeLegacyDefault =
+    trimmedTitle.length === 0 ||
+    trimmedTitle === LEGACY_DEFAULT_CONVERSATION_TITLE;
+  const expectedTruncationTitle = generateConversationTitle(firstUserContent);
+  const looksLikeFirstMessageTruncation =
+    expectedTruncationTitle !== LEGACY_DEFAULT_CONVERSATION_TITLE &&
+    trimmedTitle === expectedTruncationTitle;
+
+  if (!looksLikeLegacyDefault && !looksLikeFirstMessageTruncation) {
+    return false;
+  }
+
+  if (smartTitleBackfillInFlight.has(conversationId)) return false;
+  smartTitleBackfillInFlight.add(conversationId);
+
+  void (async () => {
+    try {
+      const smartTitle = await generateSmartConversationTitle(
+        firstUserContent,
+        firstAssistantContent,
+      );
+      if (!smartTitle) return;
+      if (smartTitle === currentTitle) return;
+      await db
+        .update(conversations)
+        .set({ title: smartTitle })
+        .where(
+          and(
+            eq(conversations.id, conversationId),
+            eq(conversations.title, currentTitle),
+          ),
+        );
+    } catch (err) {
+      console.error(
+        "Smart title backfill failed:",
+        err instanceof Error ? err.message : err,
+      );
+    } finally {
+      smartTitleBackfillInFlight.delete(conversationId);
+    }
+  })();
+
+  return true;
+}
+
+// Walk one batch of the user's conversations and schedule smart-title
+// backfill jobs for any that look auto-generated. Designed to be called
+// fire-and-forget AFTER the list response has already been sent — never
+// blocks the API response, never throws.
+//
+// The walk is driven by `smartTitleBackfillCursor`: each call examines
+// up to `SMART_TITLE_BACKFILL_SCAN_BATCH_SIZE` conversations strictly
+// older than the last cursor, advances the cursor to the lowest id seen,
+// and resets the cursor when it reaches the bottom of the user's
+// history. Across repeated /api/conversations requests this naturally
+// covers the user's entire history — addressing older conversations
+// well beyond the slice the list endpoint itself returns.
+async function runSmartTitleBackfillScan(userId: string): Promise<void> {
+  try {
+    const cursor = smartTitleBackfillCursor.get(userId);
+    let scanRows = await db
+      .select({ id: conversations.id, title: conversations.title })
+      .from(conversations)
+      .where(
+        cursor !== undefined
+          ? and(
+              eq(conversations.userId, userId),
+              lt(conversations.id, cursor),
+            )
+          : eq(conversations.userId, userId),
+      )
+      .orderBy(desc(conversations.id))
+      .limit(SMART_TITLE_BACKFILL_SCAN_BATCH_SIZE);
+
+    if (scanRows.length === 0 && cursor !== undefined) {
+      // We've reached the end of this user's history — wrap around so
+      // future requests pick up conversations that didn't qualify on
+      // the previous pass (e.g. they hadn't received an assistant
+      // reply yet, or were created since).
+      smartTitleBackfillCursor.delete(userId);
+      scanRows = await db
+        .select({ id: conversations.id, title: conversations.title })
+        .from(conversations)
+        .where(eq(conversations.userId, userId))
+        .orderBy(desc(conversations.id))
+        .limit(SMART_TITLE_BACKFILL_SCAN_BATCH_SIZE);
+    }
+
+    if (scanRows.length === 0) return;
+
+    // Advance the cursor immediately so concurrent /api/conversations
+    // calls from the same user don't all scan the same window.
+    smartTitleBackfillCursor.set(
+      userId,
+      scanRows[scanRows.length - 1].id,
+    );
+
+    const scanIds = scanRows.map((c) => c.id);
+    const scanMessages = await db
+      .select({
+        conversationId: messages.conversationId,
+        role: messages.role,
+        content: messages.content,
+      })
+      .from(messages)
+      .where(inArray(messages.conversationId, scanIds))
+      .orderBy(desc(messages.createdAt));
+
+    // Iterating desc and overwriting leaves the EARLIEST message
+    // (smallest createdAt) stored last, i.e. it wins.
+    const firstUserByConv = new Map<number, string>();
+    const firstAssistantByConv = new Map<number, string>();
+    for (const m of scanMessages) {
+      if (m.role === "user") {
+        firstUserByConv.set(m.conversationId, m.content);
+      } else if (m.role === "assistant") {
+        firstAssistantByConv.set(m.conversationId, m.content);
+      }
+    }
+
+    let scheduled = 0;
+    for (const c of scanRows) {
+      if (scheduled >= SMART_TITLE_BACKFILLS_PER_REQUEST) break;
+      const triggered = scheduleSmartTitleBackfill(
+        c.id,
+        c.title,
+        firstUserByConv.get(c.id),
+        firstAssistantByConv.get(c.id),
+      );
+      if (triggered) scheduled += 1;
+    }
+  } catch (err) {
+    console.error(
+      "Smart title backfill scan failed:",
+      err instanceof Error ? err.message : err,
+    );
   }
 }
 
@@ -452,6 +646,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           };
         }),
       });
+
+      // Fire-and-forget smart-title backfill scan. Walks the user's
+      // entire history one batch at a time across repeated requests, so
+      // older conversations (well beyond the slice we just returned)
+      // also get smart titles over time. Internally bounded and
+      // error-swallowing — never blocks or fails the list response.
+      void runSmartTitleBackfillScan(userId);
     } catch (error) {
       console.error("Conversations list error:", error);
       res.status(500).json({ error: "Failed to fetch conversations" });
