@@ -12,6 +12,7 @@ import {
   getCurrentPeriodStart,
   getNextPeriodStart,
   getTokensUsed,
+  getTokensUsedHistory,
   tryReserveTokens,
   recordTokens,
 } from "./tokens";
@@ -276,6 +277,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Token check error:", error);
       res.status(500).json({ error: "Failed to check token usage" });
+    }
+  });
+
+  app.get("/api/tokens/history", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.user!.userId;
+      const rawDays = Number(req.query.days ?? 7);
+      const days =
+        Number.isFinite(rawDays) && rawDays > 0
+          ? Math.min(30, Math.floor(rawDays))
+          : 7;
+      const history = await getTokensUsedHistory(userId, days);
+      res.json({
+        days,
+        tokenLimit: FREE_TOKEN_LIMIT,
+        period: "day",
+        history,
+      });
+    } catch (error) {
+      console.error("Token history error:", error);
+      res.status(500).json({ error: "Failed to fetch token history" });
     }
   });
 

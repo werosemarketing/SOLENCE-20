@@ -70,6 +70,49 @@ export async function tryReserveTokens(
   });
 }
 
+/**
+ * Returns per-day token totals for the most recent `days` UTC-day periods,
+ * including days with no usage (filled with 0). Days are returned in ascending
+ * order (oldest first). The newest entry corresponds to today's UTC period.
+ */
+export async function getTokensUsedHistory(
+  userId: string,
+  days: number,
+): Promise<{ periodStart: string; tokensUsed: number }[]> {
+  const today = getCurrentPeriodStart();
+  const oldest = new Date(today.getTime() - (days - 1) * 24 * 60 * 60 * 1000);
+
+  const rows = await db
+    .select({
+      periodStart: tokenUsage.periodStart,
+      total: sql<number>`COALESCE(SUM(${tokenUsage.tokensUsed}), 0)::int`,
+    })
+    .from(tokenUsage)
+    .where(
+      and(
+        eq(tokenUsage.userId, userId),
+        gte(tokenUsage.periodStart, oldest),
+      ),
+    )
+    .groupBy(tokenUsage.periodStart);
+
+  const totalsByDay = new Map<number, number>();
+  for (const row of rows) {
+    const key = new Date(row.periodStart).getTime();
+    totalsByDay.set(key, (totalsByDay.get(key) ?? 0) + row.total);
+  }
+
+  const history: { periodStart: string; tokensUsed: number }[] = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const day = new Date(today.getTime() - i * 24 * 60 * 60 * 1000);
+    history.push({
+      periodStart: day.toISOString(),
+      tokensUsed: Math.max(0, totalsByDay.get(day.getTime()) ?? 0),
+    });
+  }
+  return history;
+}
+
 export async function recordTokens(
   userId: string,
   tokens: number,
