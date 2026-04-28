@@ -21,6 +21,7 @@ const audioBodyParser = express.json({ limit: "50mb" });
 
 const LEGACY_DEFAULT_CONVERSATION_TITLE = "Solence Session";
 const CONVERSATION_TITLE_MAX_LEN = 60;
+const SMART_TITLE_MODEL = "gpt-4o-mini";
 
 // Derive a short, human-readable title for a conversation from a piece of
 // text (typically the first user message). Collapses whitespace, strips
@@ -41,6 +42,62 @@ function generateConversationTitle(text: string | null | undefined): string {
   const cutoff =
     lastSpace > CONVERSATION_TITLE_MAX_LEN * 0.6 ? lastSpace : sliced.length;
   return `${sliced.slice(0, cutoff).trimEnd()}…`;
+}
+
+// Sanitize a raw model-generated title: collapse whitespace, strip wrapping
+// quotes/punctuation, drop trailing sentence punctuation, and clamp the
+// length using the same word-boundary truncation as the fallback titler.
+function sanitizeSmartTitle(raw: string): string {
+  let title = raw
+    .replace(/\s+/g, " ")
+    .replace(/^["'`\s]+|["'`\s]+$/g, "")
+    .replace(/[.!?,;:]+$/g, "")
+    .trim();
+  // Some models prefix the response with "Title:" or similar — strip it.
+  title = title.replace(/^(title|summary)\s*[:\-–]\s*/i, "").trim();
+  if (title.length > CONVERSATION_TITLE_MAX_LEN) {
+    title = generateConversationTitle(title);
+  }
+  return title;
+}
+
+// Ask a lightweight chat model to summarize the first user/assistant
+// exchange into a 3–6 word title for the Profile list. Returns null on any
+// failure so the caller can keep the existing first-message truncation.
+async function generateSmartConversationTitle(
+  userMessage: string,
+  assistantMessage: string,
+): Promise<string | null> {
+  try {
+    const response = await openai.chat.completions.create({
+      model: SMART_TITLE_MODEL,
+      temperature: 0.4,
+      max_tokens: 24,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You generate short, descriptive titles for journaling and emotional-reflection conversations. Reply with ONLY the title — 3 to 6 words, in title case, no quotes, no trailing punctuation, no prefixes like 'Title:'. Capture the topic or feeling being explored (e.g. 'Anxiety About Work Week', 'Missing An Old Friend', 'Sleep Trouble This Month'). Avoid generic phrases like 'Personal Reflection' or 'Conversation Summary'.",
+        },
+        {
+          role: "user",
+          content: `First user message:\n${userMessage}\n\nAssistant reply:\n${assistantMessage}\n\nWrite a 3–6 word title that captures what this conversation is about.`,
+        },
+      ],
+    });
+    const raw = response.choices[0]?.message?.content?.trim() ?? "";
+    if (!raw) return null;
+    const cleaned = sanitizeSmartTitle(raw);
+    if (cleaned.length === 0) return null;
+    if (cleaned === LEGACY_DEFAULT_CONVERSATION_TITLE) return null;
+    return cleaned;
+  } catch (error) {
+    console.error(
+      "Smart title generation failed:",
+      error instanceof Error ? error.message : error,
+    );
+    return null;
+  }
 }
 
 if (!process.env.SESSION_SECRET) {
@@ -690,6 +747,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .where(eq(messages.conversationId, conversationId))
         .orderBy(messages.createdAt);
 
+      // If the just-inserted user message is the only message in the
+      // thread, this is the first exchange — a good moment to ask the
+      // model for a smart summary title once the assistant has replied.
+      const isFirstExchange = currentMessages.length === 1;
+
       let pastContext = "";
       // Exclude the active conversation from the "past context" pool so the
       // model doesn't see the resumed thread twice (once as live history,
@@ -778,6 +840,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
         nextResetAt: getNextPeriodStart().toISOString(),
         period: "day",
       });
+
+      // Fire-and-forget: after the very first exchange in a conversation,
+      // ask the model for a smart summary title and overwrite the initial
+      // truncated title. We deliberately do NOT await this so it can never
+      // delay the chat response. Failures are swallowed and logged — the
+      // existing first-message truncation remains as a safe fallback.
+      if (isFirstExchange && assistantTranscript.trim().length > 0) {
+        const conversationIdForTitle = conversationId;
+        // Snapshot the title we set during this request. We only overwrite
+        // if the stored title still matches this snapshot — that way a
+        // manual rename racing with the async update doesn't get clobbered.
+        const expectedTitleAtRequestTime =
+          generateConversationTitle(userTranscript);
+        void (async () => {
+          try {
+            const smartTitle = await generateSmartConversationTitle(
+              userTranscript,
+              assistantTranscript,
+            );
+            if (!smartTitle) return;
+            await db
+              .update(conversations)
+              .set({ title: smartTitle })
+              .where(
+                and(
+                  eq(conversations.id, conversationIdForTitle),
+                  eq(conversations.title, expectedTitleAtRequestTime),
+                ),
+              );
+          } catch (err) {
+            console.error(
+              "Smart title update failed:",
+              err instanceof Error ? err.message : err,
+            );
+          }
+        })();
+      }
     } catch (error) {
       console.error("Voice API error:", error);
       // Refund the up-front reservation since the request failed before
