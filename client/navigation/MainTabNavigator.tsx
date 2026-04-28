@@ -1,10 +1,13 @@
 import React from "react";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
+import type { NavigatorScreenParams } from "@react-navigation/native";
 import { Feather } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
 import { Platform, StyleSheet } from "react-native";
 import SolenceScreen from "@/screens/SolenceScreen";
-import ProfileStackNavigator from "@/navigation/ProfileStackNavigator";
+import ProfileStackNavigator, {
+  type ProfileStackParamList,
+} from "@/navigation/ProfileStackNavigator";
 import { useTheme } from "@/hooks/useTheme";
 
 export type MainTabParamList = {
@@ -14,7 +17,7 @@ export type MainTabParamList = {
         activeConversationTitle?: string;
       }
     | undefined;
-  ProfileTab: undefined;
+  ProfileTab: NavigatorScreenParams<ProfileStackParamList> | undefined;
 };
 
 export type MainTabNavigatorProps = {

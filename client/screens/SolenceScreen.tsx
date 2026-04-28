@@ -1098,6 +1098,26 @@ export default function SolenceScreen({
     Haptics.selectionAsync().catch(() => {});
   };
 
+  // Tapping the body of the resumed-conversation pill jumps into the
+  // Profile tab's conversation detail screen so the user can re-read the
+  // earlier exchange. We deliberately do NOT clear `activeConversationId`
+  // here — when the user navigates back, the pill is still active so the
+  // next message keeps appending to the same thread.
+  const openResumedConversation = () => {
+    if (activeConversationId == null) return;
+    Haptics.selectionAsync().catch(() => {});
+    navigation.navigate("Main", {
+      screen: "ProfileTab",
+      params: {
+        screen: "ConversationDetail",
+        params: {
+          conversationId: activeConversationId,
+          title: activeConversationTitle ?? undefined,
+        },
+      },
+    });
+  };
+
   const openSettings = async () => {
     if (Platform.OS !== "web") {
       try {
@@ -1272,24 +1292,39 @@ export default function SolenceScreen({
               ]}
               testID="resumed-conversation-banner"
             >
-              <Feather
-                name="message-circle"
-                size={13}
-                color={theme.textMuted}
-              />
-              <Text
-                style={[
-                  styles.resumedBannerText,
-                  { color: theme.textMuted },
+              <Pressable
+                onPress={openResumedConversation}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  activeConversationTitle && activeConversationTitle.trim()
+                    ? `Open ${activeConversationTitle.trim()} to read past messages`
+                    : "Open your last conversation to read past messages"
+                }
+                testID="open-resumed-conversation-button"
+                style={({ pressed }) => [
+                  styles.resumedBannerBody,
+                  { opacity: pressed ? 0.6 : 1 },
                 ]}
-                numberOfLines={1}
-                testID="text-resumed-conversation"
               >
-                Continuing{" "}
-                {activeConversationTitle && activeConversationTitle.trim()
-                  ? activeConversationTitle.trim()
-                  : "your last conversation"}
-              </Text>
+                <Feather
+                  name="message-circle"
+                  size={13}
+                  color={theme.textMuted}
+                />
+                <Text
+                  style={[
+                    styles.resumedBannerText,
+                    { color: theme.textMuted },
+                  ]}
+                  numberOfLines={1}
+                  testID="text-resumed-conversation"
+                >
+                  Continuing{" "}
+                  {activeConversationTitle && activeConversationTitle.trim()
+                    ? activeConversationTitle.trim()
+                    : "your last conversation"}
+                </Text>
+              </Pressable>
               <Pressable
                 onPress={dismissResumedConversation}
                 hitSlop={8}
@@ -1628,6 +1663,12 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.full,
     borderWidth: 1,
     maxWidth: "90%",
+  },
+  resumedBannerBody: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.xs,
+    flexShrink: 1,
   },
   resumedBannerText: {
     fontSize: 12,
