@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { BackHandler, Platform } from "react-native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
+import type { NavigatorScreenParams } from "@react-navigation/native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import DisclaimerScreen from "@/screens/DisclaimerScreen";
 import OnboardingScreen from "@/screens/OnboardingScreen";
 import UserAgreementScreen from "@/screens/UserAgreementScreen";
 import AuthScreen from "@/screens/AuthScreen";
 import UpgradeScreen from "@/screens/UpgradeScreen";
-import MainTabNavigator from "@/navigation/MainTabNavigator";
+import MainTabNavigator, { type MainTabParamList } from "@/navigation/MainTabNavigator";
 import { useScreenOptions } from "@/hooks/useScreenOptions";
 import { getApiUrl } from "@/lib/query-client";
 
@@ -18,7 +19,7 @@ const STORAGE_KEY_AUTH_TOKEN = "solence_auth_token";
 type AppStage = "loading" | "auth" | "disclaimer" | "agreement" | "onboarding" | "main";
 
 export type RootStackParamList = {
-  Main: undefined;
+  Main: NavigatorScreenParams<MainTabParamList> | undefined;
   Upgrade: { tokenLimit?: number; resetLabel?: string } | undefined;
 };
 

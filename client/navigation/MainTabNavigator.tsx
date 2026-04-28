@@ -8,7 +8,7 @@ import ProfileStackNavigator from "@/navigation/ProfileStackNavigator";
 import { useTheme } from "@/hooks/useTheme";
 
 export type MainTabParamList = {
-  HomeTab: undefined;
+  HomeTab: { activeConversationId?: number } | undefined;
   ProfileTab: undefined;
 };
 
@@ -60,7 +60,14 @@ export default function MainTabNavigator({
           ),
         }}
       >
-        {() => <SolenceScreen authToken={authToken} onSignOut={onSignOut} />}
+        {(props) => (
+          <SolenceScreen
+            authToken={authToken}
+            onSignOut={onSignOut}
+            route={props.route}
+            navigation={props.navigation}
+          />
+        )}
       </Tab.Screen>
       <Tab.Screen
         name="ProfileTab"

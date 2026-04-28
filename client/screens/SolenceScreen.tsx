@@ -39,12 +39,17 @@ import * as FileSystem from "expo-file-system/legacy";
 
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
+import {
+  useBottomTabBarHeight,
+  type BottomTabNavigationProp,
+  type BottomTabScreenProps,
+} from "@react-navigation/bottom-tabs";
 
 import { useTheme } from "@/hooks/useTheme";
 import { Spacing, BorderRadius, FontFamily } from "@/constants/theme";
 import { getApiUrl } from "@/lib/query-client";
 import type { RootStackParamList } from "@/navigation/RootStackNavigator";
+import type { MainTabParamList } from "@/navigation/MainTabNavigator";
 
 let currentBlobUrl: string | null = null;
 
@@ -429,13 +434,24 @@ function EtherealOrb({ voiceState, isDark }: { voiceState: VoiceState; isDark: b
 type SolenceScreenProps = {
   authToken: string | null;
   onSignOut: () => void;
+  route?: BottomTabScreenProps<MainTabParamList, "HomeTab">["route"];
+  navigation?: BottomTabNavigationProp<MainTabParamList, "HomeTab">;
 };
 
-export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenProps) {
+export default function SolenceScreen({
+  authToken,
+  onSignOut,
+  route,
+  navigation: tabNavigation,
+}: SolenceScreenProps) {
   const insets = useSafeAreaInsets();
   const tabBarHeight = useBottomTabBarHeight();
   const { theme, isDark } = useTheme();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const routeActiveConversationId = route?.params?.activeConversationId ?? null;
+  const [activeConversationId, setActiveConversationId] = useState<number | null>(
+    routeActiveConversationId,
+  );
 
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [currentMessage, setCurrentMessage] = useState<string>("");
@@ -482,6 +498,22 @@ export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenPro
     });
     return () => sub.remove();
   }, []);
+
+  // When the user resumes a specific conversation from the Profile tab, the
+  // tab is navigated to with an activeConversationId param. Adopt it as the
+  // active target, clear the starter prompts (this is no longer a fresh
+  // session), and immediately strip the param from the route so it doesn't
+  // re-trigger if the user later starts a brand new chat from the same tab.
+  useEffect(() => {
+    if (routeActiveConversationId == null) return;
+    setActiveConversationId(routeActiveConversationId);
+    setShowStarters(false);
+    setCurrentMessage("");
+    setLastVoiceError(null);
+    if (tabNavigation) {
+      tabNavigation.setParams({ activeConversationId: undefined });
+    }
+  }, [routeActiveConversationId, tabNavigation]);
 
   // Auto-refresh token balance shortly after the daily reset moment so the
   // UI reflects the new quota without needing a manual reload.
@@ -797,7 +829,12 @@ export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenPro
       const response = await fetch(`${apiUrl}/api/chat/voice`, {
         method: "POST",
         headers,
-        body: JSON.stringify({ audio: audioBase64 }),
+        body: JSON.stringify({
+          audio: audioBase64,
+          ...(activeConversationId != null
+            ? { conversationId: activeConversationId }
+            : {}),
+        }),
       });
 
       if (!response.ok) {
@@ -876,7 +913,12 @@ export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenPro
       const response = await fetch(`${apiUrl}/api/chat/voice`, {
         method: "POST",
         headers: textHeaders,
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({
+          text,
+          ...(activeConversationId != null
+            ? { conversationId: activeConversationId }
+            : {}),
+        }),
       });
 
       if (!response.ok) {
@@ -931,7 +973,12 @@ export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenPro
       const response = await fetch(`${apiUrl}/api/chat/voice`, {
         method: "POST",
         headers,
-        body: JSON.stringify({ audio: saved.payload }),
+        body: JSON.stringify({
+          audio: saved.payload,
+          ...(activeConversationId != null
+            ? { conversationId: activeConversationId }
+            : {}),
+        }),
       });
       if (!response.ok) {
         if (response.status === 429) {
@@ -1025,6 +1072,10 @@ export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenPro
     }
     
     setVoiceState("idle");
+    // Once the user explicitly ends a resumed session, drop the override so
+    // the next interaction resumes the default (most-recent) target instead
+    // of silently continuing to append to the old thread.
+    setActiveConversationId(null);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   };
 

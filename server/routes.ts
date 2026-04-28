@@ -466,10 +466,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
     let reservedPeriodStart: Date | null = null;
     const userId = req.user!.userId;
     try {
-      const { audio, text } = req.body;
+      const { audio, text, conversationId: requestedConversationId } = req.body;
 
       if (!audio && !text) {
         return res.status(400).json({ error: "Either [audio] or [text] is required" });
+      }
+
+      // Optional caller-supplied target conversation. We validate ownership
+      // before trusting it — never let a request append to another user's
+      // conversation just because it knows the id.
+      let targetConversationId: number | null = null;
+      if (requestedConversationId !== undefined && requestedConversationId !== null) {
+        const parsed = Number(requestedConversationId);
+        if (!Number.isFinite(parsed) || parsed <= 0) {
+          return res.status(400).json({ error: "Invalid conversationId" });
+        }
+        const [owned] = await db
+          .select()
+          .from(conversations)
+          .where(
+            and(eq(conversations.id, parsed), eq(conversations.userId, userId)),
+          )
+          .limit(1);
+        if (!owned) {
+          return res.status(404).json({ error: "Conversation not found" });
+        }
+        targetConversationId = owned.id;
       }
 
       const reservation = await tryReserveTokens(userId, MIN_TOKENS_FOR_REQUEST);
@@ -526,7 +548,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .orderBy(desc(conversations.createdAt))
         .limit(6);
 
-      if (recentConversations.length > 0) {
+      if (targetConversationId !== null) {
+        // User explicitly resumed a specific conversation from history.
+        conversationId = targetConversationId;
+      } else if (recentConversations.length > 0) {
         conversationId = recentConversations[0].id;
       } else {
         const [newConv] = await db
@@ -545,8 +570,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .orderBy(messages.createdAt);
 
       let pastContext = "";
-      if (recentConversations.length > 1) {
-        const olderConvIds = recentConversations.slice(1).map((c) => c.id);
+      // Exclude the active conversation from the "past context" pool so the
+      // model doesn't see the resumed thread twice (once as live history,
+      // once as past context).
+      const olderConvIds = recentConversations
+        .map((c) => c.id)
+        .filter((id) => id !== conversationId);
+      if (olderConvIds.length > 0) {
         const olderMessages = await db
           .select()
           .from(messages)

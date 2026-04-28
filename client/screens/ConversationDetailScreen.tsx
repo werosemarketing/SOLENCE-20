@@ -7,6 +7,7 @@ import {
   Text,
   View,
 } from "react-native";
+import * as Haptics from "expo-haptics";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useHeaderHeight } from "@react-navigation/elements";
@@ -21,10 +22,13 @@ import {
   Spacing,
   BorderRadius,
   Typography,
+  FontFamily,
   fontForWeight,
 } from "@/constants/theme";
 import { getApiUrl } from "@/lib/query-client";
 import type { ProfileStackParamList } from "@/navigation/ProfileStackNavigator";
+import type { MainTabParamList } from "@/navigation/MainTabNavigator";
+import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
 
 const STORAGE_KEY_AUTH_TOKEN = "solence_auth_token";
 
@@ -61,6 +65,19 @@ export default function ConversationDetailScreen({ route, navigation }: Props) {
   const insets = useSafeAreaInsets();
   const headerHeight = useHeaderHeight();
   const { theme } = useTheme();
+
+  const handleContinue = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    // ConversationDetail sits in the Profile stack which is itself a screen
+    // inside the bottom tab navigator. Navigating from the tab navigator to
+    // HomeTab both switches tabs and forwards the param to SolenceScreen.
+    const tabNav = navigation.getParent<
+      BottomTabNavigationProp<MainTabParamList>
+    >();
+    if (tabNav) {
+      tabNav.navigate("HomeTab", { activeConversationId: conversationId });
+    }
+  };
 
   const [data, setData] = useState<ConversationResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -253,6 +270,27 @@ export default function ConversationDetailScreen({ route, navigation }: Props) {
         </Card>
       )}
 
+      {!loading && !error ? (
+        <Pressable
+          onPress={handleContinue}
+          style={({ pressed }) => [
+            styles.continueButton,
+            {
+              backgroundColor: theme.orbPrimary,
+              opacity: pressed ? 0.85 : 1,
+            },
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel="Continue this conversation"
+          testID="button-continue-conversation"
+        >
+          <Feather name="message-circle" size={18} color={theme.buttonText} />
+          <Text style={[styles.continueButtonText, { color: theme.buttonText }]}>
+            Continue this conversation
+          </Text>
+        </Pressable>
+      ) : null}
+
       <ConfirmDialog
         visible={confirmVisible}
         title="Delete this conversation?"
@@ -313,5 +351,21 @@ const styles = StyleSheet.create({
   headerActionButton: {
     paddingHorizontal: Spacing.xs,
     paddingVertical: Spacing.xs,
+  },
+  continueButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: Spacing.sm,
+    marginTop: Spacing.xl,
+    paddingVertical: Spacing.lg,
+    paddingHorizontal: Spacing.xl,
+    borderRadius: BorderRadius.full,
+  },
+  continueButtonText: {
+    ...Typography.body,
+    fontFamily: FontFamily.bold,
+    fontWeight: "600",
+    letterSpacing: 0.3,
   },
 });
