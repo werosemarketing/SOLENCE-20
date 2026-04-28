@@ -27,6 +27,7 @@ import {
   fontForWeight,
 } from "@/constants/theme";
 import { getApiUrl } from "@/lib/query-client";
+import { displayConversationTitle } from "@/lib/conversation-title";
 import type { ProfileStackParamList } from "@/navigation/ProfileStackNavigator";
 import type { MainTabParamList } from "@/navigation/MainTabNavigator";
 import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
@@ -92,20 +93,25 @@ export default function ConversationDetailScreen({ route, navigation }: Props) {
   const [confirmVisible, setConfirmVisible] = useState(false);
   const [deleteSubmitting, setDeleteSubmitting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
-  const [currentTitle, setCurrentTitle] = useState<string>(
-    title ?? "Conversation",
-  );
   const [renameVisible, setRenameVisible] = useState(false);
   const [renameSubmitting, setRenameSubmitting] = useState(false);
   const [renameError, setRenameError] = useState<string | null>(null);
 
-  useEffect(() => {
-    setCurrentTitle(title ?? "Conversation");
-  }, [title]);
+  // Prefer the freshly-loaded conversation title (with the legacy-default
+  // fallback applied) so the header updates if the title was backfilled
+  // server-side after navigation. After a rename, we update `data` below,
+  // which makes this recompute automatically.
+  const headerTitle =
+    data?.conversation
+      ? displayConversationTitle(
+          data.conversation.title,
+          data.conversation.createdAt,
+        )
+      : title ?? "Conversation";
 
   useLayoutEffect(() => {
     navigation.setOptions({
-      title: currentTitle,
+      title: headerTitle,
       headerRight: () => (
         <View style={styles.headerActions}>
           <Pressable
@@ -143,7 +149,7 @@ export default function ConversationDetailScreen({ route, navigation }: Props) {
         </View>
       ),
     });
-  }, [navigation, currentTitle, theme.text]);
+  }, [navigation, headerTitle, theme.text]);
 
   const handleConfirmRename = async (nextTitle: string) => {
     if (renameSubmitting) return;
@@ -152,7 +158,10 @@ export default function ConversationDetailScreen({ route, navigation }: Props) {
       setRenameError("Please enter a title.");
       return;
     }
-    if (trimmed === currentTitle) {
+    // Compare against the currently displayed title (which already accounts
+    // for the legacy-default fallback) so submitting an unchanged value is
+    // treated as a no-op.
+    if (trimmed === headerTitle) {
       setRenameVisible(false);
       setRenameError(null);
       return;
@@ -190,7 +199,9 @@ export default function ConversationDetailScreen({ route, navigation }: Props) {
         conversation: { id: number; title: string };
       };
       const updatedTitle = payload.conversation?.title ?? trimmed;
-      setCurrentTitle(updatedTitle);
+      // Update the loaded conversation so headerTitle recomputes to the new
+      // value, then forward the title back through route params so the back
+      // navigation hand-off in ProfileScreen stays consistent.
       setData((prev) =>
         prev
           ? {
@@ -403,7 +414,7 @@ export default function ConversationDetailScreen({ route, navigation }: Props) {
         message={
           deleteError
             ? deleteError
-            : `"${currentTitle}" and all of its messages will be permanently removed. This can't be undone.`
+            : `"${headerTitle}" and all of its messages will be permanently removed. This can't be undone.`
         }
         confirmLabel="Delete"
         cancelLabel="Cancel"
@@ -418,7 +429,7 @@ export default function ConversationDetailScreen({ route, navigation }: Props) {
         visible={renameVisible}
         title="Rename conversation"
         description="Give this session a name that will help you find it later."
-        initialValue={currentTitle}
+        initialValue={headerTitle}
         placeholder="Conversation title"
         confirmLabel="Save"
         loading={renameSubmitting}

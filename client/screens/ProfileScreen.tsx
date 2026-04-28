@@ -27,6 +27,7 @@ import {
   fontForWeight,
 } from "@/constants/theme";
 import { getApiUrl } from "@/lib/query-client";
+import { displayConversationTitle } from "@/lib/conversation-title";
 import type { ProfileStackParamList } from "@/navigation/ProfileStackNavigator";
 
 const STORAGE_KEY_AUTH_TOKEN = "solence_auth_token";
@@ -331,7 +332,7 @@ export default function ProfileScreen() {
   const handleOpenConversation = (conversation: ConversationListItem) => {
     navigation.navigate("ConversationDetail", {
       conversationId: conversation.id,
-      title: conversation.title,
+      title: displayConversationTitle(conversation.title, conversation.createdAt),
     });
   };
 
@@ -490,6 +491,10 @@ export default function ProfileScreen() {
                   : conversation.lastMessage?.role === "user"
                     ? "You: "
                     : "";
+              const titleLabel = displayConversationTitle(
+                conversation.title,
+                conversation.createdAt,
+              );
               return (
                 <View
                   key={conversation.id}
@@ -509,7 +514,7 @@ export default function ProfileScreen() {
                     ]}
                     testID={`profile-conversation-row-${conversation.id}`}
                     accessibilityRole="button"
-                    accessibilityLabel={`Open conversation ${conversation.title}`}
+                    accessibilityLabel={`Open conversation ${titleLabel}`}
                   >
                     <View style={styles.conversationHeader}>
                       <Text
@@ -520,7 +525,7 @@ export default function ProfileScreen() {
                         numberOfLines={1}
                         testID={`profile-conversation-title-${conversation.id}`}
                       >
-                        {conversation.title}
+                        {titleLabel}
                       </Text>
                       <Text
                         style={[
@@ -572,7 +577,7 @@ export default function ProfileScreen() {
                     ]}
                     testID={`profile-conversation-delete-${conversation.id}`}
                     accessibilityRole="button"
-                    accessibilityLabel={`Delete conversation ${conversation.title}`}
+                    accessibilityLabel={`Delete conversation ${titleLabel}`}
                   >
                     <Feather
                       name="trash-2"
@@ -617,7 +622,7 @@ export default function ProfileScreen() {
           deleteError
             ? deleteError
             : pendingDelete
-              ? `"${pendingDelete.title}" and all of its messages will be permanently removed. This can't be undone.`
+              ? `"${displayConversationTitle(pendingDelete.title, pendingDelete.createdAt)}" and all of its messages will be permanently removed. This can't be undone.`
               : undefined
         }
         confirmLabel="Delete"

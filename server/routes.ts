@@ -19,6 +19,30 @@ import {
 
 const audioBodyParser = express.json({ limit: "50mb" });
 
+const LEGACY_DEFAULT_CONVERSATION_TITLE = "Solence Session";
+const CONVERSATION_TITLE_MAX_LEN = 60;
+
+// Derive a short, human-readable title for a conversation from a piece of
+// text (typically the first user message). Collapses whitespace, strips
+// surrounding quotes, and truncates on a word boundary when possible. Falls
+// back to the legacy default when the input has nothing useful in it.
+function generateConversationTitle(text: string | null | undefined): string {
+  if (!text) return LEGACY_DEFAULT_CONVERSATION_TITLE;
+  let cleaned = text
+    .replace(/\s+/g, " ")
+    .replace(/^["'`\s]+|["'`\s]+$/g, "")
+    .trim();
+  if (cleaned.length === 0) return LEGACY_DEFAULT_CONVERSATION_TITLE;
+  if (cleaned.length <= CONVERSATION_TITLE_MAX_LEN) return cleaned;
+  const sliced = cleaned.slice(0, CONVERSATION_TITLE_MAX_LEN);
+  const lastSpace = sliced.lastIndexOf(" ");
+  // If there's a reasonable word break in the last third of the slice,
+  // prefer to cut there so we don't slice mid-word.
+  const cutoff =
+    lastSpace > CONVERSATION_TITLE_MAX_LEN * 0.6 ? lastSpace : sliced.length;
+  return `${sliced.slice(0, cutoff).trimEnd()}…`;
+}
+
 if (!process.env.SESSION_SECRET) {
   throw new Error("SESSION_SECRET environment variable is required");
 }
@@ -535,6 +559,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // before trusting it — never let a request append to another user's
       // conversation just because it knows the id.
       let targetConversationId: number | null = null;
+      let targetConversationTitle: string | null = null;
       if (requestedConversationId !== undefined && requestedConversationId !== null) {
         const parsed = Number(requestedConversationId);
         if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -551,6 +576,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return res.status(404).json({ error: "Conversation not found" });
         }
         targetConversationId = owned.id;
+        targetConversationTitle = owned.title;
       }
 
       const reservation = await tryReserveTokens(userId, MIN_TOKENS_FOR_REQUEST);
@@ -613,11 +639,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } else if (recentConversations.length > 0) {
         conversationId = recentConversations[0].id;
       } else {
+        // Brand-new conversation — title it from the user's first message
+        // so it's distinguishable in the Profile list.
         const [newConv] = await db
           .insert(conversations)
-          .values({ userId, title: "Solence Session" })
+          .values({
+            userId,
+            title: generateConversationTitle(userTranscript),
+          })
           .returning();
         conversationId = newConv.id;
+      }
+
+      // Backfill legacy/default titles in-place. Once a conversation has any
+      // user content we want it to carry a meaningful name in the Profile
+      // list, even if it was created before this feature existed.
+      const activeConversationTitle =
+        targetConversationId !== null
+          ? targetConversationTitle
+          : recentConversations[0]?.title ?? null;
+      if (activeConversationTitle === LEGACY_DEFAULT_CONVERSATION_TITLE) {
+        // Prefer the earliest existing user message; fall back to the
+        // current message if this is the first one in the thread.
+        const [firstUserMessage] = await db
+          .select()
+          .from(messages)
+          .where(
+            and(
+              eq(messages.conversationId, conversationId),
+              eq(messages.role, "user"),
+            ),
+          )
+          .orderBy(messages.createdAt)
+          .limit(1);
+        const seedText = firstUserMessage?.content ?? userTranscript;
+        const newTitle = generateConversationTitle(seedText);
+        if (newTitle !== LEGACY_DEFAULT_CONVERSATION_TITLE) {
+          await db
+            .update(conversations)
+            .set({ title: newTitle })
+            .where(eq(conversations.id, conversationId));
+        }
       }
 
       await db.insert(messages).values({ conversationId, role: "user", content: userTranscript });
