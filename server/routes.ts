@@ -6,7 +6,7 @@ import jwt from "jsonwebtoken";
 import { openai, detectAudioFormat, speechToText } from "./replit_integrations/audio";
 import { db } from "./db";
 import { users, conversations, messages, tokenUsage, FREE_TOKEN_LIMIT } from "@shared/schema";
-import { eq, desc, and, gte } from "drizzle-orm";
+import { eq, desc, and, gte, inArray, sql } from "drizzle-orm";
 
 const audioBodyParser = express.json({ limit: "50mb" });
 
@@ -50,25 +50,76 @@ const MIN_TOKENS_FOR_REQUEST = 500;
 
 function getCurrentPeriodStart(): Date {
   const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth(), 1);
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+}
+
+function getNextPeriodStart(): Date {
+  const start = getCurrentPeriodStart();
+  return new Date(start.getTime() + 24 * 60 * 60 * 1000);
 }
 
 async function getTokensUsed(userId: string): Promise<number> {
   const periodStart = getCurrentPeriodStart();
-  const records = await db
-    .select()
+  const result = await db
+    .select({ total: sql<number>`COALESCE(SUM(${tokenUsage.tokensUsed}), 0)::int` })
     .from(tokenUsage)
     .where(
       and(
         eq(tokenUsage.userId, userId),
-        gte(tokenUsage.periodStart, periodStart)
-      )
+        gte(tokenUsage.periodStart, periodStart),
+      ),
     );
-  return records.reduce((sum, r) => sum + r.tokensUsed, 0);
+  return result[0]?.total ?? 0;
 }
 
-async function reserveAndRecordTokens(userId: string, tokens: number): Promise<void> {
+/**
+ * Atomically check the user's daily quota and reserve tokens. We acquire a
+ * transaction-scoped Postgres advisory lock keyed on the user id so that
+ * concurrent requests for the same user are serialized; this prevents the
+ * SELECT SUM + INSERT pair from racing and overshooting the daily cap.
+ *
+ * Returns the periodStart used for the reservation so the caller can record
+ * any later refund or additional usage against the same day, even if the
+ * request straddles UTC midnight.
+ */
+async function tryReserveTokens(
+  userId: string,
+  tokens: number,
+): Promise<
+  | { ok: true; newTotal: number; periodStart: Date }
+  | { ok: false; tokensUsed: number }
+> {
   const periodStart = getCurrentPeriodStart();
+  return await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${userId}))`);
+    const result = await tx
+      .select({ total: sql<number>`COALESCE(SUM(${tokenUsage.tokensUsed}), 0)::int` })
+      .from(tokenUsage)
+      .where(
+        and(
+          eq(tokenUsage.userId, userId),
+          gte(tokenUsage.periodStart, periodStart),
+        ),
+      );
+    const current = result[0]?.total ?? 0;
+    if (current + tokens > FREE_TOKEN_LIMIT) {
+      return { ok: false as const, tokensUsed: current };
+    }
+    await tx.insert(tokenUsage).values({
+      userId,
+      tokensUsed: tokens,
+      periodStart,
+    });
+    return { ok: true as const, newTotal: current + tokens, periodStart };
+  });
+}
+
+async function recordTokens(
+  userId: string,
+  tokens: number,
+  periodStart: Date = getCurrentPeriodStart(),
+): Promise<void> {
+  if (tokens === 0) return;
   await db.insert(tokenUsage).values({
     userId,
     tokensUsed: tokens,
@@ -288,7 +339,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = req.user!.userId;
       const used = await getTokensUsed(userId);
       const remaining = Math.max(0, FREE_TOKEN_LIMIT - used);
-      res.json({ tokensUsed: used, tokensRemaining: remaining, tokenLimit: FREE_TOKEN_LIMIT });
+      res.json({
+        tokensUsed: used,
+        tokensRemaining: remaining,
+        tokenLimit: FREE_TOKEN_LIMIT,
+        nextResetAt: getNextPeriodStart().toISOString(),
+        period: "day",
+      });
     } catch (error) {
       console.error("Token check error:", error);
       res.status(500).json({ error: "Failed to check token usage" });
@@ -296,26 +353,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.post("/api/chat/voice", audioBodyParser, requireAuth, async (req: Request, res: Response) => {
+    let reservationActive = false;
+    let reservedPeriodStart: Date | null = null;
+    const userId = req.user!.userId;
     try {
       const { audio, text } = req.body;
-      const userId = req.user!.userId;
 
       if (!audio && !text) {
         return res.status(400).json({ error: "Either [audio] or [text] is required" });
       }
 
-      const tokensUsedSoFar = await getTokensUsed(userId);
-      const tokensLeft = FREE_TOKEN_LIMIT - tokensUsedSoFar;
-      if (tokensLeft < MIN_TOKENS_FOR_REQUEST) {
+      const reservation = await tryReserveTokens(userId, MIN_TOKENS_FOR_REQUEST);
+      if (!reservation.ok) {
         return res.status(429).json({
-          error: "Token limit reached",
-          tokensUsed: tokensUsedSoFar,
-          tokensRemaining: Math.max(0, tokensLeft),
+          error: "Daily token limit reached",
+          tokensUsed: reservation.tokensUsed,
+          tokensRemaining: Math.max(0, FREE_TOKEN_LIMIT - reservation.tokensUsed),
           tokenLimit: FREE_TOKEN_LIMIT,
+          nextResetAt: getNextPeriodStart().toISOString(),
+          period: "day",
         });
       }
-
-      await reserveAndRecordTokens(userId, MIN_TOKENS_FOR_REQUEST);
+      reservationActive = true;
+      reservedPeriodStart = reservation.periodStart;
 
       let userTranscript = text || "";
 
@@ -324,7 +384,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const detected = detectAudioFormat(rawBuffer);
         const sttFormat = detected === "mp3" ? "mp3" : detected === "webm" ? "webm" : "wav";
         const fileExt = detected === "unknown" ? "m4a" : detected;
-        console.log("Audio format detected:", detected, "| Buffer size:", rawBuffer.length);
+        console.log("Audio in:", detected, rawBuffer.length, "bytes");
 
         try {
           userTranscript = await speechToText(rawBuffer, sttFormat, fileExt);
@@ -334,11 +394,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
 
         if (!userTranscript || userTranscript.trim().length === 0) {
+          // Refund the reservation against the same day it was reserved on.
+          await recordTokens(userId, -MIN_TOKENS_FOR_REQUEST, reservedPeriodStart);
+          reservationActive = false;
+          const used = await getTokensUsed(userId);
           return res.status(400).json({
-            error: "Could not understand audio. Please try again.",
-            tokensUsed: tokensUsedSoFar + MIN_TOKENS_FOR_REQUEST,
-            tokensRemaining: Math.max(0, tokensLeft - MIN_TOKENS_FOR_REQUEST),
+            error: "I couldn't quite catch that. Try again?",
+            tokensUsed: used,
+            tokensRemaining: Math.max(0, FREE_TOKEN_LIMIT - used),
             tokenLimit: FREE_TOKEN_LIMIT,
+            nextResetAt: getNextPeriodStart().toISOString(),
+            period: "day",
           });
         }
       }
@@ -349,7 +415,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .from(conversations)
         .where(eq(conversations.userId, userId))
         .orderBy(desc(conversations.createdAt))
-        .limit(1);
+        .limit(6);
 
       if (recentConversations.length > 0) {
         conversationId = recentConversations[0].id;
@@ -369,23 +435,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .where(eq(messages.conversationId, conversationId))
         .orderBy(messages.createdAt);
 
-      const pastConversations = await db
-        .select()
-        .from(conversations)
-        .where(eq(conversations.userId, userId))
-        .orderBy(desc(conversations.createdAt))
-        .limit(6);
-
       let pastContext = "";
-      if (pastConversations.length > 1) {
-        const olderConvIds = pastConversations.slice(1).map((c) => c.id);
-        const pastMessages = [];
+      if (recentConversations.length > 1) {
+        const olderConvIds = recentConversations.slice(1).map((c) => c.id);
+        const olderMessages = await db
+          .select()
+          .from(messages)
+          .where(inArray(messages.conversationId, olderConvIds))
+          .orderBy(messages.conversationId, messages.createdAt);
+
+        const grouped = new Map<number, typeof olderMessages>();
+        for (const m of olderMessages) {
+          const list = grouped.get(m.conversationId) ?? [];
+          list.push(m);
+          grouped.set(m.conversationId, list);
+        }
+        const pastMessages: string[] = [];
         for (const convId of olderConvIds) {
-          const msgs = await db
-            .select()
-            .from(messages)
-            .where(eq(messages.conversationId, convId))
-            .orderBy(messages.createdAt);
+          const msgs = grouped.get(convId) ?? [];
           if (msgs.length > 0) {
             const summary = msgs
               .slice(-6)
@@ -426,17 +493,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const totalTokens = response.usage?.total_tokens || 0;
       const additionalTokens = Math.max(0, totalTokens - MIN_TOKENS_FOR_REQUEST);
       if (additionalTokens > 0) {
-        await reserveAndRecordTokens(userId, additionalTokens);
+        await recordTokens(userId, additionalTokens, reservedPeriodStart!);
       }
+      reservationActive = false;
 
-      const updatedTokensUsed = tokensUsedSoFar + MIN_TOKENS_FOR_REQUEST + additionalTokens;
+      const updatedTokensUsed = await getTokensUsed(userId);
       const tokensRemaining = Math.max(0, FREE_TOKEN_LIMIT - updatedTokensUsed);
 
       await db.insert(messages).values({ conversationId, role: "assistant", content: assistantTranscript });
 
-      console.log("User said:", userTranscript);
-      console.log("Solence response:", assistantTranscript);
-      console.log("Tokens used this request:", totalTokens, "| Total this period:", updatedTokensUsed);
+      console.log(
+        `Voice req: ${userTranscript.length}c in, ${assistantTranscript.length}c out, ` +
+          `${totalTokens} tokens (daily total ${updatedTokensUsed}/${FREE_TOKEN_LIMIT})`,
+      );
 
       res.json({
         text: assistantTranscript,
@@ -446,9 +515,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         tokensUsed: updatedTokensUsed,
         tokensRemaining,
         tokenLimit: FREE_TOKEN_LIMIT,
+        nextResetAt: getNextPeriodStart().toISOString(),
+        period: "day",
       });
     } catch (error) {
       console.error("Voice API error:", error);
+      // Refund the up-front reservation since the request failed before
+      // recording any real usage. Pin the refund to the original day so we
+      // don't accidentally credit a different daily bucket.
+      if (reservationActive && reservedPeriodStart) {
+        try {
+          await recordTokens(userId, -MIN_TOKENS_FOR_REQUEST, reservedPeriodStart);
+        } catch (refundError) {
+          console.error("Token refund error:", refundError);
+        }
+      }
       res.status(500).json({ error: "Failed to process voice message" });
     }
   });

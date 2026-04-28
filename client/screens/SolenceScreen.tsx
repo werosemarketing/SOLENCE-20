@@ -9,6 +9,8 @@ import {
   Platform,
   Linking,
   KeyboardAvoidingView,
+  AppState,
+  type AppStateStatus,
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -430,14 +432,19 @@ export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenPro
 
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [currentMessage, setCurrentMessage] = useState<string>("");
-  const [tokensRemaining, setTokensRemaining] = useState(50000);
-  const [tokenLimit, setTokenLimit] = useState(50000);
+  const [tokensRemaining, setTokensRemaining] = useState(15000);
+  const [tokenLimit, setTokenLimit] = useState(15000);
+  const [nextResetAt, setNextResetAt] = useState<string | null>(null);
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [showSubscriptionPrompt, setShowSubscriptionPrompt] = useState(false);
   const [permissionDenied, setPermissionDenied] = useState(false);
   const [isConversationActive, setIsConversationActive] = useState(false);
   const [showStarters, setShowStarters] = useState(true);
   const [textInputValue, setTextInputValue] = useState("");
+  const [lastVoiceError, setLastVoiceError] = useState<{
+    kind: "audio" | "text";
+    payload: string;
+  } | null>(null);
 
   const messageOpacity = useSharedValue(0);
 
@@ -461,7 +468,26 @@ export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenPro
 
   useEffect(() => {
     fetchTokenUsage();
+    const sub = AppState.addEventListener("change", (state: AppStateStatus) => {
+      if (state === "active") {
+        fetchTokenUsage();
+      }
+    });
+    return () => sub.remove();
   }, []);
+
+  // Auto-refresh token balance shortly after the daily reset moment so the
+  // UI reflects the new quota without needing a manual reload.
+  useEffect(() => {
+    if (!nextResetAt) return;
+    const resetMs = new Date(nextResetAt).getTime();
+    const delay = resetMs - Date.now() + 5000;
+    if (!isFinite(delay) || delay <= 0 || delay > 24 * 60 * 60 * 1000) return;
+    const timer = setTimeout(() => {
+      fetchTokenUsage();
+    }, delay);
+    return () => clearTimeout(timer);
+  }, [nextResetAt]);
 
   useEffect(() => {
     if (currentMessage) {
@@ -566,18 +592,53 @@ export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenPro
         const data = await response.json();
         setTokensRemaining(data.tokensRemaining);
         setTokenLimit(data.tokenLimit);
+        if (data.nextResetAt) setNextResetAt(data.nextResetAt);
       }
     } catch (e) {
       console.log("Error fetching token usage:", e);
     }
   };
 
-  const updateTokensFromResponse = (data: { tokensRemaining?: number; tokenLimit?: number }) => {
+  const updateTokensFromResponse = (data: {
+    tokensRemaining?: number;
+    tokenLimit?: number;
+    nextResetAt?: string;
+  }) => {
     if (data.tokensRemaining !== undefined) {
       setTokensRemaining(data.tokensRemaining);
     }
     if (data.tokenLimit !== undefined) {
       setTokenLimit(data.tokenLimit);
+    }
+    if (data.nextResetAt) {
+      setNextResetAt(data.nextResetAt);
+    }
+  };
+
+  const formatResetTime = (iso: string | null): string => {
+    if (!iso) return "tomorrow";
+    try {
+      const reset = new Date(iso);
+      const now = new Date();
+      const sameDay =
+        reset.toDateString() === now.toDateString();
+      const time = reset.toLocaleTimeString(undefined, {
+        hour: "numeric",
+        minute: "2-digit",
+      });
+      if (sameDay) return `at ${time}`;
+      const tomorrow = new Date(now);
+      tomorrow.setDate(now.getDate() + 1);
+      if (reset.toDateString() === tomorrow.toDateString()) {
+        return `tomorrow at ${time}`;
+      }
+      return reset.toLocaleString(undefined, {
+        weekday: "short",
+        hour: "numeric",
+        minute: "2-digit",
+      });
+    } catch {
+      return "tomorrow";
     }
   };
 
@@ -623,15 +684,25 @@ export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenPro
     }
 
     try {
+      // Always re-check the current OS permission state. requestRecordingPermissionsAsync
+      // is safe to call repeatedly: on iOS the system dialog only ever appears
+      // the first time and afterwards it returns the cached status without
+      // prompting. This means a user who flipped mic access back on in Settings
+      // will recover automatically the next time they tap the orb.
       const status = await AudioModule.requestRecordingPermissionsAsync();
       if (!status.granted) {
-        if (!status.canAskAgain) {
-          setPermissionDenied(true);
-        }
+        setPermissionDenied(true);
+        // Stop any in-progress conversation loop so we don't keep retrying
+        // recording behind the scenes.
         setIsConversationActive(false);
+        shouldContinueListeningRef.current = false;
+        setVoiceState("idle");
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
         return;
       }
+      // Permission is now granted — clear any previous denial banner so the
+      // "Open Settings" affordance disappears.
+      if (permissionDenied) setPermissionDenied(false);
 
       await setAudioModeAsync({
         allowsRecording: true,
@@ -690,8 +761,9 @@ export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenPro
   };
 
   const sendAudioToAPI = async (recordingUri: string) => {
+    let audioBase64 = "";
     try {
-      const audioBase64 = await readRecordingAsBase64(recordingUri);
+      audioBase64 = await readRecordingAsBase64(recordingUri);
 
       if (audioBase64.length < 100) {
         setCurrentMessage("Recording was too short. Please try again.");
@@ -723,7 +795,7 @@ export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenPro
         if (response.status === 400) {
           const errData = await response.json();
           updateTokensFromResponse(errData);
-          setCurrentMessage(errData.error || "Could not understand audio. Please try again.");
+          setCurrentMessage(errData.error || "I couldn't quite catch that. Try again?");
           setVoiceState("idle");
           if (isConversationActive && canSendMessage()) {
             setTimeout(() => startRecording(), 1000);
@@ -737,6 +809,7 @@ export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenPro
       const data = await response.json();
       updateTokensFromResponse(data);
       setCurrentMessage(data.text);
+      setLastVoiceError(null);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
       if (data.audioBase64) {
@@ -752,10 +825,13 @@ export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenPro
       }
     } catch (e: unknown) {
       console.log("Error sending audio:", e instanceof Error ? e.message : e);
-      setCurrentMessage("Something went wrong. Please try again.");
+      setCurrentMessage("Something went wrong. Tap retry to try again.");
       setVoiceState("idle");
       setIsConversationActive(false);
       shouldContinueListeningRef.current = false;
+      if (audioBase64.length >= 100) {
+        setLastVoiceError({ kind: "audio", payload: audioBase64 });
+      }
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     }
   };
@@ -797,6 +873,7 @@ export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenPro
       const data = await response.json();
       updateTokensFromResponse(data);
       setCurrentMessage(data.text);
+      setLastVoiceError(null);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
       if (data.audioBase64) {
@@ -808,8 +885,74 @@ export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenPro
       }
     } catch (e: unknown) {
       console.log("Error sending text:", e instanceof Error ? e.message : e);
-      setCurrentMessage("Something went wrong. Please try again.");
+      setCurrentMessage("Something went wrong. Tap retry to try again.");
       setVoiceState("idle");
+      setLastVoiceError({ kind: "text", payload: text });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    }
+  };
+
+  const retryLastVoiceMessage = async () => {
+    if (!lastVoiceError) return;
+    const saved = lastVoiceError;
+    setLastVoiceError(null);
+    setCurrentMessage("");
+    if (saved.kind === "text") {
+      sendTextToAPI(saved.payload);
+      return;
+    }
+    setIsConversationActive(true);
+    setVoiceState("responding");
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    try {
+      const apiUrl = getApiUrl();
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
+      const response = await fetch(`${apiUrl}/api/chat/voice`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ audio: saved.payload }),
+      });
+      if (!response.ok) {
+        if (response.status === 429) {
+          const errData = await response.json();
+          updateTokensFromResponse(errData);
+          setShowSubscriptionPrompt(true);
+          setVoiceState("idle");
+          setIsConversationActive(false);
+          shouldContinueListeningRef.current = false;
+          return;
+        }
+        if (response.status === 400) {
+          const errData = await response.json();
+          updateTokensFromResponse(errData);
+          setCurrentMessage(errData.error || "I couldn't quite catch that. Try again?");
+          setVoiceState("idle");
+          setIsConversationActive(false);
+          return;
+        }
+        throw new Error(`API request failed: ${response.status}`);
+      }
+      const data = await response.json();
+      updateTokensFromResponse(data);
+      setCurrentMessage(data.text);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      if (data.audioBase64) {
+        const audioFileUri = await saveBase64Audio(data.audioBase64);
+        // We just resumed an active conversation, so ensure auto-listen kicks
+        // back in after the response audio finishes. Reading
+        // isConversationActive here would be stale because setIsConversationActive
+        // earlier in this function hasn't flushed yet.
+        shouldContinueListeningRef.current = true;
+        await playResponseAudio(audioFileUri);
+      } else {
+        setVoiceState("idle");
+      }
+    } catch (e: unknown) {
+      console.log("Retry failed:", e instanceof Error ? e.message : e);
+      setCurrentMessage("Still having trouble connecting. Tap retry to try again.");
+      setVoiceState("idle");
+      setLastVoiceError(saved);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     }
   };
@@ -886,6 +1029,9 @@ export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenPro
 
   const getStateText = () => {
     if (permissionDenied) return "Microphone access required";
+    if (tokensRemaining <= 0 && !isSubscribed) {
+      return `Comes back ${formatResetTime(nextResetAt)}`;
+    }
     switch (voiceState) {
       case "idle":
         return "Tap to begin";
@@ -1020,6 +1166,26 @@ export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenPro
               </Pressable>
             ) : null}
 
+            {lastVoiceError && voiceState === "idle" ? (
+              <Pressable
+                onPress={retryLastVoiceMessage}
+                style={({ pressed }) => [
+                  styles.retryButton,
+                  {
+                    backgroundColor: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.05)",
+                    borderColor: theme.orbPrimary,
+                    opacity: pressed ? 0.7 : 1,
+                  },
+                ]}
+                testID="retry-button"
+              >
+                <Feather name="refresh-cw" size={14} color={theme.orbPrimary} />
+                <Text style={[styles.retryButtonText, { color: theme.orbPrimary }]}>
+                  Try again
+                </Text>
+              </Pressable>
+            ) : null}
+
             <Animated.View style={[styles.messageContainer, animatedMessageStyle]}>
               {currentMessage ? (
                 <Text style={[styles.messageText, { color: theme.text }]}>
@@ -1123,7 +1289,7 @@ export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenPro
             ]}
           >
             <Text style={[styles.subscriptionTitle, { color: theme.text }]}>
-              Unlock Unlimited Conversations
+              Solence needs to rest
             </Text>
             <Text
               style={[
@@ -1131,8 +1297,9 @@ export default function SolenceScreen({ authToken, onSignOut }: SolenceScreenPro
                 { color: theme.textMuted },
               ]}
             >
-              You've used all your free tokens this month. Subscribe for unlimited
-              access to Solence.
+              You've used all your free tokens for today. Solence comes back{" "}
+              {formatResetTime(nextResetAt)}, or you can unlock unlimited
+              conversations now.
             </Text>
             <Pressable
               style={({ pressed }) => [
@@ -1278,6 +1445,22 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "500",
     fontFamily: FontFamily.medium,
+  },
+  retryButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.xs,
+    marginTop: Spacing.lg,
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.lg,
+    borderRadius: BorderRadius.full,
+    borderWidth: 1,
+  },
+  retryButtonText: {
+    fontSize: 14,
+    fontWeight: "500",
+    fontFamily: FontFamily.medium,
+    letterSpacing: 0.5,
   },
   startersContainer: {
     flexDirection: "row",

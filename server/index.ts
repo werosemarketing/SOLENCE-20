@@ -83,16 +83,25 @@ function setupRequestLogging(app: express.Application) {
       const duration = Date.now() - start;
 
       let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        const safeResponse = { ...capturedJsonResponse };
-        if ("token" in safeResponse) {
-          safeResponse.token = "[REDACTED]";
-        }
+
+      // For sensitive endpoints (auth, voice transcripts/audio) only log the
+      // status code and timing — never the user's words or the response body.
+      const isSensitivePath =
+        path.startsWith("/api/auth") || path.startsWith("/api/chat");
+
+      if (capturedJsonResponse && !isSensitivePath) {
+        const safeResponse: Record<string, unknown> = { ...capturedJsonResponse };
+        if ("token" in safeResponse) safeResponse.token = "[REDACTED]";
+        if ("password" in safeResponse) safeResponse.password = "[REDACTED]";
+        if ("audioBase64" in safeResponse) safeResponse.audioBase64 = "[REDACTED]";
+        if ("text" in safeResponse) safeResponse.text = "[REDACTED]";
+        if ("userTranscript" in safeResponse)
+          safeResponse.userTranscript = "[REDACTED]";
         logLine += ` :: ${JSON.stringify(safeResponse)}`;
       }
 
-      if (logLine.length > 80) {
-        logLine = logLine.slice(0, 79) + "…";
+      if (logLine.length > 120) {
+        logLine = logLine.slice(0, 119) + "…";
       }
 
       log(logLine);

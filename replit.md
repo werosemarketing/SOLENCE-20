@@ -42,8 +42,8 @@ Solence is a voice-first AI companion app for meditation, reflection, and emotio
 - POST `/api/chat/voice` with JSON body containing `audio` (base64) and/or `text`, plus `sessionId`
 - When audio is provided: transcribes via STT first (supports all mobile formats: m4a, mp4, webm, wav, mp3), then sends transcribed text to gpt-audio for response
 - No ffmpeg dependency - uses OpenAI transcription API which natively handles all audio formats
-- Returns JSON with `text`, `userTranscript`, `audioBase64`, `audioFormat`, `tokensUsed`, `tokensRemaining`, `tokenLimit`
-- GET `/api/tokens` returns current token usage balance
+- Returns JSON with `text`, `userTranscript`, `audioBase64`, `audioFormat`, `tokensUsed`, `tokensRemaining`, `tokenLimit`, `nextResetAt`, `period`
+- GET `/api/tokens` returns current token usage balance, daily limit, and the next reset timestamp
 - Audio playback: Uses native HTML5 Audio on web, expo-audio useAudioPlayer on native
 
 ### Key Features
@@ -59,15 +59,20 @@ Solence is a voice-first AI companion app for meditation, reflection, and emotio
    - 15-second auto-stop timer
    - Interrupt playback by tapping orb
 
-3. **Token-Based Usage Tracking** - Server-side monthly token limit
-   - 50,000 free tokens per month (FREE_TOKEN_LIMIT in shared/schema.ts)
-   - Tracked via `token_usage` table in PostgreSQL
-   - GET /api/tokens returns current usage and remaining balance
-   - Each request reserves 500 tokens upfront to prevent concurrent overshoot
+3. **Token-Based Usage Tracking** - Server-side daily token limit
+   - 15,000 free tokens per UTC day (FREE_TOKEN_LIMIT in shared/schema.ts)
+   - Tracked via `token_usage` table in PostgreSQL (indexed on user_id + period_start)
+   - GET /api/tokens returns current usage, remaining balance, and `nextResetAt`
+   - Each request atomically check-and-reserves 500 tokens inside a transaction
+     so concurrent requests cannot collectively exceed the daily cap
    - Actual token usage from OpenAI response is recorded after each call
+   - Failed STT (no transcript) refunds the 500-token reservation
+   - Server errors before the LLM call also refund the reservation
    - Frontend displays remaining tokens (formatted as "XX.Xk tokens remaining")
    - Token count turns orange when below 5,000 tokens
-   - Resets monthly (first of each month)
+   - Frontend refreshes the balance on app foreground and shortly after the
+     next reset moment so the new day's quota appears automatically
+   - Resets daily at 00:00 UTC; UI shows local time ("Comes back tomorrow at 5:00 PM")
 
 4. **Subscription Modal** - Triggered when token limit reached (429 from server)
 
