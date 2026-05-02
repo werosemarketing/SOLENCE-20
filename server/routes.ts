@@ -876,6 +876,12 @@ function serializePreferences(user: UserRow): UserPreferences {
     tone: (user.tone ?? null) as Tone | null,
     voice,
     language,
+    reminderEnabled: user.reminderEnabled ?? false,
+    reminderTime: user.reminderTime ?? "20:00",
+    weeklySummaryEnabled: user.weeklySummaryEnabled ?? false,
+    weeklySummaryDay:
+      typeof user.weeklySummaryDay === "number" ? user.weeklySummaryDay : 0,
+    weeklySummaryTime: user.weeklySummaryTime ?? "19:00",
     onboardingCompletedAt: user.onboardingCompletedAt
       ? user.onboardingCompletedAt.toISOString()
       : null,
@@ -1489,6 +1495,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
         if ("language" in parsed.data) {
           updates.language = parsed.data.language ?? null;
+        }
+        if ("reminderEnabled" in parsed.data && parsed.data.reminderEnabled !== undefined) {
+          updates.reminderEnabled = parsed.data.reminderEnabled;
+        }
+        if ("reminderTime" in parsed.data && parsed.data.reminderTime !== undefined) {
+          updates.reminderTime = parsed.data.reminderTime;
+        }
+        if (
+          "weeklySummaryEnabled" in parsed.data &&
+          parsed.data.weeklySummaryEnabled !== undefined
+        ) {
+          updates.weeklySummaryEnabled = parsed.data.weeklySummaryEnabled;
+        }
+        if (
+          "weeklySummaryDay" in parsed.data &&
+          parsed.data.weeklySummaryDay !== undefined
+        ) {
+          updates.weeklySummaryDay = parsed.data.weeklySummaryDay;
+        }
+        if (
+          "weeklySummaryTime" in parsed.data &&
+          parsed.data.weeklySummaryTime !== undefined
+        ) {
+          updates.weeklySummaryTime = parsed.data.weeklySummaryTime;
         }
         if (parsed.data.markOnboardingComplete) {
           updates.onboardingCompletedAt = new Date();
@@ -2425,6 +2455,214 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } catch (error) {
         console.error("List mood entries error:", error);
         res.status(500).json({ error: "Failed to load mood entries" });
+        return;
+      }
+    },
+  );
+
+  // ── Weekly reflection summary ──────────────────────────────────────
+  // Returns a gentle aggregate of the caller's week: how many sessions
+  // they had, their average mood, a few recurring themes pulled from
+  // reflection takeaways, and a single "highlight" assistant line they
+  // can re-read. `weekOffset=0` is the current week (Sunday-anchored
+  // in local-server time, which is good enough for a soft summary).
+  app.get(
+    "/api/weekly-summary",
+    requireAuth,
+    async (req: Request, res: Response) => {
+      try {
+        const userId = req.user!.userId;
+        const rawOffset = Number(req.query.weekOffset ?? 0);
+        const weekOffset =
+          Number.isFinite(rawOffset) && rawOffset <= 0 && rawOffset >= -52
+            ? Math.floor(rawOffset)
+            : 0;
+
+        // Anchor to the start of "this week" (Sunday 00:00 local), then
+        // shift backwards by weekOffset weeks. Capping the lookback at
+        // 52 weeks keeps the query bounded for any reasonable history.
+        const now = new Date();
+        const startOfThisWeek = new Date(
+          now.getFullYear(),
+          now.getMonth(),
+          now.getDate() - now.getDay(),
+          0,
+          0,
+          0,
+          0,
+        );
+        const weekStart = new Date(startOfThisWeek);
+        weekStart.setDate(weekStart.getDate() + weekOffset * 7);
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekEnd.getDate() + 7);
+
+        // Conversations *started* in this week count as a session. We
+        // intentionally don't count message activity inside an older
+        // conversation — it's the act of opening a new one that the
+        // user thinks of as "this week's reflection time".
+        const weekConversations = await db
+          .select({
+            id: conversations.id,
+            createdAt: conversations.createdAt,
+            reflectionSummary: conversations.reflectionSummary,
+            reflectionTakeaway: conversations.reflectionTakeaway,
+          })
+          .from(conversations)
+          .where(
+            and(
+              eq(conversations.userId, userId),
+              gte(conversations.createdAt, weekStart),
+              lt(conversations.createdAt, weekEnd),
+            ),
+          )
+          .orderBy(desc(conversations.createdAt));
+
+        // Mood: average across all entries (pre + post) in the window.
+        const weekMoods = await db
+          .select({
+            score: moodEntries.score,
+          })
+          .from(moodEntries)
+          .where(
+            and(
+              eq(moodEntries.userId, userId),
+              gte(moodEntries.createdAt, weekStart),
+              lt(moodEntries.createdAt, weekEnd),
+            ),
+          );
+        const moodCount = weekMoods.length;
+        const avgMood =
+          moodCount > 0
+            ? Math.round(
+                (weekMoods.reduce((sum, m) => sum + m.score, 0) / moodCount) *
+                  10,
+              ) / 10
+            : null;
+
+        // Themes: very lightweight keyword extraction over the week's
+        // reflection takeaways + summaries. We tokenize, drop stop
+        // words, count, and surface the top 3. Not a model call — this
+        // is a soft "here's what kept coming up" hint, and we'd rather
+        // be cheap and predictable than perfectly insightful.
+        const STOP_WORDS = new Set([
+          "the","and","you","your","that","this","with","have","were","was","for","but","not","just","like","feel","felt","feeling","feelings","about","into","there","they","them","what","when","where","which","while","from","then","than","over","some","more","much","very","will","would","could","should","also","been","being","because","each","other","their","these","those","through","into","still","really","always","never","ever","even","kind","keep","kept","make","made","makes","know","knew","known","think","thought","want","wanted","need","needed","take","took","taken","find","found","finding","work","working","day","days","time","today","weeks","week","again","things","something","anything","everything","nothing","talked","talking","said","saying","tell","told","feels","felt","were","with","without","seemed","seems","seem","being","been","let","its","also","yes","yeah","okay","ok","one","two","three","much","many","alot","got","get","gets","getting",
+        ]);
+        // Memories captured during the week add another signal to the
+        // theme corpus — they're the things Solence chose to remember
+        // about the user, so they tend to mirror what's been on their
+        // mind (per the spec: include memory content alongside
+        // reflections when computing themes).
+        const weekMemories = await db
+          .select({ text: userMemories.text })
+          .from(userMemories)
+          .where(
+            and(
+              eq(userMemories.userId, userId),
+              gte(userMemories.createdAt, weekStart),
+              lt(userMemories.createdAt, weekEnd),
+            ),
+          );
+
+        const counts = new Map<string, number>();
+        const ingest = (text: string) => {
+          for (const raw of text.toLowerCase().split(/[^a-záéíóúñü]+/i)) {
+            const word = raw.trim();
+            if (word.length < 4) continue;
+            if (STOP_WORDS.has(word)) continue;
+            counts.set(word, (counts.get(word) ?? 0) + 1);
+          }
+        };
+        for (const c of weekConversations) {
+          ingest(`${c.reflectionTakeaway ?? ""} ${c.reflectionSummary ?? ""}`);
+        }
+        for (const m of weekMemories) {
+          ingest(m.text ?? "");
+        }
+        const themes = [...counts.entries()]
+          .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+          .slice(0, 3)
+          .map(([word]) => word);
+
+        // Highlight quote: first try a favorited assistant message from
+        // the week (the user explicitly said "this stays with me"),
+        // falling back to the most recent assistant message. Both paths
+        // are scoped to conversations the user owns AND created during
+        // this week, so we never bleed lines from an older session.
+        type HighlightRow = {
+          id: number;
+          content: string;
+          createdAt: Date;
+          conversationId: number;
+        };
+        let highlight: HighlightRow | null = null;
+        const weekConvIds = weekConversations.map((c) => c.id);
+        if (weekConvIds.length > 0) {
+          const favRows = await db
+            .select({
+              id: messages.id,
+              content: messages.content,
+              createdAt: messages.createdAt,
+              conversationId: messages.conversationId,
+            })
+            .from(messages)
+            .innerJoin(favorites, eq(favorites.messageId, messages.id))
+            .where(
+              and(
+                eq(favorites.userId, userId),
+                eq(messages.role, "assistant"),
+                inArray(messages.conversationId, weekConvIds),
+              ),
+            )
+            .orderBy(desc(favorites.createdAt))
+            .limit(1);
+          if (favRows.length > 0) {
+            highlight = favRows[0];
+          } else {
+            const recent = await db
+              .select({
+                id: messages.id,
+                content: messages.content,
+                createdAt: messages.createdAt,
+                conversationId: messages.conversationId,
+              })
+              .from(messages)
+              .where(
+                and(
+                  eq(messages.role, "assistant"),
+                  inArray(messages.conversationId, weekConvIds),
+                ),
+              )
+              .orderBy(desc(messages.createdAt))
+              .limit(1);
+            if (recent.length > 0) {
+              highlight = recent[0];
+            }
+          }
+        }
+
+        res.json({
+          weekOffset,
+          weekStart: weekStart.toISOString(),
+          weekEnd: weekEnd.toISOString(),
+          sessionCount: weekConversations.length,
+          moodCount,
+          avgMood,
+          themes,
+          highlight: highlight
+            ? {
+                messageId: highlight.id,
+                conversationId: highlight.conversationId,
+                content: highlight.content,
+                createdAt:
+                  highlight.createdAt instanceof Date
+                    ? highlight.createdAt.toISOString()
+                    : highlight.createdAt,
+              }
+            : null,
+        });
+      } catch (error) {
+        console.error("Weekly summary error:", error);
+        res.status(500).json({ error: "Failed to load weekly summary" });
       }
     },
   );

@@ -477,6 +477,36 @@
         "6": "S"
       }
     },
+    "reminders": {
+      "title": "Recordatorio diario",
+      "subtitle": "Un suave aviso cada día para tomar un momento contigo y con Solence.",
+      "toggleLabel": "Enviar un recordatorio diario",
+      "toggleHelp": "Cuando está activo, Solence envía una notificación local suave a la hora que elijas.",
+      "toggleHelpWeb": "Los recordatorios necesitan un dispositivo real — abre Solence en Expo Go en tu teléfono.",
+      "toggleHelpDenied": "Las notificaciones están desactivadas para Solence. Actívalas en Ajustes para recibir recordatorios.",
+      "timeLabel": "Hora del día",
+      "errorPermission": "Necesitamos permiso de notificaciones para enviarte recordatorios.",
+      "errorGeneric": "No se pudo guardar tu recordatorio. Inténtalo de nuevo.",
+      "openSettings": "Abrir Ajustes",
+      "notificationTitle": "Un momento tranquilo con Solence",
+      "notificationBody": "Cuando quieras, aquí estoy."
+    },
+    "weeklySummary": {
+      "title": "Reflexión semanal",
+      "subtitle": "Un resumen suave de tu semana — sesiones, ánimo y lo que estuvo presente.",
+      "openButton": "Abrir esta semana",
+      "openA11y": "Abrir el resumen de reflexión de esta semana",
+      "toggleLabel": "Enviar un resumen semanal",
+      "toggleHelp": "Cuando está activo, Solence envía una notificación local suave con un enlace a tu semana.",
+      "toggleHelpWeb": "El resumen semanal necesita un dispositivo real — abre Solence en Expo Go en tu teléfono.",
+      "toggleHelpDenied": "Las notificaciones están desactivadas para Solence. Actívalas en Ajustes para recibir el resumen semanal.",
+      "dayLabel": "Día de la semana",
+      "timeLabel": "Hora del día",
+      "errorPermission": "Necesitamos permiso de notificaciones para enviarte el resumen semanal.",
+      "errorGeneric": "No se pudo guardar tu resumen semanal. Inténtalo de nuevo.",
+      "notificationTitle": "Tu semana con Solence",
+      "notificationBody": "Una mirada suave a tus reflexiones de esta semana."
+    },
     "upgrade": {
       "freePlanTitle": "Plan gratuito",
       "freePlanSubtitle": "Reflexiones diarias que se reinician cada día.",
@@ -566,6 +596,45 @@
       "purchaseFailed": "No se pudo completar la compra. Inténtalo de nuevo.",
       "restoreFailed": "No se pudo restaurar. Inténtalo de nuevo.",
       "noPurchases": "No se encontraron compras anteriores."
+    }
+  },
+  "weeklySummary": {
+    "header": "Reflexión semanal",
+    "previous": "Semana anterior",
+    "next": "Semana siguiente",
+    "previousA11y": "Mostrar la semana anterior",
+    "nextA11y": "Mostrar la semana siguiente",
+    "thisWeek": "Esta semana",
+    "lastWeek": "La semana pasada",
+    "weeksAgo": "Hace {{count}} semanas",
+    "rangeLabel": "{{start}} – {{end}}",
+    "loading": "Cargando…",
+    "errorGeneric": "No se pudo cargar tu resumen semanal. Desliza hacia abajo para reintentar.",
+    "retry": "Reintentar",
+    "sessions": {
+      "title": "Sesiones",
+      "value_one": "{{count}} sesión",
+      "value_other": "{{count}} sesiones",
+      "empty": "Aún sin sesiones"
+    },
+    "mood": {
+      "title": "Ánimo promedio",
+      "value": "{{value}} / 5",
+      "entries_one": "{{count}} registro",
+      "entries_other": "{{count}} registros",
+      "empty": "Sin registros de ánimo"
+    },
+    "themes": {
+      "title": "Lo que estuvo presente",
+      "empty": "Los temas aparecerán cuando hayas reflexionado varias veces esta semana."
+    },
+    "highlight": {
+      "title": "Una línea para guardar",
+      "empty": "Guarda un momento en una conversación y aparecerá aquí."
+    },
+    "empty": {
+      "title": "Una semana tranquila",
+      "body": "Cuando tengas algunas sesiones en una semana, aquí aparecerá tu resumen de reflexión."
     }
   },
   "time": {

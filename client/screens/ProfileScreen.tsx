@@ -15,6 +15,7 @@ import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
+import * as Linking from "expo-linking";
 import * as LocalAuthentication from "expo-local-authentication";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useHeaderHeight } from "@react-navigation/elements";
@@ -69,8 +70,27 @@ import {
   type ClientPreferences,
 } from "@/lib/preferences";
 import { setAppLanguage } from "@/lib/i18n";
+import {
+  cancelDailyReminder,
+  cancelWeeklySummary,
+  formatTimeOfDayLabel,
+  isNotificationsSupported,
+  requestNotificationPermissionsAsync,
+  scheduleDailyReminder,
+  scheduleWeeklySummary,
+} from "@/lib/notifications";
 import type { Intent, Language, Tone, Voice } from "@shared/schema";
 import type { RootStackParamList } from "@/navigation/RootStackNavigator";
+
+const REMINDER_TIME_OPTIONS = [
+  "07:00",
+  "12:00",
+  "18:00",
+  "19:00",
+  "20:00",
+  "22:00",
+];
+const WEEKLY_DAY_OPTIONS = [0, 1, 2, 3, 4, 5, 6];
 
 const STORAGE_KEY_AUTH_TOKEN = "solence_auth_token";
 const HISTORY_DAYS = 7;
@@ -376,6 +396,17 @@ export default function ProfileScreen() {
     string | null
   >(null);
 
+  // Notifications (daily reminder + weekly summary) state. Saving is
+  // optimistic against /api/preferences and the local schedule is
+  // (re-)installed on opt-in / time change. On web everything is
+  // disabled and we render a helper note pointing to Expo Go.
+  const [notificationsSaving, setNotificationsSaving] = useState<
+    "reminder" | "weekly" | null
+  >(null);
+  const [reminderError, setReminderError] = useState<string | null>(null);
+  const [weeklyError, setWeeklyError] = useState<string | null>(null);
+  const [notificationsBlocked, setNotificationsBlocked] = useState(false);
+
   // "Solence's voice" picker state. Selection saves immediately on tap;
   // preview hits a separate rate-limited endpoint and plays via expo-audio.
   const [voiceSaving, setVoiceSaving] = useState<Voice | null>(null);
@@ -439,6 +470,14 @@ export default function ProfileScreen() {
         tone: data.preferences.tone ?? null,
         voice: data.preferences.voice ?? null,
         language: data.preferences.language ?? null,
+        reminderEnabled: data.preferences.reminderEnabled ?? false,
+        reminderTime: data.preferences.reminderTime ?? "20:00",
+        weeklySummaryEnabled: data.preferences.weeklySummaryEnabled ?? false,
+        weeklySummaryDay:
+          typeof data.preferences.weeklySummaryDay === "number"
+            ? data.preferences.weeklySummaryDay
+            : 0,
+        weeklySummaryTime: data.preferences.weeklySummaryTime ?? "19:00",
         onboardingCompletedAt: data.preferences.onboardingCompletedAt ?? null,
       });
     } catch (e) {
@@ -596,6 +635,332 @@ export default function ProfileScreen() {
     },
     [appLockPrefs, appLockSaving],
   );
+
+  // Persist a partial preferences update with the same optimistic-then-
+  // rollback pattern used by the voice / language pickers. Returns true
+  // when the server confirms the write so callers can chain the local
+  // notification (re)scheduling on success only.
+  const persistPreferenceUpdate = useCallback(
+    async (
+      patch: Partial<ClientPreferences>,
+    ): Promise<{ ok: true; data: ClientPreferences } | { ok: false; message: string }> => {
+      try {
+        const token = await AsyncStorage.getItem(STORAGE_KEY_AUTH_TOKEN);
+        const headers: Record<string, string> = {
+          "Content-Type": "application/json",
+        };
+        if (token) headers["Authorization"] = `Bearer ${token}`;
+        const apiUrl = getApiUrl();
+        const response = await fetch(`${apiUrl}/api/preferences`, {
+          method: "PATCH",
+          headers,
+          body: JSON.stringify(patch),
+        });
+        if (!response.ok) {
+          let message = `Couldn't save (${response.status})`;
+          try {
+            const data = await response.json();
+            if (data && typeof data.error === "string") message = data.error;
+          } catch {
+            // ignore parse failure
+          }
+          return { ok: false, message };
+        }
+        const payload = (await response.json()) as {
+          preferences: ClientPreferences;
+        };
+        return { ok: true, data: payload.preferences };
+      } catch (e) {
+        return {
+          ok: false,
+          message: e instanceof Error ? e.message : "Network error",
+        };
+      }
+    },
+    [],
+  );
+
+  // Toggle the daily reminder. Permission is requested only on opt-in
+  // (per task brief). On opt-out we cancel the scheduled notification
+  // first so a stale entry doesn't continue firing if the server save
+  // round-trip fails — better to be silent than to nag.
+  const handleToggleReminder = useCallback(
+    async (next: boolean) => {
+      if (notificationsSaving) return;
+      if (Platform.OS === "web") return;
+      const previous = preferences.reminderEnabled;
+      if (previous === next) return;
+      setReminderError(null);
+      setNotificationsSaving("reminder");
+
+      // Optimistic UI update.
+      setPreferences((p) => ({ ...p, reminderEnabled: next }));
+
+      try {
+        if (next) {
+          const perm = await requestNotificationPermissionsAsync();
+          if (!perm.granted) {
+            setPreferences((p) => ({ ...p, reminderEnabled: previous }));
+            setReminderError(t("profile.reminders.errorPermission"));
+            setNotificationsBlocked(!perm.canAskAgain);
+            return;
+          }
+          setNotificationsBlocked(false);
+          const result = await persistPreferenceUpdate({
+            reminderEnabled: true,
+            reminderTime: preferences.reminderTime,
+          });
+          if (!result.ok) {
+            setPreferences((p) => ({ ...p, reminderEnabled: previous }));
+            setReminderError(result.message);
+            return;
+          }
+          await scheduleDailyReminder(preferences.reminderTime, preferences.language, {
+            title: t("profile.reminders.notificationTitle"),
+            body: t("profile.reminders.notificationBody"),
+          });
+        } else {
+          // Cancel locally first so silence is immediate even if the
+          // network blip flips the optimistic update back.
+          await cancelDailyReminder();
+          const result = await persistPreferenceUpdate({
+            reminderEnabled: false,
+          });
+          if (!result.ok) {
+            // Re-schedule to restore previous behavior since save failed.
+            setPreferences((p) => ({ ...p, reminderEnabled: previous }));
+            setReminderError(result.message);
+            await scheduleDailyReminder(preferences.reminderTime, preferences.language, {
+              title: t("profile.reminders.notificationTitle"),
+              body: t("profile.reminders.notificationBody"),
+            }).catch(() => {});
+            return;
+          }
+        }
+      } finally {
+        setNotificationsSaving(null);
+      }
+    },
+    [
+      notificationsSaving,
+      preferences.reminderEnabled,
+      preferences.reminderTime,
+      preferences.language,
+      persistPreferenceUpdate,
+      t,
+    ],
+  );
+
+  // Choose a reminder time chip. Saves the new time immediately. When
+  // reminders are off, the tap simply records the preference (so the
+  // chip the user just picked persists for when they later opt in).
+  const handleSelectReminderTime = useCallback(
+    async (time: string) => {
+      if (notificationsSaving) return;
+      if (Platform.OS === "web") return;
+      if (preferences.reminderTime === time) return;
+      const previous = preferences.reminderTime;
+      setReminderError(null);
+      setNotificationsSaving("reminder");
+      setPreferences((p) => ({ ...p, reminderTime: time }));
+      try {
+        const result = await persistPreferenceUpdate({ reminderTime: time });
+        if (!result.ok) {
+          setPreferences((p) => ({ ...p, reminderTime: previous }));
+          setReminderError(result.message);
+          return;
+        }
+        if (preferences.reminderEnabled) {
+          await scheduleDailyReminder(time, preferences.language, {
+            title: t("profile.reminders.notificationTitle"),
+            body: t("profile.reminders.notificationBody"),
+          });
+        }
+      } finally {
+        setNotificationsSaving(null);
+      }
+    },
+    [
+      notificationsSaving,
+      preferences.reminderTime,
+      preferences.reminderEnabled,
+      preferences.language,
+      persistPreferenceUpdate,
+      t,
+    ],
+  );
+
+  // Toggle the weekly summary notification. Mirrors the daily reminder
+  // handler — permission on opt-in, cancel-first on opt-out.
+  const handleToggleWeeklySummary = useCallback(
+    async (next: boolean) => {
+      if (notificationsSaving) return;
+      if (Platform.OS === "web") return;
+      const previous = preferences.weeklySummaryEnabled;
+      if (previous === next) return;
+      setWeeklyError(null);
+      setNotificationsSaving("weekly");
+      setPreferences((p) => ({ ...p, weeklySummaryEnabled: next }));
+      try {
+        if (next) {
+          const perm = await requestNotificationPermissionsAsync();
+          if (!perm.granted) {
+            setPreferences((p) => ({ ...p, weeklySummaryEnabled: previous }));
+            setWeeklyError(t("profile.weeklySummary.errorPermission"));
+            setNotificationsBlocked(!perm.canAskAgain);
+            return;
+          }
+          setNotificationsBlocked(false);
+          const result = await persistPreferenceUpdate({
+            weeklySummaryEnabled: true,
+            weeklySummaryDay: preferences.weeklySummaryDay,
+            weeklySummaryTime: preferences.weeklySummaryTime,
+          });
+          if (!result.ok) {
+            setPreferences((p) => ({ ...p, weeklySummaryEnabled: previous }));
+            setWeeklyError(result.message);
+            return;
+          }
+          await scheduleWeeklySummary(
+            preferences.weeklySummaryDay,
+            preferences.weeklySummaryTime,
+            preferences.language,
+            {
+              title: t("profile.weeklySummary.notificationTitle"),
+              body: t("profile.weeklySummary.notificationBody"),
+            },
+          );
+        } else {
+          await cancelWeeklySummary();
+          const result = await persistPreferenceUpdate({
+            weeklySummaryEnabled: false,
+          });
+          if (!result.ok) {
+            setPreferences((p) => ({ ...p, weeklySummaryEnabled: previous }));
+            setWeeklyError(result.message);
+            await scheduleWeeklySummary(
+              preferences.weeklySummaryDay,
+              preferences.weeklySummaryTime,
+              preferences.language,
+              {
+                title: t("profile.weeklySummary.notificationTitle"),
+                body: t("profile.weeklySummary.notificationBody"),
+              },
+            ).catch(() => {});
+            return;
+          }
+        }
+      } finally {
+        setNotificationsSaving(null);
+      }
+    },
+    [
+      notificationsSaving,
+      preferences.weeklySummaryEnabled,
+      preferences.weeklySummaryDay,
+      preferences.weeklySummaryTime,
+      preferences.language,
+      persistPreferenceUpdate,
+      t,
+    ],
+  );
+
+  const handleSelectWeeklyDay = useCallback(
+    async (day: number) => {
+      if (notificationsSaving) return;
+      if (Platform.OS === "web") return;
+      if (preferences.weeklySummaryDay === day) return;
+      const previous = preferences.weeklySummaryDay;
+      setWeeklyError(null);
+      setNotificationsSaving("weekly");
+      setPreferences((p) => ({ ...p, weeklySummaryDay: day }));
+      try {
+        const result = await persistPreferenceUpdate({ weeklySummaryDay: day });
+        if (!result.ok) {
+          setPreferences((p) => ({ ...p, weeklySummaryDay: previous }));
+          setWeeklyError(result.message);
+          return;
+        }
+        if (preferences.weeklySummaryEnabled) {
+          await scheduleWeeklySummary(
+            day,
+            preferences.weeklySummaryTime,
+            preferences.language,
+            {
+              title: t("profile.weeklySummary.notificationTitle"),
+              body: t("profile.weeklySummary.notificationBody"),
+            },
+          );
+        }
+      } finally {
+        setNotificationsSaving(null);
+      }
+    },
+    [
+      notificationsSaving,
+      preferences.weeklySummaryDay,
+      preferences.weeklySummaryEnabled,
+      preferences.weeklySummaryTime,
+      preferences.language,
+      persistPreferenceUpdate,
+      t,
+    ],
+  );
+
+  const handleSelectWeeklyTime = useCallback(
+    async (time: string) => {
+      if (notificationsSaving) return;
+      if (Platform.OS === "web") return;
+      if (preferences.weeklySummaryTime === time) return;
+      const previous = preferences.weeklySummaryTime;
+      setWeeklyError(null);
+      setNotificationsSaving("weekly");
+      setPreferences((p) => ({ ...p, weeklySummaryTime: time }));
+      try {
+        const result = await persistPreferenceUpdate({ weeklySummaryTime: time });
+        if (!result.ok) {
+          setPreferences((p) => ({ ...p, weeklySummaryTime: previous }));
+          setWeeklyError(result.message);
+          return;
+        }
+        if (preferences.weeklySummaryEnabled) {
+          await scheduleWeeklySummary(
+            preferences.weeklySummaryDay,
+            time,
+            preferences.language,
+            {
+              title: t("profile.weeklySummary.notificationTitle"),
+              body: t("profile.weeklySummary.notificationBody"),
+            },
+          );
+        }
+      } finally {
+        setNotificationsSaving(null);
+      }
+    },
+    [
+      notificationsSaving,
+      preferences.weeklySummaryTime,
+      preferences.weeklySummaryDay,
+      preferences.weeklySummaryEnabled,
+      preferences.language,
+      persistPreferenceUpdate,
+      t,
+    ],
+  );
+
+  const handleOpenWeeklySummary = useCallback(() => {
+    navigation.navigate("WeeklySummary", { weekOffset: 0 });
+  }, [navigation]);
+
+  const handleOpenSettings = useCallback(async () => {
+    if (Platform.OS === "web") return;
+    try {
+      await Linking.openSettings();
+    } catch {
+      // openSettings unavailable — quietly ignore
+    }
+  }, []);
 
   // Track when the preview finishes so we can flip the play indicator off.
   useEffect(() => {
@@ -2123,6 +2488,337 @@ export default function ProfileScreen() {
         )}
       </Card>
 
+      <Card elevation={1} style={styles.remindersCard}>
+        <ThemedText type="h4" style={styles.cardTitle}>
+          {t("profile.reminders.title")}
+        </ThemedText>
+        <ThemedText
+          type="small"
+          style={[styles.cardDescription, { color: theme.textMuted }]}
+        >
+          {t("profile.reminders.subtitle")}
+        </ThemedText>
+
+        <View
+          style={[
+            styles.lockToggleRow,
+            { borderBottomColor: theme.backgroundSecondary },
+          ]}
+        >
+          <View style={styles.lockToggleText}>
+            <Text
+              style={[styles.lockToggleTitle, { color: theme.text }]}
+              testID="profile-reminder-toggle-label"
+            >
+              {t("profile.reminders.toggleLabel")}
+            </Text>
+            <Text
+              style={[styles.lockToggleHelp, { color: theme.textMuted }]}
+            >
+              {Platform.OS === "web"
+                ? t("profile.reminders.toggleHelpWeb")
+                : notificationsBlocked
+                  ? t("profile.reminders.toggleHelpDenied")
+                  : t("profile.reminders.toggleHelp")}
+            </Text>
+          </View>
+          <Switch
+            value={preferences.reminderEnabled}
+            onValueChange={handleToggleReminder}
+            disabled={
+              Platform.OS === "web" ||
+              notificationsSaving === "reminder" ||
+              preferencesLoading
+            }
+            trackColor={{
+              false: theme.backgroundSecondary,
+              true: theme.orbPrimary,
+            }}
+            thumbColor={
+              Platform.OS === "android"
+                ? preferences.reminderEnabled
+                  ? theme.orbSecondary
+                  : theme.backgroundTertiary
+                : undefined
+            }
+            testID="profile-reminder-toggle"
+            accessibilityLabel={t("profile.reminders.toggleLabel")}
+          />
+        </View>
+
+        {reminderError ? (
+          <Text
+            style={[styles.lockError, { color: theme.textMuted }]}
+            testID="profile-reminder-error"
+          >
+            {reminderError}
+          </Text>
+        ) : null}
+
+        {Platform.OS !== "web" && notificationsBlocked ? (
+          <Pressable
+            onPress={handleOpenSettings}
+            style={({ pressed }) => [
+              styles.openSettingsButton,
+              {
+                borderColor: theme.orbPrimary,
+                opacity: pressed ? 0.6 : 1,
+              },
+            ]}
+            testID="profile-reminder-open-settings"
+            accessibilityRole="button"
+          >
+            <Text
+              style={[styles.openSettingsText, { color: theme.orbPrimary }]}
+            >
+              {t("profile.reminders.openSettings")}
+            </Text>
+          </Pressable>
+        ) : null}
+
+        <View style={styles.lockTimerSection}>
+          <Text style={[styles.lockTimerLabel, { color: theme.textMuted }]}>
+            {t("profile.reminders.timeLabel")}
+          </Text>
+          <View style={styles.lockTimerOptions}>
+            {REMINDER_TIME_OPTIONS.map((option) => {
+              const isSelected = preferences.reminderTime === option;
+              const disabled =
+                Platform.OS === "web" ||
+                notificationsSaving === "reminder" ||
+                preferencesLoading;
+              const label = formatTimeOfDayLabel(option, locale);
+              return (
+                <Pressable
+                  key={option}
+                  onPress={() => handleSelectReminderTime(option)}
+                  disabled={disabled}
+                  style={({ pressed }) => [
+                    styles.lockTimerChip,
+                    {
+                      borderColor: isSelected
+                        ? theme.orbPrimary
+                        : theme.backgroundSecondary,
+                      backgroundColor: isSelected
+                        ? theme.backgroundSecondary
+                        : "transparent",
+                      opacity: disabled ? 0.5 : pressed ? 0.6 : 1,
+                    },
+                  ]}
+                  testID={`profile-reminder-time-${option}`}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected: isSelected, disabled }}
+                  accessibilityLabel={`${t("profile.reminders.timeLabel")} ${label}`}
+                >
+                  <Text
+                    style={[
+                      styles.lockTimerChipText,
+                      {
+                        color: isSelected ? theme.orbPrimary : theme.text,
+                      },
+                    ]}
+                  >
+                    {label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+      </Card>
+
+      <Card elevation={1} style={styles.weeklyCard}>
+        <ThemedText type="h4" style={styles.cardTitle}>
+          {t("profile.weeklySummary.title")}
+        </ThemedText>
+        <ThemedText
+          type="small"
+          style={[styles.cardDescription, { color: theme.textMuted }]}
+        >
+          {t("profile.weeklySummary.subtitle")}
+        </ThemedText>
+
+        <Pressable
+          onPress={handleOpenWeeklySummary}
+          style={({ pressed }) => [
+            styles.weeklyOpenButton,
+            {
+              borderColor: theme.orbPrimary,
+              backgroundColor: pressed
+                ? theme.backgroundSecondary
+                : "transparent",
+            },
+          ]}
+          testID="profile-weekly-open"
+          accessibilityRole="button"
+          accessibilityLabel={t("profile.weeklySummary.openA11y")}
+        >
+          <Feather name="calendar" size={16} color={theme.orbPrimary} />
+          <Text
+            style={[styles.weeklyOpenText, { color: theme.orbPrimary }]}
+          >
+            {t("profile.weeklySummary.openButton")}
+          </Text>
+          <Feather name="chevron-right" size={16} color={theme.orbPrimary} />
+        </Pressable>
+
+        <View
+          style={[
+            styles.lockToggleRow,
+            { borderBottomColor: theme.backgroundSecondary },
+          ]}
+        >
+          <View style={styles.lockToggleText}>
+            <Text
+              style={[styles.lockToggleTitle, { color: theme.text }]}
+              testID="profile-weekly-toggle-label"
+            >
+              {t("profile.weeklySummary.toggleLabel")}
+            </Text>
+            <Text
+              style={[styles.lockToggleHelp, { color: theme.textMuted }]}
+            >
+              {Platform.OS === "web"
+                ? t("profile.weeklySummary.toggleHelpWeb")
+                : notificationsBlocked
+                  ? t("profile.weeklySummary.toggleHelpDenied")
+                  : t("profile.weeklySummary.toggleHelp")}
+            </Text>
+          </View>
+          <Switch
+            value={preferences.weeklySummaryEnabled}
+            onValueChange={handleToggleWeeklySummary}
+            disabled={
+              Platform.OS === "web" ||
+              notificationsSaving === "weekly" ||
+              preferencesLoading
+            }
+            trackColor={{
+              false: theme.backgroundSecondary,
+              true: theme.orbPrimary,
+            }}
+            thumbColor={
+              Platform.OS === "android"
+                ? preferences.weeklySummaryEnabled
+                  ? theme.orbSecondary
+                  : theme.backgroundTertiary
+                : undefined
+            }
+            testID="profile-weekly-toggle"
+            accessibilityLabel={t("profile.weeklySummary.toggleLabel")}
+          />
+        </View>
+
+        {weeklyError ? (
+          <Text
+            style={[styles.lockError, { color: theme.textMuted }]}
+            testID="profile-weekly-error"
+          >
+            {weeklyError}
+          </Text>
+        ) : null}
+
+        <View style={styles.lockTimerSection}>
+          <Text style={[styles.lockTimerLabel, { color: theme.textMuted }]}>
+            {t("profile.weeklySummary.dayLabel")}
+          </Text>
+          <View style={styles.lockTimerOptions}>
+            {WEEKLY_DAY_OPTIONS.map((day) => {
+              const isSelected = preferences.weeklySummaryDay === day;
+              const disabled =
+                Platform.OS === "web" ||
+                notificationsSaving === "weekly" ||
+                preferencesLoading;
+              const label = t(`profile.mood.dayLabels.${day}`);
+              return (
+                <Pressable
+                  key={day}
+                  onPress={() => handleSelectWeeklyDay(day)}
+                  disabled={disabled}
+                  style={({ pressed }) => [
+                    styles.weeklyDayChip,
+                    {
+                      borderColor: isSelected
+                        ? theme.orbPrimary
+                        : theme.backgroundSecondary,
+                      backgroundColor: isSelected
+                        ? theme.backgroundSecondary
+                        : "transparent",
+                      opacity: disabled ? 0.5 : pressed ? 0.6 : 1,
+                    },
+                  ]}
+                  testID={`profile-weekly-day-${day}`}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected: isSelected, disabled }}
+                  accessibilityLabel={`${t("profile.weeklySummary.dayLabel")} ${label}`}
+                >
+                  <Text
+                    style={[
+                      styles.lockTimerChipText,
+                      {
+                        color: isSelected ? theme.orbPrimary : theme.text,
+                      },
+                    ]}
+                  >
+                    {label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+
+        <View style={styles.lockTimerSection}>
+          <Text style={[styles.lockTimerLabel, { color: theme.textMuted }]}>
+            {t("profile.weeklySummary.timeLabel")}
+          </Text>
+          <View style={styles.lockTimerOptions}>
+            {REMINDER_TIME_OPTIONS.map((option) => {
+              const isSelected = preferences.weeklySummaryTime === option;
+              const disabled =
+                Platform.OS === "web" ||
+                notificationsSaving === "weekly" ||
+                preferencesLoading;
+              const label = formatTimeOfDayLabel(option, locale);
+              return (
+                <Pressable
+                  key={option}
+                  onPress={() => handleSelectWeeklyTime(option)}
+                  disabled={disabled}
+                  style={({ pressed }) => [
+                    styles.lockTimerChip,
+                    {
+                      borderColor: isSelected
+                        ? theme.orbPrimary
+                        : theme.backgroundSecondary,
+                      backgroundColor: isSelected
+                        ? theme.backgroundSecondary
+                        : "transparent",
+                      opacity: disabled ? 0.5 : pressed ? 0.6 : 1,
+                    },
+                  ]}
+                  testID={`profile-weekly-time-${option}`}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected: isSelected, disabled }}
+                  accessibilityLabel={`${t("profile.weeklySummary.timeLabel")} ${label}`}
+                >
+                  <Text
+                    style={[
+                      styles.lockTimerChipText,
+                      {
+                        color: isSelected ? theme.orbPrimary : theme.text,
+                      },
+                    ]}
+                  >
+                    {label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+      </Card>
+
       <Card elevation={1} style={styles.historyCard}>
         <ThemedText type="h4" style={styles.cardTitle}>
           {t("profile.tokens.title", { days: HISTORY_DAYS })}
@@ -3376,6 +4072,51 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   lockTimerChipText: {
+    ...Typography.small,
+    fontFamily: fontForWeight("600"),
+  },
+  remindersCard: {
+    marginTop: Spacing.lg,
+    paddingVertical: Spacing.xl,
+  },
+  weeklyCard: {
+    marginTop: Spacing.lg,
+    paddingVertical: Spacing.xl,
+  },
+  weeklyOpenButton: {
+    marginTop: Spacing.md,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: Spacing.xs,
+    paddingVertical: Spacing.sm + 2,
+    paddingHorizontal: Spacing.lg,
+    borderRadius: BorderRadius.full,
+    borderWidth: 1,
+    marginBottom: Spacing.md,
+  },
+  weeklyOpenText: {
+    ...Typography.small,
+    fontFamily: fontForWeight("600"),
+  },
+  weeklyDayChip: {
+    minWidth: 38,
+    paddingHorizontal: Spacing.sm + 2,
+    paddingVertical: Spacing.xs + 2,
+    borderRadius: BorderRadius.full,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  openSettingsButton: {
+    alignSelf: "flex-start",
+    marginTop: Spacing.sm,
+    paddingVertical: Spacing.xs + 2,
+    paddingHorizontal: Spacing.md,
+    borderRadius: BorderRadius.full,
+    borderWidth: 1,
+  },
+  openSettingsText: {
     ...Typography.small,
     fontFamily: fontForWeight("600"),
   },

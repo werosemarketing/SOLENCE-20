@@ -71,6 +71,11 @@ export type ClientPreferences = {
   tone: Tone | null;
   voice: Voice | null;
   language: Language | null;
+  reminderEnabled: boolean;
+  reminderTime: string;
+  weeklySummaryEnabled: boolean;
+  weeklySummaryDay: number;
+  weeklySummaryTime: string;
   onboardingCompletedAt: string | null;
 };
 
@@ -80,5 +85,10 @@ export const EMPTY_PREFERENCES: ClientPreferences = {
   tone: null,
   voice: null,
   language: null,
+  reminderEnabled: false,
+  reminderTime: "20:00",
+  weeklySummaryEnabled: false,
+  weeklySummaryDay: 0,
+  weeklySummaryTime: "19:00",
   onboardingCompletedAt: null,
 };

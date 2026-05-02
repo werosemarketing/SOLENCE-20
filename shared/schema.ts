@@ -25,6 +25,22 @@ export const users = pgTable(
     // replies. Nullable so legacy rows + brand-new accounts fall back to
     // English (DEFAULT_LANGUAGE) without a backfill.
     language: text("language"),
+    // Gentle daily reminder preference. The notification itself is scheduled
+    // and delivered locally on-device via expo-notifications; the server
+    // only stores the user's choice so it survives a reinstall and can be
+    // re-applied on a new device. `reminderTime` is stored as a 24-hour
+    // "HH:MM" string interpreted in the user's local timezone by the
+    // device that schedules the notification.
+    reminderEnabled: boolean("reminder_enabled").notNull().default(false),
+    reminderTime: text("reminder_time").notNull().default("20:00"),
+    // Weekly reflection summary preference. Same on-device scheduling
+    // model as the daily reminder. `weeklySummaryDay` follows JS's
+    // getDay() convention (0=Sunday … 6=Saturday); time is "HH:MM".
+    weeklySummaryEnabled: boolean("weekly_summary_enabled")
+      .notNull()
+      .default(false),
+    weeklySummaryDay: integer("weekly_summary_day").notNull().default(0),
+    weeklySummaryTime: text("weekly_summary_time").notNull().default("19:00"),
     onboardingCompletedAt: timestamp("onboarding_completed_at"),
     // Personal share code printed on the Profile invite card. Generated on
     // first registration (or lazily backfilled for legacy rows). Lower-cased
@@ -77,6 +93,20 @@ export const INTENT_OPTIONS = [
 ] as const;
 export type Intent = (typeof INTENT_OPTIONS)[number];
 
+// 24-hour "HH:MM" string with leading zeros — matches the format used by
+// the on-device daily/weekly notification schedulers. Stored as text so we
+// keep timezone interpretation on the device that does the scheduling.
+export const TIME_OF_DAY_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
+export const DEFAULT_REMINDER_TIME = "20:00";
+export const DEFAULT_WEEKLY_SUMMARY_TIME = "19:00";
+// 0 = Sunday … 6 = Saturday, matching JavaScript's Date.getDay().
+export const DEFAULT_WEEKLY_SUMMARY_DAY = 0;
+
+const timeOfDaySchema = z
+  .string()
+  .regex(TIME_OF_DAY_PATTERN, "Time must be HH:MM in 24-hour format");
+const weekdaySchema = z.number().int().min(0).max(6);
+
 export const updatePreferencesSchema = z.object({
   displayName: z
     .string()
@@ -92,6 +122,11 @@ export const updatePreferencesSchema = z.object({
   tone: z.enum(TONE_OPTIONS).nullable().optional(),
   voice: z.enum(VOICE_OPTIONS).nullable().optional(),
   language: z.enum(LANGUAGE_OPTIONS).nullable().optional(),
+  reminderEnabled: z.boolean().optional(),
+  reminderTime: timeOfDaySchema.optional(),
+  weeklySummaryEnabled: z.boolean().optional(),
+  weeklySummaryDay: weekdaySchema.optional(),
+  weeklySummaryTime: timeOfDaySchema.optional(),
   markOnboardingComplete: z.boolean().optional(),
 });
 
@@ -103,6 +138,11 @@ export type UserPreferences = {
   tone: Tone | null;
   voice: Voice | null;
   language: Language | null;
+  reminderEnabled: boolean;
+  reminderTime: string;
+  weeklySummaryEnabled: boolean;
+  weeklySummaryDay: number;
+  weeklySummaryTime: string;
   onboardingCompletedAt: string | null;
 };
 

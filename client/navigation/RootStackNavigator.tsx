@@ -4,6 +4,7 @@ import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import type { NavigatorScreenParams } from "@react-navigation/native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Linking from "expo-linking";
+import * as Notifications from "expo-notifications";
 import { useTranslation } from "react-i18next";
 import DisclaimerScreen from "@/screens/DisclaimerScreen";
 import OnboardingScreen from "@/screens/OnboardingScreen";
@@ -12,6 +13,7 @@ import AuthScreen from "@/screens/AuthScreen";
 import UpgradeScreen from "@/screens/UpgradeScreen";
 import ConversationDetailScreen from "@/screens/ConversationDetailScreen";
 import BreathingScreen from "@/screens/BreathingScreen";
+import WeeklySummaryScreen from "@/screens/WeeklySummaryScreen";
 import MainTabNavigator, { type MainTabParamList } from "@/navigation/MainTabNavigator";
 import LockScreen from "@/components/LockScreen";
 import { useScreenOptions } from "@/hooks/useScreenOptions";
@@ -21,6 +23,13 @@ import {
   thresholdToMs,
   type AppLockPreferences,
 } from "@/lib/app-lock";
+import {
+  NOTIFICATION_CATEGORIES,
+  categoryFromResponse,
+  configureNotificationsForApp,
+  isNotificationsSupported,
+} from "@/lib/notifications";
+import { navigationRef } from "@/lib/navigation-ref";
 
 const STORAGE_KEY_DISCLAIMER = "solence_disclaimer_accepted";
 const STORAGE_KEY_ONBOARDING = "solence_onboarding_complete";
@@ -37,6 +46,7 @@ export type RootStackParamList = {
     scrollToMessageId?: number;
   };
   Breathing: undefined;
+  WeeklySummary: { weekOffset?: number } | undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -158,6 +168,49 @@ export default function RootStackNavigator() {
       subscription.remove();
     };
   }, []);
+
+  // Configure local notifications + listen for taps. We install the
+  // foreground handler at boot so a scheduled reminder still surfaces a
+  // banner if the app happens to be open. The response listener routes
+  // a tap on the weekly-summary notification straight to that screen,
+  // which is the deep-link contract the Profile UI promises the user.
+  // Cold-start taps are handled via getLastNotificationResponseAsync so
+  // we don't lose the navigation when the app was launched by the tap.
+  useEffect(() => {
+    if (!isNotificationsSupported()) return;
+    configureNotificationsForApp();
+
+    const handleResponse = (
+      response: Notifications.NotificationResponse | null,
+    ) => {
+      if (!response) return;
+      // Wait until the app is in the "main" stage and a token is present
+      // before navigating — otherwise we'd be pushing onto a navigator
+      // that hasn't mounted yet (auth/onboarding screens).
+      if (stage !== "main") return;
+      const category = categoryFromResponse(response);
+      if (
+        category === NOTIFICATION_CATEGORIES.weeklySummary &&
+        navigationRef.isReady()
+      ) {
+        navigationRef.navigate("WeeklySummary", { weekOffset: 0 });
+      }
+      // Daily reminder taps just open the app to wherever it last was —
+      // no special routing intended, the nudge itself is the point.
+    };
+
+    Notifications.getLastNotificationResponseAsync()
+      .then(handleResponse)
+      .catch(() => {
+        // Non-fatal — just means there was no pending response.
+      });
+    const sub = Notifications.addNotificationResponseReceivedListener(
+      handleResponse,
+    );
+    return () => {
+      sub.remove();
+    };
+  }, [stage]);
 
   useEffect(() => {
     if (stage === "agreement" && Platform.OS !== "web") {
@@ -368,6 +421,13 @@ export default function RootStackNavigator() {
           presentation: "modal",
           animation: "slide_from_bottom",
           gestureEnabled: true,
+        }}
+      />
+      <Stack.Screen
+        name="WeeklySummary"
+        component={WeeklySummaryScreen}
+        options={{
+          title: t("weeklySummary.header"),
         }}
       />
     </Stack.Navigator>

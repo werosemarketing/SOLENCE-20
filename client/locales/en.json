@@ -477,6 +477,36 @@
         "6": "S"
       }
     },
+    "reminders": {
+      "title": "Daily reminder",
+      "subtitle": "A soft nudge each day to take a quiet moment with Solence.",
+      "toggleLabel": "Send a daily reminder",
+      "toggleHelp": "When on, Solence sends one gentle local notification at your chosen time.",
+      "toggleHelpWeb": "Reminders need a real device — open Solence in Expo Go on your phone.",
+      "toggleHelpDenied": "Notifications are turned off for Solence. Enable them in Settings to receive reminders.",
+      "timeLabel": "Time of day",
+      "errorPermission": "We need notification permission to send reminders.",
+      "errorGeneric": "Couldn't save your reminder. Please try again.",
+      "openSettings": "Open Settings",
+      "notificationTitle": "A quiet moment with Solence",
+      "notificationBody": "When you're ready, I'm here."
+    },
+    "weeklySummary": {
+      "title": "Weekly reflection",
+      "subtitle": "A soft summary of your week — sessions, mood, and what kept coming up.",
+      "openButton": "Open this week",
+      "openA11y": "Open this week's reflection summary",
+      "toggleLabel": "Send a weekly summary",
+      "toggleHelp": "When on, Solence sends one gentle local notification with a link to your week.",
+      "toggleHelpWeb": "Weekly summaries need a real device — open Solence in Expo Go on your phone.",
+      "toggleHelpDenied": "Notifications are turned off for Solence. Enable them in Settings to receive weekly summaries.",
+      "dayLabel": "Day of the week",
+      "timeLabel": "Time of day",
+      "errorPermission": "We need notification permission to send weekly summaries.",
+      "errorGeneric": "Couldn't save your weekly summary. Please try again.",
+      "notificationTitle": "Your week with Solence",
+      "notificationBody": "A gentle look back at your reflections this week."
+    },
     "upgrade": {
       "freePlanTitle": "Free plan",
       "freePlanSubtitle": "Daily reflections that reset each day.",
@@ -566,6 +596,45 @@
       "purchaseFailed": "Couldn't complete the purchase. Please try again.",
       "restoreFailed": "Couldn't restore. Please try again.",
       "noPurchases": "No previous purchases found."
+    }
+  },
+  "weeklySummary": {
+    "header": "Weekly reflection",
+    "previous": "Previous week",
+    "next": "Next week",
+    "previousA11y": "Show the previous week",
+    "nextA11y": "Show the next week",
+    "thisWeek": "This week",
+    "lastWeek": "Last week",
+    "weeksAgo": "{{count}} weeks ago",
+    "rangeLabel": "{{start}} – {{end}}",
+    "loading": "Loading…",
+    "errorGeneric": "Couldn't load your weekly summary. Pull down to try again.",
+    "retry": "Try again",
+    "sessions": {
+      "title": "Sessions",
+      "value_one": "{{count}} session",
+      "value_other": "{{count}} sessions",
+      "empty": "No sessions yet"
+    },
+    "mood": {
+      "title": "Average mood",
+      "value": "{{value}} / 5",
+      "entries_one": "{{count}} entry",
+      "entries_other": "{{count}} entries",
+      "empty": "No mood entries"
+    },
+    "themes": {
+      "title": "What kept coming up",
+      "empty": "Themes appear once you've reflected a few times this week."
+    },
+    "highlight": {
+      "title": "A line to keep",
+      "empty": "Save a moment in any conversation and it'll show up here."
+    },
+    "empty": {
+      "title": "A quiet week",
+      "body": "When you have a few sessions in a week, your reflection summary will appear here."
     }
   },
   "time": {

@@ -15,6 +15,7 @@ import { initI18n } from "@/lib/i18n";
 import RootStackNavigator from "@/navigation/RootStackNavigator";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { TextScaleProvider } from "@/hooks/useTextScale";
+import { navigationRef } from "@/lib/navigation-ref";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -72,7 +73,7 @@ export default function App() {
           <SafeAreaProvider>
             <GestureHandlerRootView style={styles.root}>
               <KeyboardProvider>
-                <NavigationContainer>
+                <NavigationContainer ref={navigationRef}>
                   <RootStackNavigator />
                 </NavigationContainer>
                 <StatusBar style="auto" />
