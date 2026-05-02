@@ -5,6 +5,7 @@ import {
   Pressable,
   Share,
   StyleSheet,
+  Switch,
   Text,
   View,
 } from "react-native";
@@ -14,6 +15,7 @@ import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
+import * as LocalAuthentication from "expo-local-authentication";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useHeaderHeight } from "@react-navigation/elements";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
@@ -29,6 +31,15 @@ import { PersonalizationDialog } from "@/components/PersonalizationDialog";
 import { MessageActionSheet } from "@/components/MessageActionSheet";
 import { ShareQuoteModal } from "@/components/ShareQuoteModal";
 import { ThemedText } from "@/components/ThemedText";
+import {
+  DEFAULT_APP_LOCK_PREFERENCES,
+  RELOCK_LABELS,
+  RELOCK_OPTIONS,
+  loadAppLockPreferences,
+  saveAppLockPreferences,
+  type AppLockPreferences,
+  type RelockThreshold,
+} from "@/lib/app-lock";
 import { useTheme } from "@/hooks/useTheme";
 import {
   TEXT_SCALE_OPTIONS,
@@ -339,6 +350,20 @@ export default function ProfileScreen() {
   const [exportStatus, setExportStatus] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
 
+  // Privacy & Lock state. Mirrors expo-secure-store-backed prefs and
+  // talks to expo-local-authentication for the disable-time
+  // re-authentication step. On web the section is rendered but
+  // disabled — biometrics aren't available there.
+  const [appLockPrefs, setAppLockPrefs] = useState<AppLockPreferences>(
+    DEFAULT_APP_LOCK_PREFERENCES,
+  );
+  const [appLockLoading, setAppLockLoading] = useState(true);
+  const [appLockSaving, setAppLockSaving] = useState(false);
+  const [appLockError, setAppLockError] = useState<string | null>(null);
+  const [biometricSupported, setBiometricSupported] = useState<boolean | null>(
+    null,
+  );
+
   const loadPreferences = useCallback(async (signal?: AbortSignal) => {
     try {
       setPreferencesLoading(true);
@@ -378,6 +403,146 @@ export default function ProfileScreen() {
     loadPreferences(controller.signal);
     return () => controller.abort();
   }, [loadPreferences]);
+
+  // Load app-lock prefs + biometric capability on mount. Web is hardwired
+  // to "no biometrics" — there's no real device to authenticate with.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const prefs = await loadAppLockPreferences();
+        if (cancelled) return;
+        setAppLockPrefs(prefs);
+        if (Platform.OS === "web") {
+          setBiometricSupported(false);
+        } else {
+          try {
+            const hasHardware = await LocalAuthentication.hasHardwareAsync();
+            const enrolled = await LocalAuthentication.isEnrolledAsync();
+            if (!cancelled) setBiometricSupported(hasHardware && enrolled);
+          } catch {
+            if (!cancelled) setBiometricSupported(false);
+          }
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setAppLockError(
+            e instanceof Error
+              ? e.message
+              : "Could not load lock preferences",
+          );
+        }
+      } finally {
+        if (!cancelled) setAppLockLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Toggle app-lock on/off. Turning ON only requires that the device
+  // can authenticate — we don't immediately lock the user out of the
+  // session they're already in. Turning OFF requires a successful
+  // local auth step first so a stranger holding the unlocked phone
+  // can't simply flip the protection off.
+  const handleToggleAppLock = useCallback(
+    async (next: boolean) => {
+      if (appLockSaving || appLockLoading) return;
+      if (Platform.OS === "web") return;
+      setAppLockError(null);
+
+      if (next) {
+        // Enabling: confirm hardware + enrollment, then save.
+        try {
+          setAppLockSaving(true);
+          const hasHardware = await LocalAuthentication.hasHardwareAsync();
+          const enrolled = await LocalAuthentication.isEnrolledAsync();
+          if (!hasHardware) {
+            setAppLockError(
+              "This device doesn't support Face ID, Touch ID, or a passcode lock.",
+            );
+            return;
+          }
+          if (!enrolled) {
+            setAppLockError(
+              "Set up Face ID, Touch ID, or a device passcode first, then try again.",
+            );
+            return;
+          }
+          const updated: AppLockPreferences = {
+            ...appLockPrefs,
+            enabled: true,
+          };
+          await saveAppLockPreferences(updated);
+          setAppLockPrefs(updated);
+          setBiometricSupported(true);
+        } catch (e) {
+          setAppLockError(
+            e instanceof Error ? e.message : "Could not enable app lock",
+          );
+        } finally {
+          setAppLockSaving(false);
+        }
+        return;
+      }
+
+      // Disabling: re-authenticate first, then save.
+      try {
+        setAppLockSaving(true);
+        const result = await LocalAuthentication.authenticateAsync({
+          promptMessage: "Confirm to turn off the Solence lock",
+          disableDeviceFallback: false,
+          cancelLabel: "Cancel",
+        });
+        if (!result.success) {
+          setAppLockError(
+            "Authentication required to turn off the lock. Please try again.",
+          );
+          return;
+        }
+        const updated: AppLockPreferences = {
+          ...appLockPrefs,
+          enabled: false,
+        };
+        await saveAppLockPreferences(updated);
+        setAppLockPrefs(updated);
+      } catch (e) {
+        setAppLockError(
+          e instanceof Error ? e.message : "Could not turn off app lock",
+        );
+      } finally {
+        setAppLockSaving(false);
+      }
+    },
+    [appLockPrefs, appLockLoading, appLockSaving],
+  );
+
+  // Choose a re-lock threshold. We persist immediately — there's no
+  // separate "save" affordance. Disabled when the lock itself is off,
+  // since the value would be meaningless.
+  const handleSelectRelock = useCallback(
+    async (threshold: RelockThreshold) => {
+      if (appLockSaving) return;
+      if (!appLockPrefs.enabled) return;
+      if (appLockPrefs.threshold === threshold) return;
+      const previous = appLockPrefs;
+      setAppLockPrefs({ ...appLockPrefs, threshold });
+      try {
+        setAppLockSaving(true);
+        setAppLockError(null);
+        await saveAppLockPreferences({ ...appLockPrefs, threshold });
+      } catch (e) {
+        setAppLockPrefs(previous);
+        setAppLockError(
+          e instanceof Error ? e.message : "Could not save lock timing",
+        );
+      } finally {
+        setAppLockSaving(false);
+      }
+    },
+    [appLockPrefs, appLockSaving],
+  );
 
   // Track when the preview finishes so we can flip the play indicator off.
   useEffect(() => {
@@ -1499,6 +1664,141 @@ export default function ProfileScreen() {
         </View>
       </Card>
 
+      <Card elevation={1} style={styles.lockCard}>
+        <ThemedText type="h4" style={styles.cardTitle}>
+          Privacy & Lock
+        </ThemedText>
+        <ThemedText
+          type="small"
+          style={[styles.cardDescription, { color: theme.textMuted }]}
+        >
+          Require Face ID, Touch ID, or your device passcode to open Solence.
+        </ThemedText>
+
+        {appLockLoading ? (
+          <View style={styles.loadingContainer} testID="profile-lock-loading">
+            <ActivityIndicator color={theme.orbPrimary} />
+          </View>
+        ) : (
+          <View>
+            <View
+              style={[
+                styles.lockToggleRow,
+                { borderBottomColor: theme.backgroundSecondary },
+              ]}
+            >
+              <View style={styles.lockToggleText}>
+                <Text
+                  style={[styles.lockToggleTitle, { color: theme.text }]}
+                  testID="profile-lock-toggle-label"
+                >
+                  Require Face ID / passcode
+                </Text>
+                <Text
+                  style={[
+                    styles.lockToggleHelp,
+                    { color: theme.textMuted },
+                  ]}
+                >
+                  {Platform.OS === "web"
+                    ? "Available on iOS and Android — open Solence in Expo Go on your device."
+                    : biometricSupported === false
+                      ? "Set up Face ID, Touch ID, or a device passcode in Settings to enable this."
+                      : "When on, Solence asks to authenticate after it returns from the background."}
+                </Text>
+              </View>
+              <Switch
+                value={appLockPrefs.enabled}
+                onValueChange={handleToggleAppLock}
+                disabled={
+                  Platform.OS === "web" ||
+                  appLockSaving ||
+                  (biometricSupported === false && !appLockPrefs.enabled)
+                }
+                trackColor={{
+                  false: theme.backgroundSecondary,
+                  true: theme.orbPrimary,
+                }}
+                thumbColor={
+                  Platform.OS === "android"
+                    ? appLockPrefs.enabled
+                      ? theme.orbSecondary
+                      : theme.backgroundTertiary
+                    : undefined
+                }
+                testID="profile-lock-toggle"
+                accessibilityLabel="Require Face ID or passcode to open Solence"
+              />
+            </View>
+
+            {appLockError ? (
+              <Text
+                style={[styles.lockError, { color: theme.textMuted }]}
+                testID="profile-lock-error"
+              >
+                {appLockError}
+              </Text>
+            ) : null}
+
+            <View style={styles.lockTimerSection}>
+              <Text
+                style={[styles.lockTimerLabel, { color: theme.textMuted }]}
+              >
+                Re-lock
+              </Text>
+              <View style={styles.lockTimerOptions}>
+                {RELOCK_OPTIONS.map((option) => {
+                  const isSelected = appLockPrefs.threshold === option;
+                  const disabled =
+                    !appLockPrefs.enabled ||
+                    appLockSaving ||
+                    Platform.OS === "web";
+                  return (
+                    <Pressable
+                      key={option}
+                      onPress={() => handleSelectRelock(option)}
+                      disabled={disabled}
+                      style={({ pressed }) => [
+                        styles.lockTimerChip,
+                        {
+                          borderColor: isSelected
+                            ? theme.orbPrimary
+                            : theme.backgroundSecondary,
+                          backgroundColor: isSelected
+                            ? theme.backgroundSecondary
+                            : "transparent",
+                          opacity: disabled ? 0.5 : pressed ? 0.6 : 1,
+                        },
+                      ]}
+                      testID={`profile-lock-timer-${option}`}
+                      accessibilityRole="radio"
+                      accessibilityState={{
+                        selected: isSelected,
+                        disabled,
+                      }}
+                      accessibilityLabel={`Re-lock ${RELOCK_LABELS[option]}`}
+                    >
+                      <Text
+                        style={[
+                          styles.lockTimerChipText,
+                          {
+                            color: isSelected
+                              ? theme.orbPrimary
+                              : theme.text,
+                          },
+                        ]}
+                      >
+                        {RELOCK_LABELS[option]}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+          </View>
+        )}
+      </Card>
+
       <Card elevation={1} style={styles.historyCard}>
         <ThemedText type="h4" style={styles.cardTitle}>
           Last {HISTORY_DAYS} days
@@ -2537,6 +2837,63 @@ const styles = StyleSheet.create({
   },
   textSizePreviewBody: {
     fontFamily: fontForWeight("300"),
+  },
+  lockCard: {
+    marginTop: Spacing.lg,
+    paddingVertical: Spacing.xl,
+  },
+  lockToggleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: Spacing.md,
+    paddingBottom: Spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  lockToggleText: {
+    flex: 1,
+    gap: 4,
+  },
+  lockToggleTitle: {
+    ...Typography.body,
+    fontFamily: fontForWeight("600"),
+  },
+  lockToggleHelp: {
+    ...Typography.small,
+    fontFamily: fontForWeight("400"),
+    lineHeight: 18,
+  },
+  lockError: {
+    ...Typography.small,
+    fontFamily: fontForWeight("400"),
+    marginTop: Spacing.sm,
+    textAlign: "left",
+  },
+  lockTimerSection: {
+    marginTop: Spacing.md,
+    gap: Spacing.sm,
+  },
+  lockTimerLabel: {
+    ...Typography.small,
+    fontSize: 12,
+    fontFamily: fontForWeight("500"),
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+  },
+  lockTimerOptions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: Spacing.xs + 2,
+  },
+  lockTimerChip: {
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs + 2,
+    borderRadius: BorderRadius.full,
+    borderWidth: 1,
+  },
+  lockTimerChipText: {
+    ...Typography.small,
+    fontFamily: fontForWeight("600"),
   },
   voiceList: {
     gap: Spacing.sm,

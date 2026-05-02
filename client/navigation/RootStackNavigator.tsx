@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from "react";
-import { BackHandler, Platform } from "react-native";
+import React, { useState, useEffect, useCallback, useRef } from "react";
+import { AppState, AppStateStatus, BackHandler, Platform } from "react-native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import type { NavigatorScreenParams } from "@react-navigation/native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -12,8 +12,14 @@ import UpgradeScreen from "@/screens/UpgradeScreen";
 import ConversationDetailScreen from "@/screens/ConversationDetailScreen";
 import BreathingScreen from "@/screens/BreathingScreen";
 import MainTabNavigator, { type MainTabParamList } from "@/navigation/MainTabNavigator";
+import LockScreen from "@/components/LockScreen";
 import { useScreenOptions } from "@/hooks/useScreenOptions";
 import { getApiUrl } from "@/lib/query-client";
+import {
+  loadAppLockPreferences,
+  thresholdToMs,
+  type AppLockPreferences,
+} from "@/lib/app-lock";
 
 const STORAGE_KEY_DISCLAIMER = "solence_disclaimer_accepted";
 const STORAGE_KEY_ONBOARDING = "solence_onboarding_complete";
@@ -63,6 +69,13 @@ export default function RootStackNavigator() {
     null,
   );
 
+  // App-lock state. `lockPrefs === null` while we're still loading the
+  // user's preference; once we know it, `locked` decides whether the
+  // LockScreen overlay is rendered above the rest of the app.
+  const [lockPrefs, setLockPrefs] = useState<AppLockPreferences | null>(null);
+  const [locked, setLocked] = useState(false);
+  const backgroundedAtRef = useRef<number | null>(null);
+
   useEffect(() => {
     checkProgress();
   }, []);
@@ -88,6 +101,59 @@ export default function RootStackNavigator() {
     return () => {
       cancelled = true;
       sub.remove();
+    };
+  }, []);
+
+  // Load the app-lock preference on mount so we can decide whether to
+  // show the lock screen on cold launch. We default to "show locked"
+  // when enabled is true so the protected content never flashes before
+  // the gate paints.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const prefs = await loadAppLockPreferences();
+      if (cancelled) return;
+      setLockPrefs(prefs);
+      if (prefs.enabled) setLocked(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Re-load preferences whenever we return to foreground so a toggle
+  // change made during the session takes effect on the next background
+  // round-trip without an app restart.
+  useEffect(() => {
+    if (Platform.OS === "web") {
+      return;
+    }
+    const subscription = AppState.addEventListener(
+      "change",
+      (next: AppStateStatus) => {
+        if (next === "background" || next === "inactive") {
+          backgroundedAtRef.current = Date.now();
+        } else if (next === "active") {
+          // Re-fetch latest prefs in case the user just toggled them.
+          loadAppLockPreferences().then((prefs) => {
+            setLockPrefs(prefs);
+            if (!prefs.enabled) {
+              backgroundedAtRef.current = null;
+              return;
+            }
+            const since = backgroundedAtRef.current;
+            backgroundedAtRef.current = null;
+            if (since == null) return;
+            const elapsed = Date.now() - since;
+            if (elapsed >= thresholdToMs(prefs.threshold)) {
+              setLocked(true);
+            }
+          });
+        }
+      },
+    );
+    return () => {
+      subscription.remove();
     };
   }, []);
 
@@ -207,8 +273,24 @@ export default function RootStackNavigator() {
   const handleSignOut = useCallback(async () => {
     await AsyncStorage.removeItem(STORAGE_KEY_AUTH_TOKEN);
     setAuthToken(null);
+    // Clear the lock so the AuthScreen isn't hidden behind it. The
+    // user's lock preference itself is preserved so it re-engages
+    // after they sign in again.
+    setLocked(false);
+    backgroundedAtRef.current = null;
     setStage("auth");
   }, []);
+
+  const handleUnlock = useCallback(() => {
+    setLocked(false);
+    backgroundedAtRef.current = null;
+  }, []);
+
+  // Render the lock overlay above whatever stage we're in, but only
+  // once the user is authenticated — the AuthScreen itself shouldn't
+  // be gated, otherwise a signed-out user is trapped.
+  const showLock =
+    locked && lockPrefs?.enabled === true && stage !== "auth" && stage !== "loading";
 
   if (stage === "loading") {
     return null;
@@ -221,6 +303,10 @@ export default function RootStackNavigator() {
         initialReferralCode={pendingReferralCode}
       />
     );
+  }
+
+  if (showLock) {
+    return <LockScreen onUnlock={handleUnlock} onSignOut={handleSignOut} />;
   }
 
   if (stage === "disclaimer") {
