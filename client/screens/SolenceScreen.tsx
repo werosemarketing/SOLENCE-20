@@ -1219,6 +1219,28 @@ export default function SolenceScreen({
     setPostMoodConversationId(null);
   };
 
+  // Fire the end-of-session reflection generator on the server. Intentionally
+  // fire-and-forget: the user has already moved on (post-mood sheet, or
+  // fully torn down), so any latency or failure here must never surface.
+  const requestReflectionForConversation = async (conversationId: number) => {
+    try {
+      const token = await AsyncStorage.getItem(STORAGE_KEY_AUTH_TOKEN);
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      await fetch(`${getApiUrl()}/api/conversations/${conversationId}/end`, {
+        method: "POST",
+        headers,
+      });
+    } catch (err) {
+      console.log(
+        "Reflection request failed:",
+        err instanceof Error ? err.message : err,
+      );
+    }
+  };
+
   const endConversation = () => {
     // Snapshot the just-ended conversation BEFORE we tear state down — the
     // post-mood sheet needs to attach to this id, and we only show it
@@ -1255,6 +1277,14 @@ export default function SolenceScreen({
     if (hadInteraction && endedConversationId != null) {
       setPostMoodConversationId(endedConversationId);
       setShowPostMoodSheet(true);
+      // Fire-and-forget: ask the server to generate a reflection summary +
+      // takeaway for the just-ended session. The server is idempotent, so
+      // a duplicate call (e.g. from a Profile refresh) is a no-op. We
+      // deliberately do NOT await — the user shouldn't have to wait for
+      // OpenAI before the post-mood sheet appears, and a network error
+      // here just means the reflection won't show up; the next end of any
+      // session will retry implicitly because the columns are still NULL.
+      void requestReflectionForConversation(endedConversationId);
     }
   };
 

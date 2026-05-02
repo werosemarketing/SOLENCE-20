@@ -47,6 +47,9 @@ type ConversationResponse = {
     id: number;
     title: string;
     createdAt: string;
+    reflectionSummary?: string | null;
+    reflectionTakeaway?: string | null;
+    reflectionGeneratedAt?: string | null;
   };
   messages: Message[];
 };
