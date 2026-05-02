@@ -32,6 +32,10 @@ import { RenameDialog } from "@/components/RenameDialog";
 import { PersonalizationDialog } from "@/components/PersonalizationDialog";
 import { MessageActionSheet } from "@/components/MessageActionSheet";
 import { ShareQuoteModal } from "@/components/ShareQuoteModal";
+import {
+  TimePickerModal,
+  openAndroidTimePicker,
+} from "@/components/TimePickerModal";
 import { ThemedText } from "@/components/ThemedText";
 import {
   DEFAULT_APP_LOCK_PREFERENCES,
@@ -91,6 +95,43 @@ const REMINDER_TIME_OPTIONS = [
   "22:00",
 ];
 const WEEKLY_DAY_OPTIONS = [0, 1, 2, 3, 4, 5, 6];
+
+// Identifies the picker target so a single TimePickerModal can drive both
+// the daily reminder and weekly summary cards.
+type TimePickerTarget = "reminder" | "weekly";
+
+// Best-effort detection of whether the user's locale formats clock times
+// in 24-hour notation. Used to pre-configure the native time picker so
+// early risers / night-shift folks see the format they expect.
+function isLocale24Hour(locale: string | undefined): boolean {
+  try {
+    const sample = new Intl.DateTimeFormat(locale, {
+      hour: "numeric",
+    }).format(new Date(2020, 0, 1, 13, 0, 0));
+    return !/AM|PM|a\.\s?m\.|p\.\s?m\./i.test(sample);
+  } catch {
+    return false;
+  }
+}
+
+// Convert a stored "HH:MM" 24-hour string into a Date so we can hand it to
+// @react-native-community/datetimepicker as its initial value.
+function timeStringToDate(value: string): Date {
+  const match = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(value ?? "");
+  const hour = match ? Number(match[1]) : 20;
+  const minute = match ? Number(match[2]) : 0;
+  const d = new Date();
+  d.setHours(hour, minute, 0, 0);
+  return d;
+}
+
+// Format a Date as the canonical 24-hour "HH:MM" string we persist
+// server-side and hand to the local notification scheduler.
+function dateToTimeString(date: Date): string {
+  const h = String(date.getHours()).padStart(2, "0");
+  const m = String(date.getMinutes()).padStart(2, "0");
+  return `${h}:${m}`;
+}
 
 const STORAGE_KEY_AUTH_TOKEN = "solence_auth_token";
 const HISTORY_DAYS = 7;
@@ -406,6 +447,12 @@ export default function ProfileScreen() {
   const [reminderError, setReminderError] = useState<string | null>(null);
   const [weeklyError, setWeeklyError] = useState<string | null>(null);
   const [notificationsBlocked, setNotificationsBlocked] = useState(false);
+
+  // Which custom-time picker (if any) is currently open. Drives the iOS
+  // modal's `visible` prop. On Android the picker is fully imperative
+  // (DateTimePickerAndroid.open) and never sets this state.
+  const [timePickerTarget, setTimePickerTarget] =
+    useState<TimePickerTarget | null>(null);
 
   // "Solence's voice" picker state. Selection saves immediately on tap;
   // preview hits a separate rate-limited endpoint and plays via expo-audio.
@@ -949,6 +996,67 @@ export default function ProfileScreen() {
     ],
   );
 
+  // Opens the native time picker for the requested target. On Android the
+  // picker is fully imperative — the dialog appears on the spot and we hand
+  // the chosen time back to the same persistence path as the preset chips.
+  // On iOS we just flip state so a Modal-rendered DateTimePicker mounts.
+  const openCustomTimePicker = useCallback(
+    (target: TimePickerTarget) => {
+      if (Platform.OS === "web") return;
+      if (notificationsSaving) return;
+      if (preferencesLoading) return;
+      const is24Hour = isLocale24Hour(locale);
+      if (Platform.OS === "android") {
+        const initial =
+          target === "reminder"
+            ? preferences.reminderTime
+            : preferences.weeklySummaryTime;
+        openAndroidTimePicker({
+          value: timeStringToDate(initial),
+          is24Hour,
+          onSelect: (date) => {
+            const formatted = dateToTimeString(date);
+            if (target === "reminder") {
+              void handleSelectReminderTime(formatted);
+            } else {
+              void handleSelectWeeklyTime(formatted);
+            }
+          },
+        });
+        return;
+      }
+      setTimePickerTarget(target);
+    },
+    [
+      notificationsSaving,
+      preferencesLoading,
+      locale,
+      preferences.reminderTime,
+      preferences.weeklySummaryTime,
+      handleSelectReminderTime,
+      handleSelectWeeklyTime,
+    ],
+  );
+
+  const handleConfirmCustomTime = useCallback(
+    (date: Date) => {
+      const target = timePickerTarget;
+      setTimePickerTarget(null);
+      if (!target) return;
+      const formatted = dateToTimeString(date);
+      if (target === "reminder") {
+        void handleSelectReminderTime(formatted);
+      } else {
+        void handleSelectWeeklyTime(formatted);
+      }
+    },
+    [timePickerTarget, handleSelectReminderTime, handleSelectWeeklyTime],
+  );
+
+  const handleCancelCustomTime = useCallback(() => {
+    setTimePickerTarget(null);
+  }, []);
+
   const handleOpenWeeklySummary = useCallback(() => {
     navigation.navigate("WeeklySummary", { weekOffset: 0 });
   }, [navigation]);
@@ -1241,6 +1349,14 @@ export default function ProfileScreen() {
         voice: data.preferences.voice ?? prev.voice ?? null,
         // Same for language: not part of personalization, preserve existing.
         language: data.preferences.language ?? prev.language ?? null,
+        // Notification preferences are managed in their own card and aren't
+        // part of personalization; preserve them so the reminder/weekly UI
+        // doesn't reset after saving personalization.
+        reminderEnabled: prev.reminderEnabled,
+        reminderTime: prev.reminderTime,
+        weeklySummaryEnabled: prev.weeklySummaryEnabled,
+        weeklySummaryDay: prev.weeklySummaryDay,
+        weeklySummaryTime: prev.weeklySummaryTime,
         onboardingCompletedAt:
           data.preferences.onboardingCompletedAt ??
           prev.onboardingCompletedAt,
@@ -2623,6 +2739,61 @@ export default function ProfileScreen() {
                 </Pressable>
               );
             })}
+            {(() => {
+              const isCustomSelected =
+                !REMINDER_TIME_OPTIONS.includes(preferences.reminderTime);
+              const disabled =
+                Platform.OS === "web" ||
+                notificationsSaving === "reminder" ||
+                preferencesLoading;
+              const customLabel = isCustomSelected
+                ? formatTimeOfDayLabel(preferences.reminderTime, locale)
+                : t("profile.reminders.customLabel");
+              return (
+                <Pressable
+                  onPress={() => openCustomTimePicker("reminder")}
+                  disabled={disabled}
+                  style={({ pressed }) => [
+                    styles.lockTimerChip,
+                    styles.customTimerChip,
+                    {
+                      borderColor: isCustomSelected
+                        ? theme.orbPrimary
+                        : theme.backgroundSecondary,
+                      backgroundColor: isCustomSelected
+                        ? theme.backgroundSecondary
+                        : "transparent",
+                      opacity: disabled ? 0.5 : pressed ? 0.6 : 1,
+                    },
+                  ]}
+                  testID="profile-reminder-time-custom"
+                  accessibilityRole="button"
+                  accessibilityState={{
+                    selected: isCustomSelected,
+                    disabled,
+                  }}
+                  accessibilityLabel={`${t("profile.reminders.timeLabel")} ${customLabel}`}
+                >
+                  <Feather
+                    name="clock"
+                    size={14}
+                    color={isCustomSelected ? theme.orbPrimary : theme.text}
+                  />
+                  <Text
+                    style={[
+                      styles.lockTimerChipText,
+                      {
+                        color: isCustomSelected
+                          ? theme.orbPrimary
+                          : theme.text,
+                      },
+                    ]}
+                  >
+                    {customLabel}
+                  </Text>
+                </Pressable>
+              );
+            })()}
           </View>
         </View>
       </Card>
@@ -2815,6 +2986,62 @@ export default function ProfileScreen() {
                 </Pressable>
               );
             })}
+            {(() => {
+              const isCustomSelected = !REMINDER_TIME_OPTIONS.includes(
+                preferences.weeklySummaryTime,
+              );
+              const disabled =
+                Platform.OS === "web" ||
+                notificationsSaving === "weekly" ||
+                preferencesLoading;
+              const customLabel = isCustomSelected
+                ? formatTimeOfDayLabel(preferences.weeklySummaryTime, locale)
+                : t("profile.weeklySummary.customLabel");
+              return (
+                <Pressable
+                  onPress={() => openCustomTimePicker("weekly")}
+                  disabled={disabled}
+                  style={({ pressed }) => [
+                    styles.lockTimerChip,
+                    styles.customTimerChip,
+                    {
+                      borderColor: isCustomSelected
+                        ? theme.orbPrimary
+                        : theme.backgroundSecondary,
+                      backgroundColor: isCustomSelected
+                        ? theme.backgroundSecondary
+                        : "transparent",
+                      opacity: disabled ? 0.5 : pressed ? 0.6 : 1,
+                    },
+                  ]}
+                  testID="profile-weekly-time-custom"
+                  accessibilityRole="button"
+                  accessibilityState={{
+                    selected: isCustomSelected,
+                    disabled,
+                  }}
+                  accessibilityLabel={`${t("profile.weeklySummary.timeLabel")} ${customLabel}`}
+                >
+                  <Feather
+                    name="clock"
+                    size={14}
+                    color={isCustomSelected ? theme.orbPrimary : theme.text}
+                  />
+                  <Text
+                    style={[
+                      styles.lockTimerChipText,
+                      {
+                        color: isCustomSelected
+                          ? theme.orbPrimary
+                          : theme.text,
+                      },
+                    ]}
+                  >
+                    {customLabel}
+                  </Text>
+                </Pressable>
+              );
+            })()}
           </View>
         </View>
       </Card>
@@ -3965,6 +4192,20 @@ export default function ProfileScreen() {
         onClose={handleCloseShareSavedMoment}
         testID="profile-saved-moment-share-quote"
       />
+
+      <TimePickerModal
+        visible={timePickerTarget !== null}
+        value={timeStringToDate(
+          timePickerTarget === "weekly"
+            ? preferences.weeklySummaryTime
+            : preferences.reminderTime,
+        )}
+        is24Hour={isLocale24Hour(locale)}
+        locale={locale}
+        onSelect={handleConfirmCustomTime}
+        onCancel={handleCancelCustomTime}
+        testID="profile-time-picker"
+      />
     </KeyboardAwareScrollViewCompat>
   );
 }
@@ -4070,6 +4311,11 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.xs + 2,
     borderRadius: BorderRadius.full,
     borderWidth: 1,
+  },
+  customTimerChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.xs,
   },
   lockTimerChipText: {
     ...Typography.small,
