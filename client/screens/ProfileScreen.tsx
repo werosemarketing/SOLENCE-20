@@ -78,6 +78,41 @@ type ConversationsResponse = {
   conversations: ConversationListItem[];
 };
 
+type SavedMoment = {
+  id: number;
+  messageId: number;
+  favoritedAt: string;
+  message: {
+    role: string;
+    content: string;
+    createdAt: string;
+  };
+  conversation: {
+    id: number;
+    title: string;
+    createdAt: string;
+  };
+};
+
+type FavoritesResponse = {
+  favorites: SavedMoment[];
+};
+
+const SAVED_MOMENTS_LIMIT = 10;
+const SAVED_MOMENT_SNIPPET_MAX_LEN = 220;
+
+function snippetForMoment(content: string): string {
+  const trimmed = content.replace(/\s+/g, " ").trim();
+  if (trimmed.length <= SAVED_MOMENT_SNIPPET_MAX_LEN) return trimmed;
+  const sliced = trimmed.slice(0, SAVED_MOMENT_SNIPPET_MAX_LEN);
+  const lastSpace = sliced.lastIndexOf(" ");
+  const cutoff =
+    lastSpace > SAVED_MOMENT_SNIPPET_MAX_LEN * 0.7
+      ? lastSpace
+      : sliced.length;
+  return `${sliced.slice(0, cutoff).trimEnd()}…`;
+}
+
 // Cache the most recent preview blob URL on web so we can revoke it before
 // creating a new one — otherwise we leak object URLs every time the user
 // previews a different voice.
@@ -174,6 +209,21 @@ export default function ProfileScreen() {
     useState<ConversationListItem | null>(null);
   const [renameSubmitting, setRenameSubmitting] = useState(false);
   const [renameError, setRenameError] = useState<string | null>(null);
+
+  // "Saved moments" card state. Loads on focus alongside conversations so
+  // bookmarks the user just toggled inside ConversationDetail are reflected
+  // when they swipe back to the Profile tab.
+  const [savedMoments, setSavedMoments] = useState<SavedMoment[] | null>(
+    null,
+  );
+  const [savedMomentsLoading, setSavedMomentsLoading] = useState(true);
+  const [savedMomentsError, setSavedMomentsError] = useState<string | null>(
+    null,
+  );
+  const [unfavoritingId, setUnfavoritingId] = useState<number | null>(null);
+  const [savedMomentActionError, setSavedMomentActionError] = useState<
+    string | null
+  >(null);
 
   const [preferences, setPreferences] =
     useState<ClientPreferences>(EMPTY_PREFERENCES);
@@ -529,15 +579,89 @@ export default function ProfileScreen() {
     }
   }, []);
 
+  const loadSavedMoments = useCallback(async (signal?: AbortSignal) => {
+    try {
+      setSavedMomentsLoading(true);
+      setSavedMomentsError(null);
+      const token = await AsyncStorage.getItem(STORAGE_KEY_AUTH_TOKEN);
+      const headers: Record<string, string> = {};
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const apiUrl = getApiUrl();
+      const response = await fetch(
+        `${apiUrl}/api/favorites?limit=${SAVED_MOMENTS_LIMIT}`,
+        { headers, signal },
+      );
+      if (!response.ok) {
+        throw new Error(`Request failed (${response.status})`);
+      }
+      const data = (await response.json()) as FavoritesResponse;
+      if (signal?.aborted) return;
+      setSavedMoments(data.favorites);
+    } catch (e) {
+      if (signal?.aborted) return;
+      const message =
+        e instanceof Error ? e.message : "Could not load saved moments";
+      setSavedMomentsError(message);
+    } finally {
+      if (!signal?.aborted) setSavedMomentsLoading(false);
+    }
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
       const controller = new AbortController();
       loadConversations(controller.signal);
+      loadSavedMoments(controller.signal);
       return () => {
         controller.abort();
       };
-    }, [loadConversations]),
+    }, [loadConversations, loadSavedMoments]),
   );
+
+  const handleOpenSavedMoment = (moment: SavedMoment) => {
+    navigation.navigate("ConversationDetail", {
+      conversationId: moment.conversation.id,
+      title: displayConversationTitle(
+        moment.conversation.title,
+        moment.conversation.createdAt,
+      ),
+      scrollToMessageId: moment.messageId,
+    });
+  };
+
+  const handleUnfavoriteMoment = async (moment: SavedMoment) => {
+    if (unfavoritingId !== null) return;
+    setUnfavoritingId(moment.id);
+    setSavedMomentActionError(null);
+    // Optimistic removal: drop the row immediately so the list feels
+    // responsive. Restore on failure so the user can try again.
+    const previous = savedMoments;
+    setSavedMoments((current) =>
+      current ? current.filter((m) => m.id !== moment.id) : current,
+    );
+    try {
+      const token = await AsyncStorage.getItem(STORAGE_KEY_AUTH_TOKEN);
+      const headers: Record<string, string> = {};
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const apiUrl = getApiUrl();
+      const response = await fetch(
+        `${apiUrl}/api/messages/${moment.messageId}/favorite`,
+        { method: "DELETE", headers },
+      );
+      if (!response.ok) {
+        throw new Error(`Request failed (${response.status})`);
+      }
+    } catch (e) {
+      setSavedMoments(previous);
+      const message =
+        e instanceof Error
+          ? e.message
+          : "Couldn't remove this from your saved moments.";
+      setSavedMomentActionError(message);
+    } finally {
+      setUnfavoritingId(null);
+    }
+  };
 
   const requestDeleteConversation = (conversation: ConversationListItem) => {
     setDeleteError(null);
@@ -1102,6 +1226,147 @@ export default function ProfileScreen() {
         ) : null}
       </Card>
 
+      <Card elevation={1} style={styles.savedMomentsCard}>
+        <ThemedText type="h4" style={styles.cardTitle}>
+          Saved moments
+        </ThemedText>
+        <ThemedText
+          type="small"
+          style={[styles.cardDescription, { color: theme.textMuted }]}
+        >
+          Replies you bookmarked from your conversations.
+        </ThemedText>
+
+        {savedMomentActionError ? (
+          <Text
+            style={[styles.errorText, { color: theme.textMuted }]}
+            testID="profile-saved-moments-action-error"
+          >
+            {savedMomentActionError}
+          </Text>
+        ) : null}
+
+        {savedMomentsLoading ? (
+          <View
+            style={styles.loadingContainer}
+            testID="profile-saved-moments-loading"
+          >
+            <ActivityIndicator color={theme.orbPrimary} />
+          </View>
+        ) : savedMomentsError ? (
+          <View
+            style={styles.errorContainer}
+            testID="profile-saved-moments-error"
+          >
+            <Text style={[styles.errorText, { color: theme.textMuted }]}>
+              {savedMomentsError}
+            </Text>
+          </View>
+        ) : savedMoments && savedMoments.length > 0 ? (
+          <View testID="profile-saved-moments-list">
+            {savedMoments.map((moment, index) => {
+              const isLast = index === savedMoments.length - 1;
+              const titleLabel = displayConversationTitle(
+                moment.conversation.title,
+                moment.conversation.createdAt,
+              );
+              const isRemoving = unfavoritingId === moment.id;
+              return (
+                <View
+                  key={moment.id}
+                  style={[
+                    styles.savedMomentRow,
+                    !isLast && {
+                      borderBottomColor: theme.backgroundSecondary,
+                      borderBottomWidth: StyleSheet.hairlineWidth,
+                    },
+                  ]}
+                >
+                  <Pressable
+                    onPress={() => handleOpenSavedMoment(moment)}
+                    style={({ pressed }) => [
+                      styles.savedMomentContent,
+                      pressed && { opacity: 0.6 },
+                    ]}
+                    testID={`profile-saved-moment-row-${moment.id}`}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Open saved moment from ${titleLabel}`}
+                  >
+                    <View style={styles.savedMomentHeader}>
+                      <Text
+                        style={[
+                          styles.savedMomentSource,
+                          { color: theme.text },
+                        ]}
+                        numberOfLines={1}
+                        testID={`profile-saved-moment-source-${moment.id}`}
+                      >
+                        {titleLabel}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.savedMomentTime,
+                          { color: theme.textMuted },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {formatRelativeTime(moment.favoritedAt)}
+                      </Text>
+                    </View>
+                    <Text
+                      style={[
+                        styles.savedMomentSnippet,
+                        { color: theme.textMuted },
+                      ]}
+                      numberOfLines={3}
+                      testID={`profile-saved-moment-snippet-${moment.id}`}
+                    >
+                      {snippetForMoment(moment.message.content)}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => handleUnfavoriteMoment(moment)}
+                    disabled={isRemoving}
+                    hitSlop={8}
+                    style={({ pressed }) => [
+                      styles.conversationActionButton,
+                      { backgroundColor: theme.backgroundSecondary },
+                      pressed && { opacity: 0.6 },
+                      isRemoving && { opacity: 0.5 },
+                    ]}
+                    testID={`profile-saved-moment-remove-${moment.id}`}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Remove saved moment from ${titleLabel}`}
+                  >
+                    {isRemoving ? (
+                      <ActivityIndicator
+                        size="small"
+                        color={theme.textMuted}
+                      />
+                    ) : (
+                      <Feather
+                        name="bookmark"
+                        size={16}
+                        color={theme.orbPrimary}
+                      />
+                    )}
+                  </Pressable>
+                </View>
+              );
+            })}
+          </View>
+        ) : (
+          <View
+            style={styles.emptyContainer}
+            testID="profile-saved-moments-empty"
+          >
+            <Text style={[styles.errorText, { color: theme.textMuted }]}>
+              Tap the bookmark on any reply from Solence to keep it here.
+            </Text>
+          </View>
+        )}
+      </Card>
+
       <Card elevation={1} style={styles.conversationsCard}>
         <ThemedText type="h4" style={styles.cardTitle}>
           Recent conversations
@@ -1377,6 +1642,43 @@ const styles = StyleSheet.create({
   conversationsCard: {
     marginTop: Spacing.lg,
     paddingVertical: Spacing.xl,
+  },
+  savedMomentsCard: {
+    marginTop: Spacing.lg,
+    paddingVertical: Spacing.xl,
+  },
+  savedMomentRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: Spacing.sm,
+    paddingVertical: Spacing.md,
+  },
+  savedMomentContent: {
+    flex: 1,
+    gap: Spacing.xs,
+  },
+  savedMomentHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: Spacing.sm,
+  },
+  savedMomentSource: {
+    flex: 1,
+    ...Typography.small,
+    fontSize: 12,
+    fontFamily: fontForWeight("600"),
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+  },
+  savedMomentTime: {
+    ...Typography.small,
+    fontSize: 11,
+    fontFamily: fontForWeight("400"),
+  },
+  savedMomentSnippet: {
+    ...Typography.body,
+    fontFamily: fontForWeight("400"),
   },
   personalizationHeader: {
     flexDirection: "row",

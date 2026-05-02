@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, serial, integer, timestamp, index } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, serial, integer, timestamp, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -114,6 +114,31 @@ export type Conversation = typeof conversations.$inferSelect;
 export type InsertConversation = z.infer<typeof insertConversationSchema>;
 export type Message = typeof messages.$inferSelect;
 export type InsertMessage = z.infer<typeof insertMessageSchema>;
+
+// Per-user bookmarks for individual assistant messages. The unique index on
+// (user_id, message_id) makes the favorite/unfavorite endpoints naturally
+// idempotent — re-favoriting the same message is a no-op rather than a
+// duplicate row, and re-deleting a non-existent favorite returns 0 rows.
+export const favorites = pgTable(
+  "favorites",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    messageId: integer("message_id")
+      .notNull()
+      .references(() => messages.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  },
+  (table) => ({
+    userMessageUnique: uniqueIndex("favorites_user_message_unique").on(
+      table.userId,
+      table.messageId,
+    ),
+    userIdIdx: index("favorites_user_id_idx").on(table.userId),
+  }),
+);
+
+export type Favorite = typeof favorites.$inferSelect;
 
 export const tokenUsage = pgTable(
   "token_usage",

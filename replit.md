@@ -84,6 +84,14 @@ Solence is a voice-first AI companion app for meditation, reflection, and emotio
    - Optional User Agreement (full legal text)
    - Welcome screen with conversation starters
 
+6. **Saved Moments (favorites)** - Bookmark assistant responses worth revisiting
+   - Bookmark icon on every assistant bubble in ConversationDetail (optimistic toggle)
+   - "Saved moments" card on Profile lists newest favorites with conversation source + snippet
+   - Tapping a saved moment opens the source conversation scrolled to that message with a brief highlight
+   - Backend: `favorites` table (unique on userId+messageId, FK cascade), endpoints
+     `POST/DELETE /api/messages/:id/favorite` (idempotent, assistant-only) and
+     `GET /api/favorites?limit=20`. Messages list endpoint enriches each row with `isFavorite`.
+
 ## Design System
 Colors are defined in `client/constants/theme.ts`:
 - Light background: #FAF1E7 (warm cream, matching solence.ai)

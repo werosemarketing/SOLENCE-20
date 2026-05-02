@@ -22,7 +22,11 @@ type AppStage = "loading" | "auth" | "disclaimer" | "agreement" | "onboarding" |
 export type RootStackParamList = {
   Main: NavigatorScreenParams<MainTabParamList> | undefined;
   Upgrade: { tokenLimit?: number; resetLabel?: string } | undefined;
-  ConversationDetail: { conversationId: number; title?: string };
+  ConversationDetail: {
+    conversationId: number;
+    title?: string;
+    scrollToMessageId?: number;
+  };
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();

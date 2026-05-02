@@ -9,6 +9,7 @@ import {
   users,
   conversations,
   messages,
+  favorites,
   FREE_TOKEN_LIMIT,
   TONE_OPTIONS,
   INTENT_OPTIONS,
@@ -937,6 +938,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .where(eq(messages.conversationId, id))
           .orderBy(messages.createdAt);
 
+        // Load this user's favorites for the messages we're about to return
+        // so the client can render a filled-in bookmark icon without a
+        // second round-trip. Scoped to the caller's userId so favorites
+        // are strictly per-user even for conversations that don't have
+        // any (which is the common case).
+        let favoritedIds = new Set<number>();
+        if (conversationMessages.length > 0) {
+          const favRows = await db
+            .select({ messageId: favorites.messageId })
+            .from(favorites)
+            .where(
+              and(
+                eq(favorites.userId, userId),
+                inArray(
+                  favorites.messageId,
+                  conversationMessages.map((m) => m.id),
+                ),
+              ),
+            );
+          favoritedIds = new Set(favRows.map((r) => r.messageId));
+        }
+
         res.json({
           conversation: {
             id: conversation.id,
@@ -948,6 +971,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             role: m.role,
             content: m.content,
             createdAt: m.createdAt,
+            isFavorite: favoritedIds.has(m.id),
           })),
         });
       } catch (error) {
@@ -1047,6 +1071,180 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } catch (error) {
         console.error("Conversation rename error:", error);
         res.status(500).json({ error: "Failed to rename conversation" });
+      }
+    },
+  );
+
+  // Validate that the message exists AND belongs to a conversation owned
+  // by the caller. Returns the message row on success, or null when it
+  // either doesn't exist or belongs to someone else — both cases are
+  // surfaced to the client as 404 so we never leak existence of another
+  // user's content.
+  async function loadMessageOwnedByUser(
+    messageId: number,
+    userId: string,
+  ): Promise<typeof messages.$inferSelect | null> {
+    const [row] = await db
+      .select({
+        id: messages.id,
+        conversationId: messages.conversationId,
+        role: messages.role,
+        content: messages.content,
+        createdAt: messages.createdAt,
+      })
+      .from(messages)
+      .innerJoin(
+        conversations,
+        eq(conversations.id, messages.conversationId),
+      )
+      .where(
+        and(eq(messages.id, messageId), eq(conversations.userId, userId)),
+      )
+      .limit(1);
+    return row ?? null;
+  }
+
+  app.post(
+    "/api/messages/:id/favorite",
+    requireAuth,
+    async (req: Request, res: Response) => {
+      try {
+        const userId = req.user!.userId;
+        const messageId = Number(req.params.id);
+        if (!Number.isFinite(messageId) || messageId <= 0) {
+          return res.status(400).json({ error: "Invalid message id" });
+        }
+
+        const message = await loadMessageOwnedByUser(messageId, userId);
+        if (!message) {
+          return res.status(404).json({ error: "Message not found" });
+        }
+
+        // Saved moments are intended for Solence's replies only — the UI
+        // never offers a bookmark on the user's own messages. Enforce the
+        // same invariant server-side so a direct API call can't sneak a
+        // user message into the saved-moments list.
+        if (message.role !== "assistant") {
+          return res
+            .status(400)
+            .json({ error: "Only assistant messages can be saved" });
+        }
+
+        // Idempotent insert. If the user already favorited this message,
+        // ON CONFLICT DO NOTHING keeps the original createdAt and returns
+        // success without raising — a re-tap of the bookmark is a no-op,
+        // which matches the optimistic UI on the client.
+        await db
+          .insert(favorites)
+          .values({ userId, messageId })
+          .onConflictDoNothing({
+            target: [favorites.userId, favorites.messageId],
+          });
+
+        res.json({ success: true, messageId, isFavorite: true });
+      } catch (error) {
+        console.error("Favorite message error:", error);
+        res.status(500).json({ error: "Failed to save favorite" });
+      }
+    },
+  );
+
+  app.delete(
+    "/api/messages/:id/favorite",
+    requireAuth,
+    async (req: Request, res: Response) => {
+      try {
+        const userId = req.user!.userId;
+        const messageId = Number(req.params.id);
+        if (!Number.isFinite(messageId) || messageId <= 0) {
+          return res.status(400).json({ error: "Invalid message id" });
+        }
+
+        const message = await loadMessageOwnedByUser(messageId, userId);
+        if (!message) {
+          return res.status(404).json({ error: "Message not found" });
+        }
+
+        // Idempotent: deleting a non-existent favorite returns 0 rows,
+        // which we still treat as success so repeated unfavorites don't
+        // surface as errors to the user.
+        await db
+          .delete(favorites)
+          .where(
+            and(
+              eq(favorites.userId, userId),
+              eq(favorites.messageId, messageId),
+            ),
+          );
+
+        res.json({ success: true, messageId, isFavorite: false });
+      } catch (error) {
+        console.error("Unfavorite message error:", error);
+        res.status(500).json({ error: "Failed to remove favorite" });
+      }
+    },
+  );
+
+  app.get(
+    "/api/favorites",
+    requireAuth,
+    async (req: Request, res: Response) => {
+      try {
+        const userId = req.user!.userId;
+        const rawLimit = Number(req.query.limit ?? 20);
+        const limit =
+          Number.isFinite(rawLimit) && rawLimit > 0
+            ? Math.min(50, Math.floor(rawLimit))
+            : 20;
+
+        // Join through messages -> conversations so each favorite carries
+        // enough context for the Profile "Saved moments" card (snippet,
+        // source conversation title, when it was saved). The conversation
+        // join also indirectly enforces ownership: if the parent
+        // conversation has been deleted, the FK cascade already removed
+        // both the message and the favorite, so it never appears here.
+        const rows = await db
+          .select({
+            favoriteId: favorites.id,
+            messageId: favorites.messageId,
+            favoritedAt: favorites.createdAt,
+            messageContent: messages.content,
+            messageRole: messages.role,
+            messageCreatedAt: messages.createdAt,
+            conversationId: conversations.id,
+            conversationTitle: conversations.title,
+            conversationCreatedAt: conversations.createdAt,
+          })
+          .from(favorites)
+          .innerJoin(messages, eq(messages.id, favorites.messageId))
+          .innerJoin(
+            conversations,
+            eq(conversations.id, messages.conversationId),
+          )
+          .where(eq(favorites.userId, userId))
+          .orderBy(desc(favorites.createdAt))
+          .limit(limit);
+
+        res.json({
+          favorites: rows.map((r) => ({
+            id: r.favoriteId,
+            messageId: r.messageId,
+            favoritedAt: r.favoritedAt,
+            message: {
+              content: r.messageContent,
+              role: r.messageRole,
+              createdAt: r.messageCreatedAt,
+            },
+            conversation: {
+              id: r.conversationId,
+              title: r.conversationTitle,
+              createdAt: r.conversationCreatedAt,
+            },
+          })),
+        });
+      } catch (error) {
+        console.error("List favorites error:", error);
+        res.status(500).json({ error: "Failed to load favorites" });
       }
     },
   );
