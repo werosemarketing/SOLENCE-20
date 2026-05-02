@@ -243,6 +243,15 @@ type Memory = {
   text: string;
   sourceConversationId: number | null;
   createdAt: string;
+  // Joined from the originating conversation server-side. Null when the
+  // source conversation no longer exists (the FK is `set null` on delete)
+  // or when the memory was extracted without a source — those rows render
+  // without a "From a chat on …" link.
+  sourceConversation: {
+    id: number;
+    title: string | null;
+    createdAt: string;
+  } | null;
 };
 
 type MemoriesResponse = {
@@ -1664,6 +1673,20 @@ export default function ProfileScreen() {
         moment.conversation.createdAt,
       ),
       scrollToMessageId: moment.messageId,
+    });
+  };
+
+  // Open the conversation a memory was learned from. Only invoked when
+  // `memory.sourceConversation` is non-null (the row's link is hidden
+  // otherwise), so the screen always has a valid id + title to push.
+  const handleOpenMemorySource = (memory: Memory) => {
+    if (!memory.sourceConversation) return;
+    navigation.navigate("ConversationDetail", {
+      conversationId: memory.sourceConversation.id,
+      title: displayConversationTitle(
+        memory.sourceConversation.title,
+        memory.sourceConversation.createdAt,
+      ),
     });
   };
 
@@ -3365,6 +3388,19 @@ export default function ProfileScreen() {
             {memories.map((memory, index) => {
               const isLast = index === memories.length - 1;
               const isRemoving = memoryRemovingId === memory.id;
+              // Only render the "From a chat on …" link when the source
+              // conversation still exists. Memories whose source was
+              // deleted (or that were created without one) get their FK
+              // nulled server-side and the join returns no row, so we
+              // simply hide the link rather than ever showing a dead
+              // tap target.
+              const source = memory.sourceConversation;
+              const sourceDateLabel = source
+                ? new Date(source.createdAt).toLocaleDateString(locale, {
+                    month: "short",
+                    day: "numeric",
+                  })
+                : null;
               return (
                 <View
                   key={memory.id}
@@ -3377,12 +3413,47 @@ export default function ProfileScreen() {
                   ]}
                   testID={`profile-memory-row-${memory.id}`}
                 >
-                  <Text
-                    style={[styles.memoryText, { color: theme.text }]}
-                    testID={`profile-memory-text-${memory.id}`}
-                  >
-                    {memory.text}
-                  </Text>
+                  <View style={styles.memoryContent}>
+                    <Text
+                      style={[styles.memoryText, { color: theme.text }]}
+                      testID={`profile-memory-text-${memory.id}`}
+                    >
+                      {memory.text}
+                    </Text>
+                    {source && sourceDateLabel ? (
+                      <Pressable
+                        onPress={() => handleOpenMemorySource(memory)}
+                        hitSlop={6}
+                        style={({ pressed }) => [
+                          styles.memorySourceLink,
+                          pressed && { opacity: 0.6 },
+                        ]}
+                        testID={`profile-memory-source-${memory.id}`}
+                        accessibilityRole="link"
+                        accessibilityLabel={t(
+                          "profile.memories.sourceA11y",
+                          { date: sourceDateLabel },
+                        )}
+                      >
+                        <Text
+                          style={[
+                            styles.memorySourceText,
+                            { color: theme.textMuted },
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {t("profile.memories.fromChatOn", {
+                            date: sourceDateLabel,
+                          })}
+                        </Text>
+                        <Feather
+                          name="chevron-right"
+                          size={14}
+                          color={theme.textMuted}
+                        />
+                      </Pressable>
+                    ) : null}
+                  </View>
                   <Pressable
                     onPress={() => handleDeleteMemory(memory)}
                     disabled={isRemoving}
@@ -4558,11 +4629,25 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
     paddingVertical: Spacing.md,
   },
-  memoryText: {
+  memoryContent: {
     flex: 1,
+    gap: Spacing.xs,
+  },
+  memoryText: {
     ...Typography.body,
     fontFamily: fontForWeight("400"),
     lineHeight: 22,
+  },
+  memorySourceLink: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+    alignSelf: "flex-start",
+    paddingVertical: 2,
+  },
+  memorySourceText: {
+    ...Typography.small,
+    fontFamily: fontForWeight("500"),
   },
   memoriesPrivacyText: {
     ...Typography.small,

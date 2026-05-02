@@ -2261,18 +2261,53 @@ export async function registerRoutes(app: Express): Promise<Server> {
     async (req: Request, res: Response) => {
       try {
         const userId = req.user!.userId;
+        // Left-join conversations so each memory can carry enough source
+        // context for the Profile "What Solence remembers" card to render
+        // a tappable "From a chat on <date>" link. The FK is `set null`
+        // on conversation delete, so a deleted source row simply yields
+        // a null sourceConversation here and the UI renders the memory
+        // without a link.
         const rows = await db
           .select({
             id: userMemories.id,
             text: userMemories.text,
             sourceConversationId: userMemories.sourceConversationId,
             createdAt: userMemories.createdAt,
+            sourceConversationTitle: conversations.title,
+            sourceConversationCreatedAt: conversations.createdAt,
           })
           .from(userMemories)
+          .leftJoin(
+            conversations,
+            and(
+              eq(conversations.id, userMemories.sourceConversationId),
+              // Defense-in-depth: even though memories only ever reference
+              // the owner's conversations today, constraining the join on
+              // userId ensures we can never leak another user's title or
+              // createdAt if that invariant ever slipped.
+              eq(conversations.userId, userId),
+            ),
+          )
           .where(eq(userMemories.userId, userId))
           .orderBy(desc(userMemories.createdAt), desc(userMemories.id))
           .limit(USER_MEMORY_MAX_PER_USER);
-        res.json({ memories: rows });
+        res.json({
+          memories: rows.map((r) => ({
+            id: r.id,
+            text: r.text,
+            sourceConversationId: r.sourceConversationId,
+            createdAt: r.createdAt,
+            sourceConversation:
+              r.sourceConversationId !== null &&
+              r.sourceConversationCreatedAt !== null
+                ? {
+                    id: r.sourceConversationId,
+                    title: r.sourceConversationTitle,
+                    createdAt: r.sourceConversationCreatedAt,
+                  }
+                : null,
+          })),
+        });
       } catch (error) {
         console.error("List memories error:", error);
         res.status(500).json({ error: "Failed to load memories" });

@@ -434,6 +434,8 @@
       "subtitle": "Small notes Solence keeps from past sessions so it can show up to you a little more thoughtfully next time.",
       "privacy": "These notes never leave your account. Delete any one — or clear them all — and Solence will forget. They're never shared, sold, or shown to anyone else.",
       "empty": "Nothing yet — Solence will quietly start remembering little things as you talk.",
+      "fromChatOn": "From a chat on {{date}}",
+      "sourceA11y": "Open the chat on {{date}} where this was learned",
       "removeA11y": "Forget this memory",
       "clearAll": "Clear all memories",
       "clearConfirmTitle": "Clear all memories?",

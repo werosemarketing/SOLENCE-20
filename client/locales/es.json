@@ -434,6 +434,8 @@
       "subtitle": "Pequeñas notas que Solence guarda de sesiones pasadas para acompañarte con un poco más de cuidado la próxima vez.",
       "privacy": "Estas notas nunca salen de tu cuenta. Borra cualquiera —o todas— y Solence olvidará. Nunca se comparten, ni se venden, ni se muestran a nadie más.",
       "empty": "Nada todavía — Solence empezará a recordar pequeñas cosas a medida que conversen.",
+      "fromChatOn": "De una conversación del {{date}}",
+      "sourceA11y": "Abrir la conversación del {{date}} donde se aprendió esto",
       "removeA11y": "Olvidar este recuerdo",
       "clearAll": "Borrar todos los recuerdos",
       "clearConfirmTitle": "¿Borrar todos los recuerdos?",
