@@ -15,6 +15,7 @@ export type MainTabParamList = {
     | {
         activeConversationId?: number;
         activeConversationTitle?: string;
+        breathingStarter?: string;
       }
     | undefined;
   ProfileTab: NavigatorScreenParams<ProfileStackParamList> | undefined;

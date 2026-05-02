@@ -85,7 +85,18 @@ Solence is a voice-first AI companion app for meditation, reflection, and emotio
    - Optional User Agreement (full legal text)
    - Welcome screen with conversation starters
 
-6. **Saved Moments (favorites)** - Bookmark assistant responses worth revisiting
+6. **Breathing & Grounding mini-experience** - 60-second guided breath ritual
+   - "Take a breath" chip on the Solence home screen (visible alongside starter prompts)
+   - Tapping opens a full-screen modal (`BreathingScreen.tsx`) with a gently
+     expanding/contracting orb on a 4-7-8 cadence (4s inhale, 7s hold, 8s exhale)
+   - Phase label fades between "Breathe in" / "Hold" / "Breathe out" in sync with the orb
+   - Light haptic at every phase transition, success haptic at completion (skipped on web)
+   - Runs 3 cycles (~57s) then shows a soft "How do you feel?" prompt with two options:
+     "Start a conversation" (returns to home with a pre-filled starter) or "Close"
+   - Closeable any time via the X button (or hardware back on Android)
+   - Registered as a modal route in `RootStackNavigator` (`Breathing`)
+
+7. **Saved Moments (favorites)** - Bookmark assistant responses worth revisiting
    - Bookmark icon on every assistant bubble in ConversationDetail (optimistic toggle)
    - "Saved moments" card on Profile lists newest favorites with conversation source + snippet
    - Tapping a saved moment opens the source conversation scrolled to that message with a brief highlight

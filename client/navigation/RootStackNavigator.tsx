@@ -10,6 +10,7 @@ import UserAgreementScreen from "@/screens/UserAgreementScreen";
 import AuthScreen from "@/screens/AuthScreen";
 import UpgradeScreen from "@/screens/UpgradeScreen";
 import ConversationDetailScreen from "@/screens/ConversationDetailScreen";
+import BreathingScreen from "@/screens/BreathingScreen";
 import MainTabNavigator, { type MainTabParamList } from "@/navigation/MainTabNavigator";
 import { useScreenOptions } from "@/hooks/useScreenOptions";
 import { getApiUrl } from "@/lib/query-client";
@@ -28,6 +29,7 @@ export type RootStackParamList = {
     title?: string;
     scrollToMessageId?: number;
   };
+  Breathing: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -268,6 +270,16 @@ export default function RootStackNavigator() {
         component={ConversationDetailScreen}
         options={{
           title: "Conversation",
+        }}
+      />
+      <Stack.Screen
+        name="Breathing"
+        component={BreathingScreen}
+        options={{
+          headerShown: false,
+          presentation: "modal",
+          animation: "slide_from_bottom",
+          gestureEnabled: true,
         }}
       />
     </Stack.Navigator>

@@ -458,6 +458,7 @@ export default function SolenceScreen({
   const routeActiveConversationId = route?.params?.activeConversationId ?? null;
   const routeActiveConversationTitle =
     route?.params?.activeConversationTitle ?? null;
+  const routeBreathingStarter = route?.params?.breathingStarter ?? null;
   const [activeConversationId, setActiveConversationId] = useState<number | null>(
     routeActiveConversationId,
   );
@@ -583,6 +584,18 @@ export default function SolenceScreen({
       });
     }
   }, [routeActiveConversationId, routeActiveConversationTitle, tabNavigation]);
+
+  // After finishing the breathing experience the user can choose to
+  // "Start a conversation" — that route forwards a starter string here.
+  // Pre-fill the text input with it (so the user can edit or send), then
+  // clear the param so it can't re-trigger on tab focus.
+  useEffect(() => {
+    if (!routeBreathingStarter) return;
+    setTextInputValue(routeBreathingStarter);
+    if (tabNavigation) {
+      tabNavigation.setParams({ breathingStarter: undefined });
+    }
+  }, [routeBreathingStarter, tabNavigation]);
 
   // Auto-refresh token balance shortly after the daily reset moment so the
   // UI reflects the new quota without needing a manual reload.
@@ -1763,6 +1776,41 @@ export default function SolenceScreen({
 
             {showStarters && voiceState === "idle" && !currentMessage ? (
               <>
+                <Animated.View
+                  entering={FadeIn.duration(700).delay(500)}
+                  style={styles.breatheChipContainer}
+                >
+                  <Pressable
+                    onPress={() => {
+                      if (Platform.OS !== "web") {
+                        Haptics.selectionAsync().catch(() => {});
+                      }
+                      navigation.navigate("Breathing");
+                    }}
+                    style={({ pressed }) => [
+                      styles.breatheChip,
+                      {
+                        backgroundColor: isDark
+                          ? "rgba(214,107,50,0.16)"
+                          : "rgba(214,107,50,0.10)",
+                        borderColor: isDark
+                          ? "rgba(214,107,50,0.32)"
+                          : "rgba(214,107,50,0.28)",
+                        opacity: pressed ? 0.7 : 1,
+                      },
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel="Take a breath — open a 60-second guided breathing exercise"
+                    testID="button-take-a-breath"
+                  >
+                    <Feather name="wind" size={14} color={theme.orbPrimary} />
+                    <Text
+                      style={[styles.breatheChipText, { color: theme.orbPrimary }]}
+                    >
+                      Take a breath
+                    </Text>
+                  </Pressable>
+                </Animated.View>
                 {dailyPrompt ? (
                   <Animated.View
                     entering={FadeIn.duration(800).delay(600)}
@@ -2186,6 +2234,26 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
     textAlign: "center",
     lineHeight: 22,
+  },
+  breatheChipContainer: {
+    alignItems: "center",
+    paddingTop: Spacing.md,
+    paddingBottom: Spacing.xs,
+  },
+  breatheChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.xs,
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.lg,
+    borderRadius: BorderRadius.full,
+    borderWidth: 1,
+  },
+  breatheChipText: {
+    fontSize: 13,
+    fontWeight: "500",
+    fontFamily: FontFamily.medium,
+    letterSpacing: 0.5,
   },
   startersContainer: {
     flexDirection: "row",
