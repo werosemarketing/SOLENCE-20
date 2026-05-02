@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, serial, integer, timestamp, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, serial, integer, timestamp, index, uniqueIndex, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -96,6 +96,10 @@ export const messages = pgTable(
     conversationId: integer("conversation_id").notNull().references(() => conversations.id, { onDelete: "cascade" }),
     role: text("role").notNull(),
     content: text("content").notNull(),
+    // True when this message turn was flagged as containing crisis-relevant
+    // language (self-harm, suicide ideation, etc.). Persisted on the row so
+    // that re-opening a conversation can re-render the support banner.
+    crisisSupport: boolean("crisis_support").notNull().default(false),
     createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
   },
   (table) => ({

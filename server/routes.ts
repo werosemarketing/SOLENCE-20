@@ -725,6 +725,96 @@ You are this user's personal Solence. You grow with them over time. When past co
 GOAL:
 After talking with you, users should feel a little calmer, a little clearer, and a little less alone.`;
 
+// ---------------------------------------------------------------------------
+// Crisis-language detection
+// ---------------------------------------------------------------------------
+// We do a two-tier check on each user message:
+//   1. A small allowlist of high-confidence keyword/phrase patterns. If any
+//      hit, we flag immediately — these phrases are unambiguous enough that
+//      we accept the rare false positive in exchange for never missing them.
+//   2. For messages that don't trip the keyword list but do contain weaker
+//      signals (e.g. "give up", "hopeless"), we ask a small model for a
+//      single-token yes/no classification. The model is instructed that
+//      sadness, anxiety, stress, frustration, or low mood ALONE are not
+//      crisis — only explicit/strongly-implied self-harm or suicidal intent.
+//
+// Any error in the LLM path defaults to `false` rather than blocking the
+// chat reply: we want this signal to add support, never to gate the
+// conversation. Solence is not a crisis service — the banner the client
+// shows from this flag is the actual safety net.
+
+const CRISIS_KEYWORD_PATTERNS: RegExp[] = [
+  /\bkill(?:ing)?\s+(?:my\s?self|me)\b/i,
+  /\b(?:take|taking|took)\s+my\s+(?:own\s+)?life\b/i,
+  /\bend(?:ing)?\s+(?:my\s+life|it\s+all)\b/i,
+  /\bwant(?:\s+to|na)?\s+die\b/i,
+  /\bdon'?t\s+want\s+to\s+(?:live|be\s+(?:here|alive))\b/i,
+  /\bsuicid(?:e|al)\b/i,
+  /\bhurt(?:ing)?\s+my\s?self\b/i,
+  /\bself[\s-]?harm\b/i,
+  /\bcut(?:ting)?\s+my\s?self\b/i,
+  /\bno\s+(?:reason|point)\s+(?:to\s+|in\s+)?(?:live|living|going\s+on)\b/i,
+  /\b(?:not|isn'?t)\s+worth\s+living\b/i,
+  /\bbetter\s+off\s+(?:without\s+me|dead)\b/i,
+];
+
+const CRISIS_BORDERLINE_PATTERNS: RegExp[] = [
+  /\bgive\s+up\b/i,
+  /\bcan'?t\s+(?:take|do)\s+(?:this|it)\s+anymore\b/i,
+  /\bhopeless\b/i,
+  /\bworthless\b/i,
+  /\bnobody\s+(?:would|will)\s+(?:care|miss)\b/i,
+  /\bdisappear\s+forever\b/i,
+  /\bend\s+everything\b/i,
+];
+
+function hasCrisisKeyword(text: string): boolean {
+  return CRISIS_KEYWORD_PATTERNS.some((re) => re.test(text));
+}
+
+function hasCrisisBorderlineSignal(text: string): boolean {
+  return CRISIS_BORDERLINE_PATTERNS.some((re) => re.test(text));
+}
+
+const CRISIS_CLASSIFIER_MODEL = "gpt-4o-mini";
+
+async function classifyCrisisWithLLM(text: string): Promise<boolean> {
+  try {
+    const response = await openai.chat.completions.create({
+      model: CRISIS_CLASSIFIER_MODEL,
+      temperature: 0,
+      max_tokens: 1,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You classify whether a single user message indicates an immediate mental-health crisis: explicit or strongly-implied self-harm, suicidal ideation, plans to die, or being in imminent danger. General sadness, anxiety, stress, frustration, grief, or low mood ALONE are NOT crisis. Reply with exactly one token: yes or no.",
+        },
+        { role: "user", content: text.slice(0, 2000) },
+      ],
+    });
+    const out = response.choices[0]?.message?.content?.trim().toLowerCase() ?? "";
+    return out.startsWith("y");
+  } catch (err) {
+    console.error(
+      "Crisis classifier failed:",
+      err instanceof Error ? err.message : err,
+    );
+    return false;
+  }
+}
+
+// Public for tests. Returns true when `text` warrants surfacing the crisis
+// support banner. Conservative-but-not-trigger-happy: clear self-harm /
+// suicidal language fires immediately, ambiguous "I'm exhausted" style
+// venting does not.
+export async function detectCrisisSignal(text: string): Promise<boolean> {
+  if (!text || text.trim().length === 0) return false;
+  if (hasCrisisKeyword(text)) return true;
+  if (!hasCrisisBorderlineSignal(text)) return false;
+  return classifyCrisisWithLLM(text);
+}
+
 export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/auth/register", async (req: Request, res: Response) => {
     try {
@@ -1208,6 +1298,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             content: m.content,
             createdAt: m.createdAt,
             isFavorite: favoritedIds.has(m.id),
+            crisisSupport: m.crisisSupport ?? false,
           })),
         });
       } catch (error) {
@@ -1375,6 +1466,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         role: messages.role,
         content: messages.content,
         createdAt: messages.createdAt,
+        crisisSupport: messages.crisisSupport,
       })
       .from(messages)
       .innerJoin(
@@ -1829,6 +1921,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
+      // Run crisis-language detection on the user's turn in parallel with
+      // the rest of the request setup. Default to false on any failure so
+      // a flaky classifier never blocks the chat reply.
+      const crisisSupportPromise = detectCrisisSignal(userTranscript).catch(
+        () => false,
+      );
+
       await db.insert(messages).values({ conversationId, role: "user", content: userTranscript });
 
       const currentMessages = await db
@@ -1949,7 +2048,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const updatedTokensUsed = await getTokensUsed(userId);
       const tokensRemaining = Math.max(0, FREE_TOKEN_LIMIT - updatedTokensUsed);
 
-      await db.insert(messages).values({ conversationId, role: "assistant", content: assistantTranscript });
+      // Resolve the crisis check before persisting the assistant message so
+      // the flag is stored on the row that the client will surface a
+      // support banner against when re-opening this conversation.
+      const crisisSupport = await crisisSupportPromise;
+
+      await db.insert(messages).values({
+        conversationId,
+        role: "assistant",
+        content: assistantTranscript,
+        crisisSupport,
+      });
 
       console.log(
         `Voice req: ${userTranscript.length}c in, ${assistantTranscript.length}c out, ` +
@@ -1966,6 +2075,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // session mood, history navigation) need this id locally without
         // having to refetch the conversations list.
         conversationId,
+        // True when the just-processed user turn contained crisis-relevant
+        // language. The client uses this to surface the 988 / Crisis Text
+        // Line support banner mid-conversation.
+        crisisSupport,
         tokensUsed: updatedTokensUsed,
         tokensRemaining,
         tokenLimit: FREE_TOKEN_LIMIT,

@@ -48,6 +48,7 @@ import {
 import { useTheme } from "@/hooks/useTheme";
 import { Spacing, BorderRadius, FontFamily } from "@/constants/theme";
 import { getApiUrl } from "@/lib/query-client";
+import { CrisisBanner } from "@/components/CrisisBanner";
 import { MoodSheet } from "@/components/MoodSheet";
 import type { RootStackParamList } from "@/navigation/RootStackNavigator";
 import type { MainTabParamList } from "@/navigation/MainTabNavigator";
@@ -474,6 +475,13 @@ export default function SolenceScreen({
     kind: "audio" | "text";
     payload: string;
   } | null>(null);
+  // Visibility of the in-session crisis support banner. Flipped to true
+  // when an API response carries `crisisSupport: true`. The dismiss ref
+  // tracks per-app-session dismissal: once the user closes the banner we
+  // suppress it for the rest of this session even if subsequent turns
+  // also flag, so we don't keep re-popping it in their face.
+  const [crisisBannerVisible, setCrisisBannerVisible] = useState(false);
+  const crisisBannerDismissedRef = useRef(false);
   // Today's gentle prompt fetched from /api/daily-prompt. Stays null while
   // loading or on a fetch failure so we silently fall back to the static
   // starter chips below — never block the screen on it.
@@ -887,6 +895,20 @@ export default function SolenceScreen({
     }
   };
 
+  // Surface the crisis support banner if the server flagged the latest
+  // turn AND the user hasn't already dismissed the banner for this app
+  // session. Idempotent — safe to call from every API success path.
+  const maybeShowCrisisBanner = (data: { crisisSupport?: boolean } | null) => {
+    if (!data || data.crisisSupport !== true) return;
+    if (crisisBannerDismissedRef.current) return;
+    setCrisisBannerVisible(true);
+  };
+
+  const dismissCrisisBanner = () => {
+    crisisBannerDismissedRef.current = true;
+    setCrisisBannerVisible(false);
+  };
+
   const sendAudioToAPI = async (recordingUri: string) => {
     let audioBase64 = "";
     try {
@@ -949,6 +971,7 @@ export default function SolenceScreen({
       if (typeof data.conversationId === "number" && activeConversationId == null) {
         setActiveConversationId(data.conversationId);
       }
+      maybeShowCrisisBanner(data);
       // The pre-session mood hint only fires on the FIRST exchange — burn
       // the stash so it doesn't accidentally re-inject on later turns.
       if (moodForRequest) setPendingPreSessionMood(null);
@@ -1029,6 +1052,7 @@ export default function SolenceScreen({
       if (typeof data.conversationId === "number" && activeConversationId == null) {
         setActiveConversationId(data.conversationId);
       }
+      maybeShowCrisisBanner(data);
       if (moodForRequest) setPendingPreSessionMood(null);
       sessionUserMessageCountRef.current += 1;
       setCurrentMessage(data.text);
@@ -1110,6 +1134,7 @@ export default function SolenceScreen({
       if (typeof data.conversationId === "number" && activeConversationId == null) {
         setActiveConversationId(data.conversationId);
       }
+      maybeShowCrisisBanner(data);
       if (moodForRequest) setPendingPreSessionMood(null);
       sessionUserMessageCountRef.current += 1;
       setCurrentMessage(data.text);
@@ -1511,6 +1536,18 @@ export default function SolenceScreen({
               </Pressable>
             </View>
           </Animated.View>
+
+          {crisisBannerVisible ? (
+            <Animated.View
+              entering={FadeIn.duration(400)}
+              style={styles.crisisBannerWrap}
+            >
+              <CrisisBanner
+                onDismiss={dismissCrisisBanner}
+                testID="solence-crisis-banner"
+              />
+            </Animated.View>
+          ) : null}
 
           {activeConversationId != null ? (
             <Animated.View
@@ -1950,6 +1987,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     flex: 1,
+  },
+  crisisBannerWrap: {
+    marginTop: Spacing.lg,
+    marginHorizontal: Spacing.lg,
   },
   resumedBanner: {
     flexDirection: "row",

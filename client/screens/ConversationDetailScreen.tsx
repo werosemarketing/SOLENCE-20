@@ -18,6 +18,7 @@ import { Feather } from "@expo/vector-icons";
 
 import { Card } from "@/components/Card";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { CrisisBanner } from "@/components/CrisisBanner";
 import { RenameDialog } from "@/components/RenameDialog";
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
@@ -40,6 +41,7 @@ type Message = {
   content: string;
   createdAt: string;
   isFavorite?: boolean;
+  crisisSupport?: boolean;
 };
 
 type ConversationResponse = {
@@ -100,6 +102,11 @@ export default function ConversationDetailScreen({ route, navigation }: Props) {
   const [renameError, setRenameError] = useState<string | null>(null);
   const [favoriteBusy, setFavoriteBusy] = useState<Set<number>>(new Set());
   const [favoriteError, setFavoriteError] = useState<string | null>(null);
+  // Per-view dismissal of the crisis support banner. Re-opening this
+  // screen (or hot-navigating to a different conversation) resets to
+  // showing again — the banner is meant to be present for the user, but
+  // dismissable when they've acknowledged it.
+  const [crisisBannerDismissed, setCrisisBannerDismissed] = useState(false);
 
   // Refs for scroll-to-message behavior. The ScrollView ref lets us call
   // scrollTo with the measured y of the target row; the layoutByMessage
@@ -426,6 +433,14 @@ export default function ConversationDetailScreen({ route, navigation }: Props) {
     });
   }, [data, scrollToMessageId, headerHeight, highlightAnim, layoutTick]);
 
+  // True when any message in this conversation was flagged with crisis-
+  // relevant language. Drives the support banner so re-opening a thread
+  // that previously triggered the flag still surfaces the resources.
+  const hasCrisisSignal = useMemo(
+    () => Boolean(data?.messages.some((m) => m.crisisSupport)),
+    [data],
+  );
+
   // Animated highlight color: interpolated from transparent to a soft
   // accent tint so the bubble briefly glows without flashing aggressively.
   const highlightBackground = useMemo(
@@ -467,6 +482,13 @@ export default function ConversationDetailScreen({ route, navigation }: Props) {
         </View>
       ) : data && data.messages.length > 0 ? (
         <View testID="conversation-detail-messages">
+          {hasCrisisSignal && !crisisBannerDismissed ? (
+            <CrisisBanner
+              onDismiss={() => setCrisisBannerDismissed(true)}
+              style={styles.crisisBanner}
+              testID="conversation-detail-crisis-banner"
+            />
+          ) : null}
           {data.conversation.reflectionSummary &&
           data.conversation.reflectionTakeaway ? (
             <Card
@@ -688,6 +710,9 @@ const styles = StyleSheet.create({
     fontFamily: fontForWeight("400"),
     textAlign: "center",
     marginBottom: Spacing.sm,
+  },
+  crisisBanner: {
+    marginBottom: Spacing.lg,
   },
   reflectionCard: {
     marginBottom: Spacing.lg,

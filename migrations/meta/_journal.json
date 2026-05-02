@@ -36,6 +36,13 @@
       "when": 1777800000000,
       "tag": "0004_add_reflection_to_conversations",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1777900000000,
+      "tag": "0005_add_crisis_support_to_messages",
+      "breakpoints": true
     }
   ]
 }
