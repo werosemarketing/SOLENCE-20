@@ -140,6 +140,40 @@ export const favorites = pgTable(
 
 export type Favorite = typeof favorites.$inferSelect;
 
+// Lightweight mood check-ins captured before/after a conversation. The
+// `phase` field discriminates between the two prompts; `score` is a 1-5
+// scale (rough → great). `conversationId` is nullable because the pre-
+// session check-in fires BEFORE a conversation row exists; the post-
+// session entry links to the just-ended conversation. Index on
+// (userId, createdAt) keeps the Profile chart query cheap.
+export const MOOD_PHASES = ["pre", "post"] as const;
+export type MoodPhase = (typeof MOOD_PHASES)[number];
+export const MOOD_SCORE_MIN = 1;
+export const MOOD_SCORE_MAX = 5;
+
+export const moodEntries = pgTable(
+  "mood_entries",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    conversationId: integer("conversation_id").references(
+      () => conversations.id,
+      { onDelete: "set null" },
+    ),
+    phase: text("phase").notNull(),
+    score: integer("score").notNull(),
+    createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  },
+  (table) => ({
+    userCreatedIdx: index("mood_entries_user_created_idx").on(
+      table.userId,
+      table.createdAt,
+    ),
+  }),
+);
+
+export type MoodEntry = typeof moodEntries.$inferSelect;
+
 export const tokenUsage = pgTable(
   "token_usage",
   {

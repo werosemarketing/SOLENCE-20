@@ -10,6 +10,10 @@ import {
   conversations,
   messages,
   favorites,
+  moodEntries,
+  MOOD_PHASES,
+  MOOD_SCORE_MIN,
+  MOOD_SCORE_MAX,
   FREE_TOKEN_LIMIT,
   TONE_OPTIONS,
   INTENT_OPTIONS,
@@ -19,9 +23,10 @@ import {
   type Tone,
   type Intent,
   type Voice,
+  type MoodPhase,
   type UserPreferences,
 } from "@shared/schema";
-import { eq, desc, inArray, and, lt } from "drizzle-orm";
+import { eq, desc, inArray, and, lt, gte } from "drizzle-orm";
 import {
   MIN_TOKENS_FOR_REQUEST,
   getCurrentPeriodStart,
@@ -1249,15 +1254,173 @@ export async function registerRoutes(app: Express): Promise<Server> {
     },
   );
 
+  // ── Mood check-ins ────────────────────────────────────────────────
+  // Persist a single pre- or post-session mood rating. The pre-session
+  // entry is created BEFORE a conversation row exists, so `conversationId`
+  // is optional. The post-session entry should always carry the id of
+  // the conversation that just ended; we still scope it through the
+  // ownership check so a malicious client can't tag a stranger's
+  // conversation with their mood.
+  app.post(
+    "/api/mood",
+    requireAuth,
+    async (req: Request, res: Response) => {
+      try {
+        const userId = req.user!.userId;
+        const {
+          phase: rawPhase,
+          score: rawScore,
+          conversationId: rawConversationId,
+        } = req.body ?? {};
+
+        const phase = String(rawPhase ?? "");
+        if (!(MOOD_PHASES as readonly string[]).includes(phase)) {
+          return res
+            .status(400)
+            .json({ error: "Invalid phase (must be 'pre' or 'post')" });
+        }
+
+        const scoreNum = Number(rawScore);
+        if (
+          !Number.isFinite(scoreNum) ||
+          !Number.isInteger(scoreNum) ||
+          scoreNum < MOOD_SCORE_MIN ||
+          scoreNum > MOOD_SCORE_MAX
+        ) {
+          return res.status(400).json({
+            error: `Invalid score (must be an integer ${MOOD_SCORE_MIN}-${MOOD_SCORE_MAX})`,
+          });
+        }
+
+        let conversationId: number | null = null;
+        if (rawConversationId !== undefined && rawConversationId !== null) {
+          const parsed = Number(rawConversationId);
+          if (!Number.isFinite(parsed) || parsed <= 0) {
+            return res.status(400).json({ error: "Invalid conversationId" });
+          }
+          const [owned] = await db
+            .select({ id: conversations.id })
+            .from(conversations)
+            .where(
+              and(
+                eq(conversations.id, parsed),
+                eq(conversations.userId, userId),
+              ),
+            )
+            .limit(1);
+          if (!owned) {
+            return res.status(404).json({ error: "Conversation not found" });
+          }
+          conversationId = owned.id;
+        }
+
+        const [row] = await db
+          .insert(moodEntries)
+          .values({
+            userId,
+            phase: phase as MoodPhase,
+            score: scoreNum,
+            conversationId,
+          })
+          .returning();
+
+        res.status(201).json({
+          entry: {
+            id: row.id,
+            phase: row.phase,
+            score: row.score,
+            conversationId: row.conversationId,
+            createdAt: row.createdAt,
+          },
+        });
+      } catch (error) {
+        console.error("Create mood entry error:", error);
+        res.status(500).json({ error: "Failed to save mood entry" });
+      }
+    },
+  );
+
+  // List the caller's mood entries inside a rolling window. The Profile
+  // chart uses `days=7`; we cap at 30 so the response stays cheap and
+  // the chart code never needs to paginate.
+  app.get(
+    "/api/mood",
+    requireAuth,
+    async (req: Request, res: Response) => {
+      try {
+        const userId = req.user!.userId;
+        const rawDays = Number(req.query.days ?? 7);
+        const days =
+          Number.isFinite(rawDays) && rawDays > 0
+            ? Math.min(30, Math.floor(rawDays))
+            : 7;
+
+        const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+        const rows = await db
+          .select({
+            id: moodEntries.id,
+            phase: moodEntries.phase,
+            score: moodEntries.score,
+            conversationId: moodEntries.conversationId,
+            createdAt: moodEntries.createdAt,
+          })
+          .from(moodEntries)
+          .where(
+            and(
+              eq(moodEntries.userId, userId),
+              gte(moodEntries.createdAt, cutoff),
+            ),
+          )
+          .orderBy(desc(moodEntries.createdAt));
+
+        res.json({ days, entries: rows });
+      } catch (error) {
+        console.error("List mood entries error:", error);
+        res.status(500).json({ error: "Failed to load mood entries" });
+      }
+    },
+  );
+
   app.post("/api/chat/voice", audioBodyParser, requireAuth, async (req: Request, res: Response) => {
     let reservationActive = false;
     let reservedPeriodStart: Date | null = null;
     const userId = req.user!.userId;
     try {
-      const { audio, text, conversationId: requestedConversationId } = req.body;
+      const {
+        audio,
+        text,
+        conversationId: requestedConversationId,
+        preSessionMood: rawPreSessionMood,
+      } = req.body;
 
       if (!audio && !text) {
         return res.status(400).json({ error: "Either [audio] or [text] is required" });
+      }
+
+      // Optional pre-session mood, set by the client when the user filled in
+      // the pre-session sheet right before kicking off this session. We
+      // only honor it for the FIRST exchange — any later turn ignores it,
+      // because by then the conversation has its own emotional context.
+      // Bad shapes are silently dropped (don't fail the whole request just
+      // because the client sent us garbage in this optional field).
+      let preSessionMoodHint: { score: number; label: string } | null = null;
+      if (
+        rawPreSessionMood &&
+        typeof rawPreSessionMood === "object" &&
+        Number.isFinite(Number((rawPreSessionMood as { score?: unknown }).score))
+      ) {
+        const score = Math.round(
+          Number((rawPreSessionMood as { score: number }).score),
+        );
+        const label = String(
+          (rawPreSessionMood as { label?: unknown }).label ?? "",
+        )
+          .trim()
+          .slice(0, 40);
+        if (score >= MOOD_SCORE_MIN && score <= MOOD_SCORE_MAX && label) {
+          preSessionMoodHint = { score, label };
+        }
       }
 
       // Optional caller-supplied target conversation. We validate ownership
@@ -1464,10 +1627,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
       }
 
+      // Only inject the pre-session mood on the FIRST exchange of a
+      // session. We deliberately keep this hint short and instruction-y
+      // ("acknowledge gently, don't repeat the score back") so the model
+      // doesn't open with "You said you're at a 2 today" — the user wants
+      // to feel met, not quoted back at themselves.
+      let moodHint = "";
+      if (isFirstExchange && preSessionMoodHint) {
+        moodHint = `\n\nPRE-SESSION MOOD CHECK-IN: The user just rated their current mood as "${preSessionMoodHint.label}" (${preSessionMoodHint.score}/5). Gently acknowledge this energy in your opening response — meet them where they are without quoting the score back. If they're feeling low ("rough" or "low"), lead with extra warmth and slower pacing. If they're feeling "great" or "good", match their lift without overdoing it.`;
+      }
+
       const chatHistory: ChatMessage[] = [
         {
           role: "system",
-          content: SOLENCE_SYSTEM_PROMPT + personalizationBlock + pastContext,
+          content: SOLENCE_SYSTEM_PROMPT + personalizationBlock + pastContext + moodHint,
         },
         ...currentMessages.map((m) => ({
           role: m.role as "user" | "assistant",
