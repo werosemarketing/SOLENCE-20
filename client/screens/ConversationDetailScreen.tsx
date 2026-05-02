@@ -565,9 +565,6 @@ export default function ConversationDetailScreen({ route, navigation }: Props) {
                           color={
                             isFavorite ? theme.orbPrimary : theme.textMuted
                           }
-                          style={
-                            isFavorite ? styles.bookmarkIconFilled : undefined
-                          }
                         />
                       </Pressable>
                     ) : null}
@@ -695,13 +692,6 @@ const styles = StyleSheet.create({
   bubbleFavoriteButton: {
     paddingVertical: 2,
     paddingHorizontal: 4,
-  },
-  bookmarkIconFilled: {
-    // Feather icons render as outlines only — to convey the "saved" state
-    // we lean on color alone (orbPrimary). The non-deprecated `textShadow`
-    // shorthand suggests a slight fill weight without forking the icon
-    // set.
-    textShadow: "0px 1px 1px rgba(0,0,0,0.15)",
   },
   emptyTitle: {
     marginBottom: Spacing.xs,
