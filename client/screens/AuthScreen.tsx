@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
+import * as AppleAuthentication from "expo-apple-authentication";
 import Animated, { FadeIn, FadeInDown } from "react-native-reanimated";
 
 import { useTheme } from "@/hooks/useTheme";
@@ -44,7 +45,25 @@ export default function AuthScreen({
     initialReferralCode ? initialReferralCode.trim().toLowerCase() : "",
   );
   const [error, setError] = useState("");
+  const [info, setInfo] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [appleAvailable, setAppleAvailable] = useState(false);
+  const [appleLoading, setAppleLoading] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (Platform.OS !== "ios") return;
+    AppleAuthentication.isAvailableAsync()
+      .then((available) => {
+        if (!cancelled) setAppleAvailable(available);
+      })
+      .catch(() => {
+        if (!cancelled) setAppleAvailable(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const gradientColors = isDark
     ? (["#0f0c14", "#1a1625", "#1f1a2e", "#1a1625", "#0f0c14"] as const)
@@ -52,6 +71,7 @@ export default function AuthScreen({
 
   const handleSubmit = async () => {
     setError("");
+    setInfo("");
 
     if (!email.trim() || !password) {
       setError("Please enter your email and password");
@@ -103,9 +123,59 @@ export default function AuthScreen({
     }
   };
 
+  const handleAppleSignIn = async () => {
+    setError("");
+    setInfo("");
+    setAppleLoading(true);
+    try {
+      const credential = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+      });
+
+      if (!credential.identityToken) {
+        setError("Apple did not return an identity token. Please try again.");
+        return;
+      }
+
+      const apiUrl = getApiUrl();
+      const response = await fetch(`${apiUrl}/api/auth/apple`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ identityToken: credential.identityToken }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setError(data.error || "Could not sign in with Apple");
+        return;
+      }
+
+      if (data.linked) {
+        setInfo("We linked Sign in with Apple to your existing account.");
+      }
+
+      onAuthenticated(data.token);
+    } catch (err: unknown) {
+      const code = (err as { code?: string } | null)?.code;
+      // ERR_REQUEST_CANCELED is fired when the user dismisses the native
+      // Apple sheet. Treat that as a no-op rather than an error.
+      if (code === "ERR_REQUEST_CANCELED") {
+        return;
+      }
+      setError("Apple sign-in failed. Please try again.");
+    } finally {
+      setAppleLoading(false);
+    }
+  };
+
   const toggleMode = () => {
     setIsSignUp(!isSignUp);
     setError("");
+    setInfo("");
     setConfirmPassword("");
   };
 
@@ -144,6 +214,65 @@ export default function AuthScreen({
             entering={FadeInDown.duration(600).delay(200)}
             style={styles.formContainer}
           >
+            {appleAvailable ? (
+              <View style={styles.appleSection}>
+                <AppleAuthentication.AppleAuthenticationButton
+                  buttonType={
+                    isSignUp
+                      ? AppleAuthentication.AppleAuthenticationButtonType.SIGN_UP
+                      : AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN
+                  }
+                  buttonStyle={
+                    isDark
+                      ? AppleAuthentication.AppleAuthenticationButtonStyle.WHITE
+                      : AppleAuthentication.AppleAuthenticationButtonStyle.BLACK
+                  }
+                  cornerRadius={BorderRadius.full}
+                  style={styles.appleButton}
+                  onPress={handleAppleSignIn}
+                />
+                {appleLoading ? (
+                  <View
+                    pointerEvents="none"
+                    style={[
+                      StyleSheet.absoluteFillObject,
+                      styles.appleLoadingOverlay,
+                    ]}
+                  >
+                    <ActivityIndicator color={isDark ? "#000" : "#fff"} />
+                  </View>
+                ) : null}
+
+                <View style={styles.dividerRow}>
+                  <View
+                    style={[
+                      styles.dividerLine,
+                      {
+                        backgroundColor: isDark
+                          ? "rgba(255,255,255,0.12)"
+                          : "rgba(0,0,0,0.1)",
+                      },
+                    ]}
+                  />
+                  <Text
+                    style={[styles.dividerText, { color: theme.textMuted }]}
+                  >
+                    or
+                  </Text>
+                  <View
+                    style={[
+                      styles.dividerLine,
+                      {
+                        backgroundColor: isDark
+                          ? "rgba(255,255,255,0.12)"
+                          : "rgba(0,0,0,0.1)",
+                      },
+                    ]}
+                  />
+                </View>
+              </View>
+            ) : null}
+
             <View
               style={[
                 styles.inputContainer,
@@ -255,6 +384,15 @@ export default function AuthScreen({
               </Text>
             ) : null}
 
+            {info ? (
+              <Text
+                style={[styles.infoText, { color: theme.textMuted }]}
+                testID="text-info"
+              >
+                {info}
+              </Text>
+            ) : null}
+
             <Pressable
               onPress={handleSubmit}
               disabled={isLoading}
@@ -329,6 +467,34 @@ const styles = StyleSheet.create({
     alignSelf: "center",
     gap: Spacing.lg,
   },
+  appleSection: {
+    gap: Spacing.lg,
+  },
+  appleButton: {
+    width: "100%",
+    height: 50,
+  },
+  appleLoadingOverlay: {
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: BorderRadius.full,
+    backgroundColor: "rgba(0,0,0,0.15)",
+  },
+  dividerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.md,
+  },
+  dividerLine: {
+    flex: 1,
+    height: StyleSheet.hairlineWidth,
+  },
+  dividerText: {
+    fontSize: 12,
+    fontFamily: FontFamily.regular,
+    letterSpacing: 1,
+    textTransform: "uppercase",
+  },
   inputContainer: {
     borderRadius: BorderRadius.md,
     borderWidth: 1,
@@ -344,6 +510,13 @@ const styles = StyleSheet.create({
   errorText: {
     color: "#D32F2F",
     fontSize: 14,
+    fontFamily: FontFamily.regular,
+    fontWeight: "400",
+    textAlign: "center",
+    letterSpacing: 0.2,
+  },
+  infoText: {
+    fontSize: 13,
     fontFamily: FontFamily.regular,
     fontWeight: "400",
     textAlign: "center",

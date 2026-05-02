@@ -3,6 +3,7 @@ import { createServer, type Server } from "node:http";
 import express from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import { createRemoteJWKSet, jwtVerify } from "jose";
 import { openai, detectAudioFormat, speechToText, textToSpeech } from "./replit_integrations/audio";
 import { db } from "./db";
 import {
@@ -536,6 +537,24 @@ if (!process.env.SESSION_SECRET) {
 const JWT_SECRET: string = process.env.SESSION_SECRET;
 const JWT_EXPIRES_IN = "30d";
 
+// Apple's identity tokens are signed JWTs whose public keys live at this
+// JWKS endpoint. `createRemoteJWKSet` caches and rotates the keys for us.
+const APPLE_ISSUER = "https://appleid.apple.com";
+const APPLE_JWKS = createRemoteJWKSet(
+  new URL("https://appleid.apple.com/auth/keys"),
+);
+// The `aud` claim on a Sign in with Apple identity token is the bundle ID
+// of the app the token was issued for. We accept the production bundle by
+// default and allow extra audiences (e.g. a dev/staging bundle) via an
+// optional comma-separated env var.
+const APPLE_AUDIENCES = [
+  "com.solence.app",
+  ...(process.env.APPLE_BUNDLE_IDS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0),
+];
+
 interface AuthPayload {
   userId: string;
   email: string;
@@ -962,7 +981,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .where(eq(users.email, email.toLowerCase().trim()))
         .limit(1);
 
-      if (!user) {
+      if (!user || !user.password) {
+        // No password set on the row means the account was created via
+        // Sign in with Apple and never set an email password — surface the
+        // same generic error so we don't reveal which is the case.
         return res.status(401).json({ error: "Invalid email or password" });
       }
 
@@ -985,6 +1007,121 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Login error:", error);
       res.status(500).json({ error: "Failed to sign in" });
+    }
+  });
+
+  app.post("/api/auth/apple", async (req: Request, res: Response) => {
+    try {
+      const { identityToken } = req.body ?? {};
+      if (!identityToken || typeof identityToken !== "string") {
+        return res
+          .status(400)
+          .json({ error: "Apple identity token is required" });
+      }
+
+      let payload;
+      try {
+        const verified = await jwtVerify(identityToken, APPLE_JWKS, {
+          issuer: APPLE_ISSUER,
+          audience: APPLE_AUDIENCES,
+        });
+        payload = verified.payload;
+      } catch (err) {
+        console.error(
+          "Apple identity token verification failed:",
+          err instanceof Error ? err.message : err,
+        );
+        return res
+          .status(401)
+          .json({ error: "Could not verify Apple identity token" });
+      }
+
+      const appleSub =
+        typeof payload.sub === "string" ? payload.sub.trim() : "";
+      if (!appleSub) {
+        return res
+          .status(401)
+          .json({ error: "Apple identity token missing subject" });
+      }
+
+      const rawEmail =
+        typeof payload.email === "string" ? payload.email.trim() : "";
+      const email = rawEmail.toLowerCase();
+
+      // Order of precedence:
+      //   1. Existing account already linked to this Apple sub → just sign in.
+      //   2. Existing email/password account with the same email → link Apple
+      //      sub to it (one-time link, surfaced to the client via `linked`).
+      //   3. Otherwise, create a fresh account using the Apple email (or a
+      //      placeholder if Apple chose not to share one on subsequent signs).
+      let linked = false;
+      let user: UserRow | undefined;
+
+      const [byApple] = await db
+        .select()
+        .from(users)
+        .where(eq(users.appleUserId, appleSub))
+        .limit(1);
+      if (byApple) {
+        user = byApple;
+      } else {
+        if (email) {
+          const [byEmail] = await db
+            .select()
+            .from(users)
+            .where(eq(users.email, email))
+            .limit(1);
+          if (byEmail) {
+            const [updated] = await db
+              .update(users)
+              .set({ appleUserId: appleSub })
+              .where(
+                and(eq(users.id, byEmail.id), isNull(users.appleUserId)),
+              )
+              .returning();
+            user = updated ?? byEmail;
+            linked = true;
+          }
+        }
+
+        if (!user) {
+          // Apple omits the email on every sign-in after the first. If we
+          // somehow get here without an email (no prior link, no email in
+          // token) we have nothing usable to key the account on, so fall
+          // back to a synthetic per-Apple-user address. The user can edit
+          // it later via preferences if they want.
+          const accountEmail = email || `${appleSub}@privaterelay.appleid.com`;
+          const [created] = await db
+            .insert(users)
+            .values({
+              email: accountEmail,
+              password: null,
+              appleUserId: appleSub,
+            })
+            .returning();
+          user = created;
+        }
+      }
+
+      if (!user) {
+        return res.status(500).json({ error: "Failed to sign in with Apple" });
+      }
+
+      const token = jwt.sign(
+        { userId: user.id, email: user.email } satisfies AuthPayload,
+        JWT_SECRET,
+        { expiresIn: JWT_EXPIRES_IN },
+      );
+
+      res.json({
+        token,
+        user: { id: user.id, email: user.email },
+        preferences: serializePreferences(user),
+        linked,
+      });
+    } catch (error) {
+      console.error("Apple sign-in error:", error);
+      res.status(500).json({ error: "Failed to sign in with Apple" });
     }
   });
 

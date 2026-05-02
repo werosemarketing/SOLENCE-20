@@ -12,6 +12,7 @@ Solence is a voice-first AI companion app for meditation, reflection, and emotio
 - Subscription prompt modal
 - Dark/light mode support
 - Email/password authentication with JWT (register/login/sign-out)
+- Sign in with Apple on iOS (native button on Auth screen, links to existing email accounts on first use)
 - Disclaimer → User Agreement → Onboarding → Main flow for new users
 - V1 Solence persona: calm, warm, grounded, emotionally intelligent AI companion
 - Web audio playback uses native HTML5 Audio with safety timeout

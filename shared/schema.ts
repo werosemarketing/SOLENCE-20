@@ -3,28 +3,42 @@ import { pgTable, text, varchar, serial, integer, timestamp, index, uniqueIndex,
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
-export const users = pgTable("users", {
-  id: varchar("id")
-    .primaryKey()
-    .default(sql`gen_random_uuid()`),
-  email: text("email").notNull().unique(),
-  password: text("password").notNull(),
-  displayName: text("display_name"),
-  intents: text("intents").array(),
-  tone: text("tone"),
-  voice: text("voice"),
-  onboardingCompletedAt: timestamp("onboarding_completed_at"),
-  // Personal share code printed on the Profile invite card. Generated on
-  // first registration (or lazily backfilled for legacy rows). Lower-cased
-  // alphanumerics, 8 chars — short enough to type, big enough to avoid
-  // collisions in any realistic install base.
-  referralCode: text("referral_code").unique(),
-  // The user who referred this account at signup. Set once at register
-  // time and never changed; used to prevent the same account being
-  // counted as a referee twice and to protect against self-referral.
-  referredBy: varchar("referred_by"),
-  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
-});
+export const users = pgTable(
+  "users",
+  {
+    id: varchar("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    email: text("email").notNull().unique(),
+    // Password is nullable so Apple-only accounts (created via Sign in with
+    // Apple, no email/password ever set) don't need a synthetic placeholder.
+    password: text("password"),
+    // Apple's "sub" claim — stable per (Apple ID, app team). Nullable for
+    // existing email/password users; set on first Sign in with Apple either
+    // by creating a new account or by linking to an existing email match.
+    appleUserId: text("apple_user_id"),
+    displayName: text("display_name"),
+    intents: text("intents").array(),
+    tone: text("tone"),
+    voice: text("voice"),
+    onboardingCompletedAt: timestamp("onboarding_completed_at"),
+    // Personal share code printed on the Profile invite card. Generated on
+    // first registration (or lazily backfilled for legacy rows). Lower-cased
+    // alphanumerics, 8 chars — short enough to type, big enough to avoid
+    // collisions in any realistic install base.
+    referralCode: text("referral_code").unique(),
+    // The user who referred this account at signup. Set once at register
+    // time and never changed; used to prevent the same account being
+    // counted as a referee twice and to protect against self-referral.
+    referredBy: varchar("referred_by"),
+    createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  },
+  (table) => ({
+    appleUserIdUnique: uniqueIndex("users_apple_user_id_unique").on(
+      table.appleUserId,
+    ),
+  }),
+);
 
 export const insertUserSchema = createInsertSchema(users).pick({
   email: true,
