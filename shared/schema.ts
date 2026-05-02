@@ -79,6 +79,9 @@ export const conversations = pgTable(
     id: serial("id").primaryKey(),
     userId: text("user_id").notNull(),
     title: text("title").notNull(),
+    reflectionSummary: text("reflection_summary"),
+    reflectionTakeaway: text("reflection_takeaway"),
+    reflectionGeneratedAt: timestamp("reflection_generated_at"),
     createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
   },
   (table) => ({

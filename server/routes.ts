@@ -26,7 +26,7 @@ import {
   type MoodPhase,
   type UserPreferences,
 } from "@shared/schema";
-import { eq, desc, inArray, and, lt, gte } from "drizzle-orm";
+import { eq, desc, inArray, and, lt, gte, isNull } from "drizzle-orm";
 import {
   MIN_TOKENS_FOR_REQUEST,
   getCurrentPeriodStart,
@@ -311,6 +311,212 @@ async function runSmartTitleBackfillScan(userId: string): Promise<void> {
       "Smart title backfill scan failed:",
       err instanceof Error ? err.message : err,
     );
+  }
+}
+
+// ----- Reflection generation -----------------------------------------------
+//
+// At end-of-conversation we ask a lightweight chat model to summarize the
+// session into a short reflection (3–5 sentences) + one-line takeaway, then
+// store both on the conversation row. The Profile screen surfaces the
+// takeaway under each recent-conversations row and lists the most recent
+// reflections in a dedicated card; ConversationDetail renders the full
+// reflection block above the messages.
+
+const REFLECTION_MODEL = "gpt-4o-mini";
+// Cap input to the most recent ~30 messages to keep token cost predictable.
+const REFLECTION_MAX_MESSAGES = 30;
+// Hard length caps so a misbehaving model can't blow up the DB row.
+const REFLECTION_SUMMARY_MAX_LEN = 700;
+const REFLECTION_TAKEAWAY_MAX_LEN = 160;
+// Module-level dedupe so a Profile refresh + an explicit /end don't both
+// kick off the same generator concurrently.
+const reflectionInFlight = new Set<number>();
+
+function clampReflectionLength(text: string, max: number): string {
+  const cleaned = text.replace(/\s+/g, " ").trim();
+  if (cleaned.length <= max) return cleaned;
+  const sliced = cleaned.slice(0, max);
+  const lastSpace = sliced.lastIndexOf(" ");
+  const cutoff = lastSpace > max * 0.6 ? lastSpace : sliced.length;
+  return `${sliced.slice(0, cutoff).trimEnd()}…`;
+}
+
+type ReflectionResult = { summary: string; takeaway: string };
+
+// Ask the model to summarize a conversation into a soft, grounded reflection.
+// Returns null on any failure (parse errors, empty result, network) so the
+// caller can leave the row untouched and try again later.
+async function generateReflection(
+  conversationMessages: Array<{ role: string; content: string }>,
+): Promise<ReflectionResult | null> {
+  const trimmedMessages = conversationMessages.slice(-REFLECTION_MAX_MESSAGES);
+  const transcript = trimmedMessages
+    .map((m) => {
+      const role = m.role === "assistant" ? "Solence" : "User";
+      return `${role}: ${m.content}`;
+    })
+    .join("\n");
+  if (transcript.trim().length === 0) return null;
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: REFLECTION_MODEL,
+      temperature: 0.5,
+      max_tokens: 320,
+      response_format: { type: "json_object" },
+      messages: [
+        {
+          role: "system",
+          content:
+            "You write gentle journal-style reflections summarizing emotional-support conversations. Speak directly to the user (second person, 'you'). Tone is warm, grounded, never clinical, never preachy. NEVER give advice or instructions. NEVER use prescribed-feeling phrases like 'remember to' or 'make sure'. NEVER mention that you are an AI or refer to Solence by name. Reply with JSON in the exact shape {\"summary\": string, \"takeaway\": string}. The summary is 3 to 5 sentences capturing what was on the user's mind, the feelings they were sitting with, and any small shift in perspective that emerged. The takeaway is a single short sentence (under 20 words) — a gentle, true-feeling phrase the user could carry with them, NOT an instruction.",
+        },
+        {
+          role: "user",
+          content: `Conversation transcript:\n${transcript}\n\nWrite the reflection JSON now.`,
+        },
+      ],
+    });
+
+    const raw = response.choices[0]?.message?.content?.trim() ?? "";
+    if (!raw) return null;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+    if (!parsed || typeof parsed !== "object") return null;
+    const obj = parsed as { summary?: unknown; takeaway?: unknown };
+    if (typeof obj.summary !== "string" || typeof obj.takeaway !== "string") {
+      return null;
+    }
+    const summary = clampReflectionLength(obj.summary, REFLECTION_SUMMARY_MAX_LEN);
+    const takeaway = clampReflectionLength(
+      obj.takeaway.replace(/^["'`]+|["'`]+$/g, ""),
+      REFLECTION_TAKEAWAY_MAX_LEN,
+    );
+    if (summary.length === 0 || takeaway.length === 0) return null;
+    return { summary, takeaway };
+  } catch (error) {
+    console.error(
+      "Reflection generation failed:",
+      error instanceof Error ? error.message : error,
+    );
+    return null;
+  }
+}
+
+// Generate + persist a reflection for the given conversation. Idempotent:
+// returns the existing reflection (without re-calling OpenAI) when one is
+// already set. Returns null when the conversation has no eligible content
+// (no user OR no assistant messages) or when the model call fails — the
+// caller should treat that as "no reflection yet" and leave the columns
+// untouched. Race-safe: the UPDATE is gated on `reflection_summary IS NULL`
+// so a concurrent generator can't clobber the first writer.
+async function generateAndPersistReflection(
+  conversationId: number,
+): Promise<{
+  summary: string;
+  takeaway: string;
+  generatedAt: Date;
+} | null> {
+  // Short-circuit if the row already has a reflection — saves an OpenAI
+  // call and keeps the endpoint cheap on repeat taps.
+  const [existing] = await db
+    .select({
+      summary: conversations.reflectionSummary,
+      takeaway: conversations.reflectionTakeaway,
+      generatedAt: conversations.reflectionGeneratedAt,
+    })
+    .from(conversations)
+    .where(eq(conversations.id, conversationId))
+    .limit(1);
+  if (
+    existing?.summary &&
+    existing.takeaway &&
+    existing.generatedAt
+  ) {
+    return {
+      summary: existing.summary,
+      takeaway: existing.takeaway,
+      generatedAt: existing.generatedAt,
+    };
+  }
+
+  if (reflectionInFlight.has(conversationId)) return null;
+  reflectionInFlight.add(conversationId);
+  try {
+    const rows = await db
+      .select({
+        role: messages.role,
+        content: messages.content,
+      })
+      .from(messages)
+      .where(eq(messages.conversationId, conversationId))
+      .orderBy(messages.createdAt);
+
+    const hasUser = rows.some((m) => m.role === "user");
+    const hasAssistant = rows.some((m) => m.role === "assistant");
+    if (!hasUser || !hasAssistant) return null;
+
+    const reflection = await generateReflection(rows);
+    if (!reflection) return null;
+
+    const now = new Date();
+    const updated = await db
+      .update(conversations)
+      .set({
+        reflectionSummary: reflection.summary,
+        reflectionTakeaway: reflection.takeaway,
+        reflectionGeneratedAt: now,
+      })
+      .where(
+        and(
+          eq(conversations.id, conversationId),
+          isNull(conversations.reflectionSummary),
+        ),
+      )
+      .returning({
+        summary: conversations.reflectionSummary,
+        takeaway: conversations.reflectionTakeaway,
+        generatedAt: conversations.reflectionGeneratedAt,
+      });
+
+    if (updated.length > 0 && updated[0].summary && updated[0].takeaway && updated[0].generatedAt) {
+      return {
+        summary: updated[0].summary,
+        takeaway: updated[0].takeaway,
+        generatedAt: updated[0].generatedAt,
+      };
+    }
+    // A concurrent writer beat us to it — re-read and return what's
+    // actually persisted so the caller sees the canonical value.
+    const [after] = await db
+      .select({
+        summary: conversations.reflectionSummary,
+        takeaway: conversations.reflectionTakeaway,
+        generatedAt: conversations.reflectionGeneratedAt,
+      })
+      .from(conversations)
+      .where(eq(conversations.id, conversationId))
+      .limit(1);
+    if (after?.summary && after.takeaway && after.generatedAt) {
+      return {
+        summary: after.summary,
+        takeaway: after.takeaway,
+        generatedAt: after.generatedAt,
+      };
+    }
+    return null;
+  } catch (err) {
+    console.error(
+      "Reflection persist failed:",
+      err instanceof Error ? err.message : err,
+    );
+    return null;
+  } finally {
+    reflectionInFlight.delete(conversationId);
   }
 }
 
@@ -898,6 +1104,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
                   createdAt: last.createdAt,
                 }
               : null,
+            reflectionSummary: c.reflectionSummary ?? null,
+            reflectionTakeaway: c.reflectionTakeaway ?? null,
+            reflectionGeneratedAt: c.reflectionGeneratedAt ?? null,
           };
         }),
       });
@@ -970,6 +1179,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
             id: conversation.id,
             title: conversation.title,
             createdAt: conversation.createdAt,
+            reflectionSummary: conversation.reflectionSummary ?? null,
+            reflectionTakeaway: conversation.reflectionTakeaway ?? null,
+            reflectionGeneratedAt: conversation.reflectionGeneratedAt ?? null,
           },
           messages: conversationMessages.map((m) => ({
             id: m.id,
@@ -1017,6 +1229,54 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } catch (error) {
         console.error("Conversation delete error:", error);
         res.status(500).json({ error: "Failed to delete conversation" });
+      }
+    },
+  );
+
+  // Mark a conversation as ended and (optionally) generate a reflection
+  // summary + one-line takeaway for it. Idempotent: returns the existing
+  // reflection on repeat calls without re-invoking OpenAI. The endpoint
+  // never errors when generation fails — the row is left untouched and
+  // the response carries `reflection: null` so the UI can quietly skip
+  // rendering rather than show a broken state.
+  app.post(
+    "/api/conversations/:id/end",
+    requireAuth,
+    async (req: Request, res: Response) => {
+      try {
+        const userId = req.user!.userId;
+        const id = Number(req.params.id);
+        if (!Number.isFinite(id) || id <= 0) {
+          return res.status(400).json({ error: "Invalid conversation id" });
+        }
+
+        const [conversation] = await db
+          .select()
+          .from(conversations)
+          .where(
+            and(eq(conversations.id, id), eq(conversations.userId, userId)),
+          )
+          .limit(1);
+
+        if (!conversation) {
+          return res.status(404).json({ error: "Conversation not found" });
+        }
+
+        const reflection = await generateAndPersistReflection(id);
+        if (!reflection) {
+          return res.json({ conversationId: id, reflection: null });
+        }
+        return res.json({
+          conversationId: id,
+          reflection: {
+            summary: reflection.summary,
+            takeaway: reflection.takeaway,
+            generatedAt: reflection.generatedAt,
+          },
+        });
+      } catch (error) {
+        console.error("End-conversation error:", error);
+        res.status(500).json({ error: "Failed to end conversation" });
       }
     },
   );
