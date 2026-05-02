@@ -25,6 +25,11 @@ import { PersonalizationDialog } from "@/components/PersonalizationDialog";
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
 import {
+  TEXT_SCALE_OPTIONS,
+  useTextScale,
+  type TextScaleId,
+} from "@/hooks/useTextScale";
+import {
   Spacing,
   BorderRadius,
   Typography,
@@ -210,6 +215,7 @@ export default function ProfileScreen() {
   const headerHeight = useHeaderHeight();
   const tabBarHeight = useBottomTabBarHeight();
   const { theme } = useTheme();
+  const { scaleId: textScaleId, setScaleId: setTextScaleId } = useTextScale();
   const navigation =
     useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
@@ -1031,6 +1037,83 @@ export default function ProfileScreen() {
         )}
       </Card>
 
+      <Card elevation={1} style={styles.textSizeCard} testID="profile-text-size-card">
+        <ThemedText type="h4" style={styles.cardTitle}>
+          Text size
+        </ThemedText>
+        <ThemedText
+          type="small"
+          style={[styles.cardDescription, { color: theme.textMuted }]}
+        >
+          Make text easier to read across the app. Your choice is saved on this
+          device.
+        </ThemedText>
+        <View
+          style={[
+            styles.textSizeSegment,
+            { backgroundColor: theme.backgroundSecondary },
+          ]}
+          accessibilityRole="radiogroup"
+          testID="profile-text-size-segment"
+        >
+          {TEXT_SCALE_OPTIONS.map((option) => {
+            const selected = option.id === textScaleId;
+            return (
+              <Pressable
+                key={option.id}
+                onPress={() => {
+                  if (option.id !== textScaleId) {
+                    setTextScaleId(option.id as TextScaleId);
+                  }
+                }}
+                style={({ pressed }) => [
+                  styles.textSizeSegmentItem,
+                  selected && {
+                    backgroundColor: theme.backgroundRoot,
+                    borderColor: theme.orbPrimary,
+                  },
+                  !selected && { borderColor: "transparent" },
+                  pressed && { opacity: 0.75 },
+                ]}
+                accessibilityRole="radio"
+                accessibilityState={{ selected }}
+                accessibilityLabel={`Text size ${option.label}`}
+                testID={`profile-text-size-${option.id}`}
+              >
+                <Text
+                  style={{
+                    fontSize: 13 * option.scale,
+                    lineHeight: 18 * option.scale,
+                    fontFamily: fontForWeight(selected ? "600" : "400"),
+                    color: selected ? theme.text : theme.textMuted,
+                    letterSpacing: 0.2,
+                  }}
+                >
+                  {option.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+        <View
+          style={[
+            styles.textSizePreview,
+            { borderColor: theme.backgroundSecondary },
+          ]}
+          testID="profile-text-size-preview"
+        >
+          <ThemedText
+            type="small"
+            style={[styles.textSizePreviewLabel, { color: theme.textMuted }]}
+          >
+            Preview
+          </ThemedText>
+          <ThemedText type="body" style={styles.textSizePreviewBody}>
+            The more truth you bring, the more alive she becomes.
+          </ThemedText>
+        </View>
+      </Card>
+
       <Card elevation={1} style={styles.voiceCard}>
         <ThemedText type="h4" style={styles.cardTitle}>
           Solence&rsquo;s voice
@@ -1536,7 +1619,12 @@ export default function ProfileScreen() {
                 </View>
 
                 {inBucket.length > 0 ? (
-                  <View style={styles.moodSummaryRow}>
+                  <View
+                    style={[
+                      styles.moodSummaryRow,
+                      { borderTopColor: theme.backgroundSecondary },
+                    ]}
+                  >
                     <View style={styles.moodSummaryBlock}>
                       <Text
                         style={[
@@ -1556,7 +1644,12 @@ export default function ProfileScreen() {
                         {avg.toFixed(1)} / 5
                       </Text>
                     </View>
-                    <View style={styles.moodSummaryDivider} />
+                    <View
+                      style={[
+                        styles.moodSummaryDivider,
+                        { backgroundColor: theme.backgroundSecondary },
+                      ]}
+                    />
                     <View style={styles.moodSummaryBlock}>
                       <Text
                         style={[
@@ -1936,6 +2029,43 @@ const styles = StyleSheet.create({
     marginTop: Spacing.lg,
     paddingVertical: Spacing.xl,
   },
+  textSizeCard: {
+    marginTop: Spacing.lg,
+    paddingVertical: Spacing.xl,
+  },
+  textSizeSegment: {
+    flexDirection: "row",
+    padding: 4,
+    borderRadius: BorderRadius.full,
+    gap: 4,
+  },
+  textSizeSegmentItem: {
+    flex: 1,
+    paddingVertical: Spacing.sm + 2,
+    paddingHorizontal: Spacing.sm,
+    borderRadius: BorderRadius.full,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 40,
+  },
+  textSizePreview: {
+    marginTop: Spacing.lg,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.md,
+    borderRadius: BorderRadius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    gap: Spacing.xs,
+  },
+  textSizePreviewLabel: {
+    fontSize: 11,
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+    fontFamily: fontForWeight("500"),
+  },
+  textSizePreviewBody: {
+    fontFamily: fontForWeight("300"),
+  },
   voiceList: {
     gap: Spacing.sm,
   },
@@ -2042,7 +2172,6 @@ const styles = StyleSheet.create({
     marginTop: Spacing.lg,
     paddingTop: Spacing.md,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "rgba(127,127,127,0.2)",
   },
   moodSummaryBlock: {
     flex: 1,
@@ -2052,7 +2181,6 @@ const styles = StyleSheet.create({
   moodSummaryDivider: {
     width: StyleSheet.hairlineWidth,
     alignSelf: "stretch",
-    backgroundColor: "rgba(127,127,127,0.2)",
   },
   moodSummaryLabel: {
     ...Typography.small,

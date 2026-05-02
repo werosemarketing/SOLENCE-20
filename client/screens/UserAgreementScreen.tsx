@@ -236,8 +236,8 @@ const styles = StyleSheet.create({
   closingSection: {
     marginTop: Spacing.xl,
     paddingTop: Spacing.xl,
-    borderTopWidth: 1,
-    borderTopColor: "rgba(128,128,128,0.15)",
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "rgba(128,128,128,0.3)",
   },
   closingText: {
     fontSize: 14,

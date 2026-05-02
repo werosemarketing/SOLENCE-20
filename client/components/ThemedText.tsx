@@ -1,6 +1,8 @@
-import { Text, type TextProps, Platform } from "react-native";
+import { useMemo } from "react";
+import { Text, type TextProps, Platform, type TextStyle } from "react-native";
 
 import { useTheme } from "@/hooks/useTheme";
+import { useTextScale } from "@/hooks/useTextScale";
 import { Typography, Fonts, fontForWeight } from "@/constants/theme";
 
 export type ThemedTextProps = TextProps & {
@@ -17,6 +19,7 @@ export function ThemedText({
   ...rest
 }: ThemedTextProps) {
   const { theme, isDark } = useTheme();
+  const { scale } = useTextScale();
 
   const getColor = () => {
     if (isDark && darkColor) {
@@ -60,7 +63,44 @@ export function ThemedText({
     ? Fonts?.sans
     : fontForWeight(typeStyle.fontWeight);
 
+  // Scale the type-style font size and lineHeight, plus any caller-provided
+  // overrides via the `style` prop, so adjusting text size in Profile cleanly
+  // propagates to every ThemedText without each call site needing to opt in.
+  const scaledStyle = useMemo<TextStyle>(() => {
+    if (scale === 1) {
+      return typeStyle as TextStyle;
+    }
+    const next: TextStyle = { ...(typeStyle as TextStyle) };
+    if (typeof next.fontSize === "number") {
+      next.fontSize = next.fontSize * scale;
+    }
+    if (typeof next.lineHeight === "number") {
+      next.lineHeight = next.lineHeight * scale;
+    }
+    return next;
+  }, [typeStyle, scale]);
+
+  const scaledOverride = useMemo<TextStyle | null>(() => {
+    if (scale === 1 || !style) return null;
+    // Caller styles can be a single object or an array — flatten so we can
+    // read fontSize/lineHeight regardless of how they were passed in.
+    const flat = Array.isArray(style)
+      ? Object.assign({}, ...style.filter(Boolean))
+      : (style as TextStyle);
+    const override: TextStyle = {};
+    if (typeof flat.fontSize === "number") {
+      override.fontSize = flat.fontSize * scale;
+    }
+    if (typeof flat.lineHeight === "number") {
+      override.lineHeight = flat.lineHeight * scale;
+    }
+    return Object.keys(override).length > 0 ? override : null;
+  }, [style, scale]);
+
   return (
-    <Text style={[{ color: getColor(), fontFamily }, typeStyle, style]} {...rest} />
+    <Text
+      style={[{ color: getColor(), fontFamily }, scaledStyle, style, scaledOverride]}
+      {...rest}
+    />
   );
 }

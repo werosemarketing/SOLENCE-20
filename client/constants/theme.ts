@@ -3,7 +3,7 @@ import { Platform } from "react-native";
 export const Colors = {
   light: {
     text: "#403E3E",
-    textMuted: "#6b6560",
+    textMuted: "#5a544f",
     buttonText: "#FFFFFF",
     tabIconDefault: "#687076",
     tabIconSelected: "#D66B32",

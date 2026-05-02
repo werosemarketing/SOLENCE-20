@@ -406,8 +406,8 @@ const styles = StyleSheet.create({
     fontWeight: "400",
   },
   planDivider: {
-    height: 1,
-    backgroundColor: "rgba(127,127,127,0.15)",
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: "rgba(127,127,127,0.25)",
     marginVertical: Spacing.xs,
   },
   benefitRow: {
