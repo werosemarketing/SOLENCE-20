@@ -13,6 +13,11 @@ import {
   favorites,
   moodEntries,
   tokenUsage,
+  userMemories,
+  USER_MEMORY_TEXT_MAX_LEN,
+  USER_MEMORY_MAX_PER_USER,
+  USER_MEMORY_PROMPT_MAX_ITEMS,
+  USER_MEMORY_PROMPT_CHAR_BUDGET,
   MOOD_PHASES,
   MOOD_SCORE_MIN,
   MOOD_SCORE_MAX,
@@ -399,7 +404,25 @@ function clampReflectionLength(text: string, max: number): string {
   return `${sliced.slice(0, cutoff).trimEnd()}…`;
 }
 
-type ReflectionResult = { summary: string; takeaway: string };
+// Long-term memory configuration. The reflection generator returns up to
+// MEMORY_ITEMS_PER_REFLECTION durable observations about the user that we
+// persist to user_memories and surface back into future system prompts.
+// Bounding both the count and the text length keeps the prompt-side
+// payload predictable and well under the ~200-token budget the chat
+// handler reserves for memories.
+const MEMORY_ITEMS_PER_REFLECTION = 2;
+
+// Hard cap on individual memory text length we accept from the model.
+// Mirrors USER_MEMORY_TEXT_MAX_LEN — duplicated here as a const so the
+// validation logic reads cleanly. Anything longer is clamped on a word
+// boundary, mirroring how reflection text is clamped.
+const MEMORY_TEXT_MAX_LEN = USER_MEMORY_TEXT_MAX_LEN;
+
+type ReflectionResult = {
+  summary: string;
+  takeaway: string;
+  memories: string[];
+};
 
 // Ask the model to summarize a conversation into a soft, grounded reflection.
 // Returns null on any failure (parse errors, empty result, network) so the
@@ -420,11 +443,11 @@ async function generateReflection(
 
   const systemContent =
     language === "es"
-      ? "Escribes reflexiones suaves al estilo de un diario que resumen conversaciones de apoyo emocional. Habla directamente al usuario (en segunda persona, 'tú'). El tono es cálido, sereno, nunca clínico ni sermoneador. NUNCA des consejos ni instrucciones. NUNCA uses frases prescriptivas como 'recuerda' o 'asegúrate de'. NUNCA menciones que eres una IA ni te refieras a Solence por su nombre. Responde con JSON con la forma exacta {\"summary\": string, \"takeaway\": string}. AMBOS campos DEBEN estar escritos en español. El 'summary' tiene de 3 a 5 oraciones que capturan lo que el usuario tenía en mente, las emociones con las que estaba, y cualquier pequeño cambio de perspectiva que haya surgido. El 'takeaway' es una sola oración corta (menos de 20 palabras) — una frase suave y verdadera que el usuario pueda llevarse consigo, NO una instrucción."
-      : "You write gentle journal-style reflections summarizing emotional-support conversations. Speak directly to the user (second person, 'you'). Tone is warm, grounded, never clinical, never preachy. NEVER give advice or instructions. NEVER use prescribed-feeling phrases like 'remember to' or 'make sure'. NEVER mention that you are an AI or refer to Solence by name. Reply with JSON in the exact shape {\"summary\": string, \"takeaway\": string}. The summary is 3 to 5 sentences capturing what was on the user's mind, the feelings they were sitting with, and any small shift in perspective that emerged. The takeaway is a single short sentence (under 20 words) — a gentle, true-feeling phrase the user could carry with them, NOT an instruction.";
+      ? `Escribes reflexiones suaves al estilo de un diario que resumen conversaciones de apoyo emocional. Habla directamente al usuario (en segunda persona, 'tú'). El tono es cálido, sereno, nunca clínico ni sermoneador. NUNCA des consejos ni instrucciones. NUNCA uses frases prescriptivas como 'recuerda' o 'asegúrate de'. NUNCA menciones que eres una IA ni te refieras a Solence por su nombre. Responde con JSON con la forma exacta {"summary": string, "takeaway": string, "memories": string[]}. TODOS los textos DEBEN estar escritos en español. El 'summary' tiene de 3 a 5 oraciones que capturan lo que el usuario tenía en mente, las emociones con las que estaba, y cualquier pequeño cambio de perspectiva que haya surgido. El 'takeaway' es una sola oración corta (menos de 20 palabras) — una frase suave y verdadera que el usuario pueda llevarse consigo, NO una instrucción. 'memories' es una lista de 0 a ${MEMORY_ITEMS_PER_REFLECTION} observaciones DURADERAS sobre el usuario que ayudarían a recordarle en una conversación futura — por ejemplo, una situación de vida estable (nuevo trabajo, mudanza, crianza), un nombre que mencionó (pareja, mascota, hijo), una práctica recurrente (meditación matutina, correr) o una preferencia explícita ('me ayuda hablar despacio'). Cada memoria debe ser una sola frase de menos de ${MEMORY_TEXT_MAX_LEN} caracteres, en tercera persona desde el punto de vista de un observador ('Está pasando por…', 'Su perro se llama…'). Devuelve [] si no surge nada digno de recordar — un estado de ánimo pasajero NO es una memoria.`
+      : `You write gentle journal-style reflections summarizing emotional-support conversations. Speak directly to the user (second person, 'you'). Tone is warm, grounded, never clinical, never preachy. NEVER give advice or instructions. NEVER use prescribed-feeling phrases like 'remember to' or 'make sure'. NEVER mention that you are an AI or refer to Solence by name. Reply with JSON in the exact shape {"summary": string, "takeaway": string, "memories": string[]}. The summary is 3 to 5 sentences capturing what was on the user's mind, the feelings they were sitting with, and any small shift in perspective that emerged. The takeaway is a single short sentence (under 20 words) — a gentle, true-feeling phrase the user could carry with them, NOT an instruction. 'memories' is a list of 0 to ${MEMORY_ITEMS_PER_REFLECTION} DURABLE observations about the user that would help recognize them in a future conversation — e.g. a stable life situation (new job, move, parenting), a name they mentioned (partner, pet, child), a recurring practice (morning meditation, running), or an explicit preference ('it helps me when you speak slowly'). Each memory must be a single sentence under ${MEMORY_TEXT_MAX_LEN} characters, written in third person from an observer's point of view ('Is going through…', 'Their dog is named…'). Return [] when nothing worth remembering surfaced — a passing mood is NOT a memory.`;
   const userContent =
     language === "es"
-      ? `Transcripción de la conversación:\n${transcript}\n\nEscribe ahora el JSON de la reflexión, con 'summary' y 'takeaway' en español.`
+      ? `Transcripción de la conversación:\n${transcript}\n\nEscribe ahora el JSON de la reflexión, con 'summary', 'takeaway' y 'memories' en español.`
       : `Conversation transcript:\n${transcript}\n\nWrite the reflection JSON now.`;
 
   try {
@@ -454,7 +477,11 @@ async function generateReflection(
       return null;
     }
     if (!parsed || typeof parsed !== "object") return null;
-    const obj = parsed as { summary?: unknown; takeaway?: unknown };
+    const obj = parsed as {
+      summary?: unknown;
+      takeaway?: unknown;
+      memories?: unknown;
+    };
     if (typeof obj.summary !== "string" || typeof obj.takeaway !== "string") {
       return null;
     }
@@ -464,7 +491,25 @@ async function generateReflection(
       REFLECTION_TAKEAWAY_MAX_LEN,
     );
     if (summary.length === 0 || takeaway.length === 0) return null;
-    return { summary, takeaway };
+    // Memories are best-effort: a missing/malformed array degrades to []
+    // rather than failing the whole reflection. We dedupe within the
+    // batch (case-insensitive) and clamp each item so a chatty model
+    // can't slip in 1000-character "memories".
+    const memories: string[] = [];
+    if (Array.isArray(obj.memories)) {
+      const seen = new Set<string>();
+      for (const item of obj.memories) {
+        if (typeof item !== "string") continue;
+        const cleaned = clampReflectionLength(item, MEMORY_TEXT_MAX_LEN);
+        if (cleaned.length === 0) continue;
+        const key = cleaned.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        memories.push(cleaned);
+        if (memories.length >= MEMORY_ITEMS_PER_REFLECTION) break;
+      }
+    }
+    return { summary, takeaway, memories };
   } catch (error) {
     console.error(
       "Reflection generation failed:",
@@ -481,6 +526,70 @@ async function generateReflection(
 // caller should treat that as "no reflection yet" and leave the columns
 // untouched. Race-safe: the UPDATE is gated on `reflection_summary IS NULL`
 // so a concurrent generator can't clobber the first writer.
+
+// Insert a freshly-extracted batch of long-term memories for the user,
+// then prune anything beyond USER_MEMORY_MAX_PER_USER (oldest-first).
+// Best-effort: any DB error is logged and swallowed so a memory-write
+// hiccup never breaks reflection persistence. Skips inserts that match
+// (case-insensitive) an existing row so the same observation isn't
+// stored twice across sessions.
+async function persistUserMemories(
+  userId: string,
+  conversationId: number,
+  texts: string[],
+): Promise<void> {
+  if (!texts || texts.length === 0) return;
+  try {
+    const existing = await db
+      .select({ text: userMemories.text })
+      .from(userMemories)
+      .where(eq(userMemories.userId, userId));
+    const seen = new Set(existing.map((r) => r.text.trim().toLowerCase()));
+
+    const fresh: { userId: string; text: string; sourceConversationId: number }[] = [];
+    for (const raw of texts) {
+      const cleaned = raw.trim();
+      if (cleaned.length === 0) continue;
+      const key = cleaned.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      fresh.push({
+        userId,
+        text: cleaned,
+        sourceConversationId: conversationId,
+      });
+    }
+    if (fresh.length === 0) return;
+
+    await db.insert(userMemories).values(fresh);
+
+    // Prune oldest-first whenever we're over the per-user cap. We pull
+    // ids ordered by createdAt DESC, then DELETE everything past the
+    // cap by id list — keeps the query portable (no LIMIT in DELETE on
+    // every dialect) and bounded in row count.
+    const allIds = await db
+      .select({ id: userMemories.id })
+      .from(userMemories)
+      .where(eq(userMemories.userId, userId))
+      .orderBy(desc(userMemories.createdAt), desc(userMemories.id));
+    if (allIds.length > USER_MEMORY_MAX_PER_USER) {
+      const toRemove = allIds
+        .slice(USER_MEMORY_MAX_PER_USER)
+        .map((r) => r.id);
+      if (toRemove.length > 0) {
+        await db
+          .delete(userMemories)
+          .where(inArray(userMemories.id, toRemove));
+      }
+    }
+  } catch (err) {
+    console.error(
+      "User memory persist failed:",
+      err instanceof Error ? err.message : err,
+    );
+  }
+}
+
 async function generateAndPersistReflection(
   conversationId: number,
   language: Language = DEFAULT_LANGUAGE,
@@ -493,6 +602,7 @@ async function generateAndPersistReflection(
   // call and keeps the endpoint cheap on repeat taps.
   const [existing] = await db
     .select({
+      userId: conversations.userId,
       summary: conversations.reflectionSummary,
       takeaway: conversations.reflectionTakeaway,
       generatedAt: conversations.reflectionGeneratedAt,
@@ -552,6 +662,16 @@ async function generateAndPersistReflection(
       });
 
     if (updated.length > 0 && updated[0].summary && updated[0].takeaway && updated[0].generatedAt) {
+      // We — and only we — were the writer that persisted this
+      // reflection, so it's safe to insert the matching memories now
+      // without risking duplicates from a concurrent generator.
+      if (existing?.userId && reflection.memories.length > 0) {
+        await persistUserMemories(
+          existing.userId,
+          conversationId,
+          reflection.memories,
+        );
+      }
       return {
         summary: updated[0].summary,
         takeaway: updated[0].takeaway,
@@ -2098,6 +2218,89 @@ export async function registerRoutes(app: Express): Promise<Server> {
     },
   );
 
+  // ── Long-term memories ────────────────────────────────────────────
+  // Powers the Profile "What Solence remembers" card. Memories are
+  // produced by the reflection generator and folded back into the chat
+  // system prompt; the user can review, delete individual items, or
+  // wipe the entire list at any time. All endpoints are scoped strictly
+  // to the caller's userId.
+
+  app.get(
+    "/api/memories",
+    requireAuth,
+    async (req: Request, res: Response) => {
+      try {
+        const userId = req.user!.userId;
+        const rows = await db
+          .select({
+            id: userMemories.id,
+            text: userMemories.text,
+            sourceConversationId: userMemories.sourceConversationId,
+            createdAt: userMemories.createdAt,
+          })
+          .from(userMemories)
+          .where(eq(userMemories.userId, userId))
+          .orderBy(desc(userMemories.createdAt), desc(userMemories.id))
+          .limit(USER_MEMORY_MAX_PER_USER);
+        res.json({ memories: rows });
+      } catch (error) {
+        console.error("List memories error:", error);
+        res.status(500).json({ error: "Failed to load memories" });
+      }
+    },
+  );
+
+  app.delete(
+    "/api/memories/:id",
+    requireAuth,
+    async (req: Request, res: Response) => {
+      try {
+        const userId = req.user!.userId;
+        const parsed = Number(req.params.id);
+        if (!Number.isFinite(parsed) || parsed <= 0) {
+          return res.status(400).json({ error: "Invalid memory id" });
+        }
+        // Ownership check is baked into the WHERE clause: the row is
+        // only deleted when it belongs to the caller, so a malicious
+        // client guessing ids can't wipe another user's memory.
+        const removed = await db
+          .delete(userMemories)
+          .where(
+            and(
+              eq(userMemories.id, parsed),
+              eq(userMemories.userId, userId),
+            ),
+          )
+          .returning({ id: userMemories.id });
+        if (removed.length === 0) {
+          return res.status(404).json({ error: "Memory not found" });
+        }
+        res.json({ ok: true });
+      } catch (error) {
+        console.error("Delete memory error:", error);
+        res.status(500).json({ error: "Failed to delete memory" });
+      }
+    },
+  );
+
+  app.delete(
+    "/api/memories",
+    requireAuth,
+    async (req: Request, res: Response) => {
+      try {
+        const userId = req.user!.userId;
+        const removed = await db
+          .delete(userMemories)
+          .where(eq(userMemories.userId, userId))
+          .returning({ id: userMemories.id });
+        res.json({ ok: true, removed: removed.length });
+      } catch (error) {
+        console.error("Clear memories error:", error);
+        res.status(500).json({ error: "Failed to clear memories" });
+      }
+    },
+  );
+
   // ── Mood check-ins ────────────────────────────────────────────────
   // Persist a single pre- or post-session mood rating. The pre-session
   // entry is created BEFORE a conversation row exists, so `conversationId`
@@ -2276,6 +2479,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           favoriteRows,
           moodRows,
           tokenUsageRows,
+          memoryRows,
         ] = await Promise.all([
           db
             .select()
@@ -2316,6 +2520,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
             .from(tokenUsage)
             .where(eq(tokenUsage.userId, userId))
             .orderBy(desc(tokenUsage.periodStart)),
+          db
+            .select()
+            .from(userMemories)
+            .where(eq(userMemories.userId, userId))
+            .orderBy(desc(userMemories.createdAt), desc(userMemories.id)),
         ]);
 
         const generatedAt = new Date().toISOString();
@@ -2395,6 +2604,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
             createdAt: stamp(t.createdAt),
           })),
         });
+        writeJson("memories.json", {
+          generatedAt,
+          count: memoryRows.length,
+          memories: memoryRows.map((m) => ({
+            id: m.id,
+            text: m.text,
+            sourceConversationId: m.sourceConversationId,
+            createdAt: stamp(m.createdAt),
+          })),
+        });
         zip.file(
           "README.txt",
           [
@@ -2410,6 +2629,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             "  • favorites.json     — replies you bookmarked as saved moments",
             "  • mood_entries.json  — pre/post-session mood check-ins",
             "  • token_usage.json   — daily usage of the free token allowance",
+            "  • memories.json      — long-term notes Solence has kept about you",
             "",
             "Sensitive material (your password hash, auth tokens, billing",
             "details) is never included in this archive.",
@@ -2728,6 +2948,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
       }
 
+      // Long-term memory snippets carried over from past reflections.
+      // These are short, durable observations about the user (e.g. names
+      // they mentioned, a stable life situation) rather than mood-of-the-
+      // moment notes. The storage cap (USER_MEMORY_MAX_PER_USER) governs
+      // how many we keep; we apply tighter prompt-side budgets here so
+      // the injected block stays close to a ~200 token target regardless
+      // of how full the user's store is. Newest memories win when we
+      // truncate. The prompt explicitly tells the model not to recite
+      // memories verbatim, mirroring how `pastContext` is framed.
+      let memoryBlock = "";
+      try {
+        const memoryRows = await db
+          .select({ text: userMemories.text })
+          .from(userMemories)
+          .where(eq(userMemories.userId, userId))
+          .orderBy(desc(userMemories.createdAt), desc(userMemories.id))
+          .limit(USER_MEMORY_PROMPT_MAX_ITEMS);
+        const selectedLines: string[] = [];
+        let usedChars = 0;
+        for (const row of memoryRows) {
+          const line = `- ${row.text}`;
+          // +1 accounts for the join newline once we have at least one line.
+          const projected =
+            usedChars + line.length + (selectedLines.length > 0 ? 1 : 0);
+          if (projected > USER_MEMORY_PROMPT_CHAR_BUDGET) break;
+          selectedLines.push(line);
+          usedChars = projected;
+        }
+        if (selectedLines.length > 0) {
+          memoryBlock = `\n\nWHAT YOU REMEMBER ABOUT THIS USER (from past sessions; reference only when it fits naturally, never recite):\n${selectedLines.join("\n")}`;
+        }
+      } catch (memoryError) {
+        console.error(
+          "Failed to load user memories for chat:",
+          memoryError instanceof Error ? memoryError.message : memoryError,
+        );
+      }
+
       // When the user has chosen Spanish, instruct the model to reply in
       // Spanish. We append this AFTER personalization so the language
       // directive is the most recent line of the system prompt and harder
@@ -2753,6 +3011,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           content:
             SOLENCE_SYSTEM_PROMPT +
             personalizationBlock +
+            memoryBlock +
             pastContext +
             moodHint +
             languageDirective,

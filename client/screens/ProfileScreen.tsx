@@ -177,6 +177,17 @@ type FavoritesResponse = {
   favorites: SavedMoment[];
 };
 
+type Memory = {
+  id: number;
+  text: string;
+  sourceConversationId: number | null;
+  createdAt: string;
+};
+
+type MemoriesResponse = {
+  memories: Memory[];
+};
+
 const SAVED_MOMENTS_LIMIT = 10;
 const SAVED_MOMENT_SNIPPET_MAX_LEN = 220;
 
@@ -327,6 +338,24 @@ export default function ProfileScreen() {
   const [moodEntries, setMoodEntries] = useState<MoodEntry[] | null>(null);
   const [moodLoading, setMoodLoading] = useState(true);
   const [moodError, setMoodError] = useState<string | null>(null);
+
+  // Long-term memory card state. The list is bounded server-side
+  // (USER_MEMORY_MAX_PER_USER) so we don't paginate. Per-row delete +
+  // a "clear all" confirmation are the user's controls. Errors degrade
+  // to inline text under the card title so a flaky network can't block
+  // the rest of Profile.
+  const [memories, setMemories] = useState<Memory[] | null>(null);
+  const [memoriesLoading, setMemoriesLoading] = useState(true);
+  const [memoriesError, setMemoriesError] = useState<string | null>(null);
+  const [memoryRemovingId, setMemoryRemovingId] = useState<number | null>(
+    null,
+  );
+  const [memoryActionError, setMemoryActionError] = useState<string | null>(
+    null,
+  );
+  const [showClearMemoriesConfirm, setShowClearMemoriesConfirm] =
+    useState(false);
+  const [clearMemoriesSubmitting, setClearMemoriesSubmitting] = useState(false);
 
   // "Invite a friend" card state. Lazily loaded — failures degrade the
   // card to a quiet error message instead of blocking the rest of
@@ -985,6 +1014,98 @@ export default function ProfileScreen() {
     }
   }, []);
 
+  const loadMemories = useCallback(async (signal?: AbortSignal) => {
+    try {
+      setMemoriesLoading(true);
+      setMemoriesError(null);
+      const token = await AsyncStorage.getItem(STORAGE_KEY_AUTH_TOKEN);
+      const headers: Record<string, string> = {};
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const apiUrl = getApiUrl();
+      const response = await fetch(`${apiUrl}/api/memories`, {
+        headers,
+        signal,
+      });
+      if (!response.ok) {
+        throw new Error(`Request failed (${response.status})`);
+      }
+      const data = (await response.json()) as MemoriesResponse;
+      if (signal?.aborted) return;
+      setMemories(data.memories);
+    } catch (e) {
+      if (signal?.aborted) return;
+      const message =
+        e instanceof Error ? e.message : "Could not load your memories";
+      setMemoriesError(message);
+    } finally {
+      if (!signal?.aborted) setMemoriesLoading(false);
+    }
+  }, []);
+
+  const handleDeleteMemory = useCallback(
+    async (memory: Memory) => {
+      if (memoryRemovingId !== null) return;
+      setMemoryRemovingId(memory.id);
+      setMemoryActionError(null);
+      // Optimistic remove — a failure rolls the row back so the user
+      // never sees a memory disappear when the request didn't actually
+      // land on the server.
+      const previous = memories;
+      setMemories((prev) =>
+        prev ? prev.filter((m) => m.id !== memory.id) : prev,
+      );
+      try {
+        const token = await AsyncStorage.getItem(STORAGE_KEY_AUTH_TOKEN);
+        const headers: Record<string, string> = {};
+        if (token) headers["Authorization"] = `Bearer ${token}`;
+        const apiUrl = getApiUrl();
+        const response = await fetch(
+          `${apiUrl}/api/memories/${memory.id}`,
+          { method: "DELETE", headers },
+        );
+        if (!response.ok && response.status !== 404) {
+          throw new Error(`Request failed (${response.status})`);
+        }
+      } catch (e) {
+        setMemories(previous);
+        setMemoryActionError(
+          e instanceof Error ? e.message : "Couldn't remove that memory.",
+        );
+      } finally {
+        setMemoryRemovingId(null);
+      }
+    },
+    [memories, memoryRemovingId],
+  );
+
+  const handleConfirmClearMemories = useCallback(async () => {
+    setClearMemoriesSubmitting(true);
+    setMemoryActionError(null);
+    try {
+      const token = await AsyncStorage.getItem(STORAGE_KEY_AUTH_TOKEN);
+      const headers: Record<string, string> = {};
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const apiUrl = getApiUrl();
+      const response = await fetch(`${apiUrl}/api/memories`, {
+        method: "DELETE",
+        headers,
+      });
+      if (!response.ok) {
+        throw new Error(`Request failed (${response.status})`);
+      }
+      setMemories([]);
+      setShowClearMemoriesConfirm(false);
+    } catch (e) {
+      setMemoryActionError(
+        e instanceof Error
+          ? e.message
+          : "Couldn't clear your memories. Try again?",
+      );
+    } finally {
+      setClearMemoriesSubmitting(false);
+    }
+  }, []);
+
   const loadMoodEntries = useCallback(async (signal?: AbortSignal) => {
     try {
       setMoodLoading(true);
@@ -1019,6 +1140,7 @@ export default function ProfileScreen() {
       loadConversations(controller.signal);
       loadSavedMoments(controller.signal);
       loadMoodEntries(controller.signal);
+      loadMemories(controller.signal);
       // Refresh referral data on focus too — `joinedCount` and the
       // active credit window may both change after a friend signs up
       // (or the credit naturally expires).
@@ -1026,7 +1148,7 @@ export default function ProfileScreen() {
       return () => {
         controller.abort();
       };
-    }, [loadConversations, loadSavedMoments, loadMoodEntries, loadReferral]),
+    }, [loadConversations, loadSavedMoments, loadMoodEntries, loadMemories, loadReferral]),
   );
 
   // Open the system share sheet with the user's invite blurb. We use
@@ -2248,6 +2370,142 @@ export default function ProfileScreen() {
         )}
       </Card>
 
+      <Card elevation={1} style={styles.memoriesCard}>
+        <View style={styles.memoriesHeader}>
+          <View style={styles.memoriesHeaderText}>
+            <ThemedText type="h4" style={styles.cardTitle}>
+              {t("profile.memories.title")}
+            </ThemedText>
+            <ThemedText
+              type="small"
+              style={[styles.cardDescription, { color: theme.textMuted }]}
+            >
+              {t("profile.memories.subtitle")}
+            </ThemedText>
+          </View>
+          {memories && memories.length > 0 ? (
+            <Pressable
+              onPress={() => {
+                setMemoryActionError(null);
+                setShowClearMemoriesConfirm(true);
+              }}
+              hitSlop={8}
+              style={({ pressed }) => [
+                styles.memoriesClearButton,
+                {
+                  borderColor: theme.backgroundSecondary,
+                  backgroundColor: theme.backgroundSecondary,
+                },
+                pressed && { opacity: 0.6 },
+              ]}
+              testID="profile-memories-clear-all"
+              accessibilityRole="button"
+              accessibilityLabel={t("profile.memories.clearAll")}
+            >
+              <Feather name="trash-2" size={14} color={theme.textMuted} />
+              <Text
+                style={[
+                  styles.memoriesClearButtonText,
+                  { color: theme.text },
+                ]}
+              >
+                {t("profile.memories.clearAll")}
+              </Text>
+            </Pressable>
+          ) : null}
+        </View>
+
+        {memoryActionError ? (
+          <Text
+            style={[styles.errorText, { color: theme.textMuted }]}
+            testID="profile-memories-action-error"
+          >
+            {memoryActionError}
+          </Text>
+        ) : null}
+
+        {memoriesLoading ? (
+          <View
+            style={styles.loadingContainer}
+            testID="profile-memories-loading"
+          >
+            <ActivityIndicator color={theme.orbPrimary} />
+          </View>
+        ) : memoriesError ? (
+          <View style={styles.errorContainer} testID="profile-memories-error">
+            <Text style={[styles.errorText, { color: theme.textMuted }]}>
+              {memoriesError}
+            </Text>
+          </View>
+        ) : memories && memories.length > 0 ? (
+          <View testID="profile-memories-list">
+            {memories.map((memory, index) => {
+              const isLast = index === memories.length - 1;
+              const isRemoving = memoryRemovingId === memory.id;
+              return (
+                <View
+                  key={memory.id}
+                  style={[
+                    styles.memoryRow,
+                    !isLast && {
+                      borderBottomColor: theme.backgroundSecondary,
+                      borderBottomWidth: StyleSheet.hairlineWidth,
+                    },
+                  ]}
+                  testID={`profile-memory-row-${memory.id}`}
+                >
+                  <Text
+                    style={[styles.memoryText, { color: theme.text }]}
+                    testID={`profile-memory-text-${memory.id}`}
+                  >
+                    {memory.text}
+                  </Text>
+                  <Pressable
+                    onPress={() => handleDeleteMemory(memory)}
+                    disabled={isRemoving}
+                    hitSlop={8}
+                    style={({ pressed }) => [
+                      styles.conversationActionButton,
+                      { backgroundColor: theme.backgroundSecondary },
+                      pressed && { opacity: 0.6 },
+                      isRemoving && { opacity: 0.5 },
+                    ]}
+                    testID={`profile-memory-remove-${memory.id}`}
+                    accessibilityRole="button"
+                    accessibilityLabel={t("profile.memories.removeA11y")}
+                  >
+                    {isRemoving ? (
+                      <ActivityIndicator
+                        size="small"
+                        color={theme.textMuted}
+                      />
+                    ) : (
+                      <Feather
+                        name="x"
+                        size={16}
+                        color={theme.textMuted}
+                      />
+                    )}
+                  </Pressable>
+                </View>
+              );
+            })}
+          </View>
+        ) : (
+          <View style={styles.emptyContainer} testID="profile-memories-empty">
+            <Text style={[styles.errorText, { color: theme.textMuted }]}>
+              {t("profile.memories.empty")}
+            </Text>
+          </View>
+        )}
+
+        <Text
+          style={[styles.memoriesPrivacyText, { color: theme.textMuted }]}
+        >
+          {t("profile.memories.privacy")}
+        </Text>
+      </Card>
+
       <Card elevation={1} style={styles.moodCard}>
         <ThemedText type="h4" style={styles.cardTitle}>
           {t("profile.mood.title")}
@@ -2978,6 +3236,25 @@ export default function ProfileScreen() {
         testID="profile-delete-confirm"
       />
 
+      <ConfirmDialog
+        visible={showClearMemoriesConfirm}
+        title={t("profile.memories.clearConfirmTitle")}
+        message={
+          memoryActionError
+            ? memoryActionError
+            : t("profile.memories.clearConfirmMessage")
+        }
+        confirmLabel={t("profile.memories.clearConfirmAction")}
+        destructive
+        loading={clearMemoriesSubmitting}
+        onConfirm={handleConfirmClearMemories}
+        onCancel={() => {
+          if (clearMemoriesSubmitting) return;
+          setShowClearMemoriesConfirm(false);
+        }}
+        testID="profile-memories-clear-confirm"
+      />
+
       <MessageActionSheet
         visible={actionSheetMoment !== null}
         isFavorite
@@ -3261,6 +3538,50 @@ const styles = StyleSheet.create({
   savedMomentsCard: {
     marginTop: Spacing.lg,
     paddingVertical: Spacing.xl,
+  },
+  memoriesCard: {
+    marginTop: Spacing.lg,
+    paddingVertical: Spacing.xl,
+  },
+  memoriesHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: Spacing.md,
+  },
+  memoriesHeaderText: {
+    flex: 1,
+  },
+  memoriesClearButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.xs,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs + 2,
+    borderRadius: BorderRadius.full,
+    borderWidth: 1,
+  },
+  memoriesClearButtonText: {
+    ...Typography.small,
+    fontFamily: fontForWeight("600"),
+  },
+  memoryRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: Spacing.sm,
+    paddingVertical: Spacing.md,
+  },
+  memoryText: {
+    flex: 1,
+    ...Typography.body,
+    fontFamily: fontForWeight("400"),
+    lineHeight: 22,
+  },
+  memoriesPrivacyText: {
+    ...Typography.small,
+    fontFamily: fontForWeight("400"),
+    marginTop: Spacing.lg,
+    lineHeight: 18,
   },
   moodCard: {
     marginTop: Spacing.lg,

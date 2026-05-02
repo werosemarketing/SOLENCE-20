@@ -429,6 +429,17 @@
       "openA11y": "Abrir momento guardado de {{title}}",
       "removeA11y": "Quitar momento guardado de {{title}}"
     },
+    "memories": {
+      "title": "Lo que Solence recuerda",
+      "subtitle": "Pequeñas notas que Solence guarda de sesiones pasadas para acompañarte con un poco más de cuidado la próxima vez.",
+      "privacy": "Estas notas nunca salen de tu cuenta. Borra cualquiera —o todas— y Solence olvidará. Nunca se comparten, ni se venden, ni se muestran a nadie más.",
+      "empty": "Nada todavía — Solence empezará a recordar pequeñas cosas a medida que conversen.",
+      "removeA11y": "Olvidar este recuerdo",
+      "clearAll": "Borrar todos los recuerdos",
+      "clearConfirmTitle": "¿Borrar todos los recuerdos?",
+      "clearConfirmMessage": "Solence olvidará todo lo que ha anotado sobre ti. Esto no se puede deshacer.",
+      "clearConfirmAction": "Borrar todo"
+    },
     "reflections": {
       "title": "Reflexiones recientes",
       "subtitle": "Apuntes breves al estilo diario de tus sesiones recientes.",

@@ -278,3 +278,46 @@ export const referralCredits = pgTable(
 );
 
 export type ReferralCredit = typeof referralCredits.$inferSelect;
+
+// Long-term memory snippets Solence carries across conversations. Each row
+// is a single short, durable observation about the user (e.g. "Working
+// through stress at a new job") extracted by the reflection generator at
+// end-of-conversation. The chat handler folds the most recent snippets
+// into the system prompt so Solence can reference them naturally without
+// re-reading entire transcripts. `sourceConversationId` is nullable +
+// `set null` on conversation delete so a memory survives the user
+// removing the originating session — the user can still see and clear
+// it from the Profile "What Solence remembers" card.
+export const USER_MEMORY_TEXT_MAX_LEN = 200;
+// Hard cap on how many memory rows we keep per user. Anything above this
+// gets pruned oldest-first whenever the reflection generator inserts a
+// fresh batch — keeps the prompt-side payload small and bounded.
+export const USER_MEMORY_MAX_PER_USER = 20;
+// Prompt-side budget for the "WHAT YOU REMEMBER" block injected into the
+// chat system prompt. The storage cap above governs how many memories we
+// retain; these tighter caps govern how many we surface per request so
+// the system prompt stays close to a ~200 token budget regardless of how
+// full the user's memory store is. Newest memories win when truncating.
+export const USER_MEMORY_PROMPT_MAX_ITEMS = 8;
+export const USER_MEMORY_PROMPT_CHAR_BUDGET = 800;
+
+export const userMemories = pgTable(
+  "user_memories",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    text: text("text").notNull(),
+    sourceConversationId: integer("source_conversation_id").references(
+      () => conversations.id,
+      { onDelete: "set null" },
+    ),
+    createdAt: timestamp("created_at")
+      .default(sql`CURRENT_TIMESTAMP`)
+      .notNull(),
+  },
+  (table) => ({
+    userIdIdx: index("user_memories_user_id_idx").on(table.userId),
+  }),
+);
+
+export type UserMemory = typeof userMemories.$inferSelect;
