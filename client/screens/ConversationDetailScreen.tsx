@@ -467,6 +467,32 @@ export default function ConversationDetailScreen({ route, navigation }: Props) {
         </View>
       ) : data && data.messages.length > 0 ? (
         <View testID="conversation-detail-messages">
+          {data.conversation.reflectionSummary &&
+          data.conversation.reflectionTakeaway ? (
+            <Card
+              elevation={1}
+              style={styles.reflectionCard}
+              testID="conversation-detail-reflection"
+            >
+              <Text
+                style={[styles.reflectionLabel, { color: theme.textMuted }]}
+              >
+                Reflection
+              </Text>
+              <Text
+                style={[styles.reflectionTakeaway, { color: theme.text }]}
+                testID="conversation-detail-reflection-takeaway"
+              >
+                {data.conversation.reflectionTakeaway}
+              </Text>
+              <Text
+                style={[styles.reflectionSummary, { color: theme.textMuted }]}
+                testID="conversation-detail-reflection-summary"
+              >
+                {data.conversation.reflectionSummary}
+              </Text>
+            </Card>
+          ) : null}
           {favoriteError ? (
             <Text
               style={[styles.favoriteErrorText, { color: theme.textMuted }]}
@@ -662,6 +688,29 @@ const styles = StyleSheet.create({
     fontFamily: fontForWeight("400"),
     textAlign: "center",
     marginBottom: Spacing.sm,
+  },
+  reflectionCard: {
+    marginBottom: Spacing.lg,
+    paddingVertical: Spacing.lg,
+    paddingHorizontal: Spacing.lg,
+    gap: Spacing.sm,
+  },
+  reflectionLabel: {
+    ...Typography.small,
+    fontSize: 11,
+    fontFamily: fontForWeight("600"),
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+  },
+  reflectionTakeaway: {
+    ...Typography.body,
+    fontSize: 17,
+    lineHeight: 23,
+    fontFamily: fontForWeight("600"),
+  },
+  reflectionSummary: {
+    ...Typography.body,
+    fontFamily: fontForWeight("400"),
   },
   bubbleRow: {
     flexDirection: "row",

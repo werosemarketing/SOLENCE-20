@@ -72,6 +72,9 @@ type ConversationListItem = {
     content: string;
     createdAt: string;
   } | null;
+  reflectionSummary?: string | null;
+  reflectionTakeaway?: string | null;
+  reflectionGeneratedAt?: string | null;
 };
 
 type ConversationsResponse = {
@@ -1589,6 +1592,129 @@ export default function ProfileScreen() {
         )}
       </Card>
 
+      {(() => {
+        // Pull reflections out of the already-loaded conversations list so
+        // we don't need a separate endpoint. Show at most the 5 most
+        // recent — the list is already sorted by last-activity desc.
+        const reflectionItems = (conversations ?? [])
+          .filter(
+            (c): c is ConversationListItem & {
+              reflectionSummary: string;
+              reflectionTakeaway: string;
+              reflectionGeneratedAt: string;
+            } =>
+              Boolean(
+                c.reflectionSummary &&
+                  c.reflectionTakeaway &&
+                  c.reflectionGeneratedAt,
+              ),
+          )
+          .sort(
+            (a, b) =>
+              new Date(b.reflectionGeneratedAt).getTime() -
+              new Date(a.reflectionGeneratedAt).getTime(),
+          )
+          .slice(0, 5);
+
+        // Hide the whole card while we're loading or errored — the recent
+        // conversations card already surfaces those states for the same
+        // data source, so duplicating them here would feel noisy.
+        if (
+          conversationsLoading ||
+          conversationsError ||
+          reflectionItems.length === 0
+        ) {
+          return null;
+        }
+
+        return (
+          <Card
+            elevation={1}
+            style={styles.reflectionsCard}
+            testID="profile-reflections-card"
+          >
+            <ThemedText type="h4" style={styles.cardTitle}>
+              Recent reflections
+            </ThemedText>
+            <ThemedText
+              type="small"
+              style={[styles.cardDescription, { color: theme.textMuted }]}
+            >
+              Short journal-style takeaways from your recent sessions.
+            </ThemedText>
+            <View testID="profile-reflections-list">
+              {reflectionItems.map((c, index) => {
+                const isLast = index === reflectionItems.length - 1;
+                const titleLabel = displayConversationTitle(
+                  c.title,
+                  c.createdAt,
+                );
+                return (
+                  <Pressable
+                    key={c.id}
+                    onPress={() =>
+                      handleOpenConversation(c)
+                    }
+                    style={({ pressed }) => [
+                      styles.reflectionRow,
+                      !isLast && {
+                        borderBottomColor: theme.backgroundSecondary,
+                        borderBottomWidth: StyleSheet.hairlineWidth,
+                      },
+                      pressed && { opacity: 0.6 },
+                    ]}
+                    testID={`profile-reflection-row-${c.id}`}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Open conversation ${titleLabel}`}
+                  >
+                    <View style={styles.reflectionRowHeader}>
+                      <Text
+                        style={[
+                          styles.reflectionRowSource,
+                          { color: theme.text },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {titleLabel}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.reflectionRowTime,
+                          { color: theme.textMuted },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {formatRelativeTime(c.reflectionGeneratedAt)}
+                      </Text>
+                    </View>
+                    <Text
+                      style={[
+                        styles.reflectionRowTakeaway,
+                        { color: theme.text },
+                      ]}
+                      numberOfLines={2}
+                      testID={`profile-reflection-takeaway-${c.id}`}
+                    >
+                      {c.reflectionTakeaway}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.reflectionRowSummary,
+                        { color: theme.textMuted },
+                      ]}
+                      numberOfLines={3}
+                      testID={`profile-reflection-summary-${c.id}`}
+                    >
+                      {c.reflectionSummary}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </Card>
+        );
+      })()}
+
       <Card elevation={1} style={styles.conversationsCard}>
         <ThemedText type="h4" style={styles.cardTitle}>
           Recent conversations
@@ -1677,16 +1803,29 @@ export default function ProfileScreen() {
                         {formatRelativeTime(stampSource)}
                       </Text>
                     </View>
-                    <Text
-                      style={[
-                        styles.conversationPreview,
-                        { color: theme.textMuted },
-                      ]}
-                      numberOfLines={2}
-                      testID={`profile-conversation-preview-${conversation.id}`}
-                    >
-                      {`${rolePrefix}${previewLabel}`}
-                    </Text>
+                    {conversation.reflectionTakeaway ? (
+                      <Text
+                        style={[
+                          styles.conversationTakeaway,
+                          { color: theme.text },
+                        ]}
+                        numberOfLines={2}
+                        testID={`profile-conversation-takeaway-${conversation.id}`}
+                      >
+                        {conversation.reflectionTakeaway}
+                      </Text>
+                    ) : (
+                      <Text
+                        style={[
+                          styles.conversationPreview,
+                          { color: theme.textMuted },
+                        ]}
+                        numberOfLines={2}
+                        testID={`profile-conversation-preview-${conversation.id}`}
+                      >
+                        {`${rolePrefix}${previewLabel}`}
+                      </Text>
+                    )}
                   </Pressable>
                   <Pressable
                     onPress={() => requestRenameConversation(conversation)}
@@ -2156,5 +2295,47 @@ const styles = StyleSheet.create({
   conversationPreview: {
     ...Typography.small,
     fontFamily: fontForWeight("400"),
+  },
+  conversationTakeaway: {
+    ...Typography.body,
+    fontFamily: fontForWeight("500"),
+    fontStyle: "italic",
+  },
+  reflectionsCard: {
+    marginTop: Spacing.lg,
+    paddingVertical: Spacing.xl,
+  },
+  reflectionRow: {
+    paddingVertical: Spacing.md,
+    gap: Spacing.xs,
+  },
+  reflectionRowHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: Spacing.sm,
+  },
+  reflectionRowSource: {
+    flex: 1,
+    ...Typography.small,
+    fontSize: 12,
+    fontFamily: fontForWeight("600"),
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+  },
+  reflectionRowTime: {
+    ...Typography.small,
+    fontSize: 11,
+    fontFamily: fontForWeight("400"),
+  },
+  reflectionRowTakeaway: {
+    ...Typography.body,
+    fontFamily: fontForWeight("600"),
+    marginTop: Spacing.xs,
+  },
+  reflectionRowSummary: {
+    ...Typography.small,
+    fontFamily: fontForWeight("400"),
+    lineHeight: 18,
   },
 });

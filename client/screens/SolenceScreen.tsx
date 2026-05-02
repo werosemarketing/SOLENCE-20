@@ -1224,11 +1224,10 @@ export default function SolenceScreen({
   // fully torn down), so any latency or failure here must never surface.
   const requestReflectionForConversation = async (conversationId: number) => {
     try {
-      const token = await AsyncStorage.getItem(STORAGE_KEY_AUTH_TOKEN);
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
       };
-      if (token) headers["Authorization"] = `Bearer ${token}`;
+      if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
       await fetch(`${getApiUrl()}/api/conversations/${conversationId}/end`, {
         method: "POST",
         headers,
