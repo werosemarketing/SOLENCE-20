@@ -21,6 +21,10 @@ export const users = pgTable(
     intents: text("intents").array(),
     tone: text("tone"),
     voice: text("voice"),
+    // BCP-47-style language tag the user picked for the Solence UI and AI
+    // replies. Nullable so legacy rows + brand-new accounts fall back to
+    // English (DEFAULT_LANGUAGE) without a backfill.
+    language: text("language"),
     onboardingCompletedAt: timestamp("onboarding_completed_at"),
     // Personal share code printed on the Profile invite card. Generated on
     // first registration (or lazily backfilled for legacy rows). Lower-cased
@@ -57,6 +61,10 @@ export const VOICE_OPTIONS = ["nova", "shimmer", "onyx", "alloy"] as const;
 export type Voice = (typeof VOICE_OPTIONS)[number];
 export const DEFAULT_VOICE: Voice = "nova";
 
+export const LANGUAGE_OPTIONS = ["en", "es"] as const;
+export type Language = (typeof LANGUAGE_OPTIONS)[number];
+export const DEFAULT_LANGUAGE: Language = "en";
+
 export const INTENT_OPTIONS = [
   "process_emotions",
   "reduce_anxiety",
@@ -83,6 +91,7 @@ export const updatePreferencesSchema = z.object({
     .optional(),
   tone: z.enum(TONE_OPTIONS).nullable().optional(),
   voice: z.enum(VOICE_OPTIONS).nullable().optional(),
+  language: z.enum(LANGUAGE_OPTIONS).nullable().optional(),
   markOnboardingComplete: z.boolean().optional(),
 });
 
@@ -93,6 +102,7 @@ export type UserPreferences = {
   intents: Intent[];
   tone: Tone | null;
   voice: Voice | null;
+  language: Language | null;
   onboardingCompletedAt: string | null;
 };
 

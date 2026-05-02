@@ -1,5 +1,6 @@
 import React from "react";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
+import { useTranslation } from "react-i18next";
 import HomeScreen from "@/screens/HomeScreen";
 import { HeaderTitle } from "@/components/HeaderTitle";
 import { useScreenOptions } from "@/hooks/useScreenOptions";
@@ -12,6 +13,7 @@ const Stack = createNativeStackNavigator<HomeStackParamList>();
 
 export default function HomeStackNavigator() {
   const screenOptions = useScreenOptions();
+  const { t } = useTranslation();
 
   return (
     <Stack.Navigator screenOptions={screenOptions}>
@@ -19,7 +21,7 @@ export default function HomeStackNavigator() {
         name="Home"
         component={HomeScreen}
         options={{
-          headerTitle: () => <HeaderTitle title="My App" />,
+          headerTitle: () => <HeaderTitle title={t("headerTitle.appName")} />,
         }}
       />
     </Stack.Navigator>

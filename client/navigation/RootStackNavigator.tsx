@@ -4,6 +4,7 @@ import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import type { NavigatorScreenParams } from "@react-navigation/native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Linking from "expo-linking";
+import { useTranslation } from "react-i18next";
 import DisclaimerScreen from "@/screens/DisclaimerScreen";
 import OnboardingScreen from "@/screens/OnboardingScreen";
 import UserAgreementScreen from "@/screens/UserAgreementScreen";
@@ -59,6 +60,7 @@ function extractReferralCode(url: string | null | undefined): string | null {
 
 export default function RootStackNavigator() {
   const screenOptions = useScreenOptions();
+  const { t } = useTranslation();
   const [stage, setStage] = useState<AppStage>("loading");
   const [authToken, setAuthToken] = useState<string | null>(null);
   // Most recently observed referral code from a deep link. Passed into
@@ -355,7 +357,7 @@ export default function RootStackNavigator() {
         name="ConversationDetail"
         component={ConversationDetailScreen}
         options={{
-          title: "Conversation",
+          title: t("conversationDetail.header"),
         }}
       />
       <Stack.Screen

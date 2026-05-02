@@ -4,6 +4,7 @@ import type { NavigatorScreenParams } from "@react-navigation/native";
 import { Feather } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
 import { Platform, StyleSheet } from "react-native";
+import { useTranslation } from "react-i18next";
 import SolenceScreen from "@/screens/SolenceScreen";
 import ProfileStackNavigator, {
   type ProfileStackParamList,
@@ -33,6 +34,7 @@ export default function MainTabNavigator({
   onSignOut,
 }: MainTabNavigatorProps) {
   const { theme, isDark } = useTheme();
+  const { t } = useTranslation();
 
   return (
     <Tab.Navigator
@@ -63,7 +65,7 @@ export default function MainTabNavigator({
       <Tab.Screen
         name="HomeTab"
         options={{
-          title: "Solence",
+          title: t("solence.header"),
           tabBarIcon: ({ color, size }) => (
             <Feather name="circle" size={size} color={color} />
           ),
@@ -82,7 +84,7 @@ export default function MainTabNavigator({
         name="ProfileTab"
         component={ProfileStackNavigator}
         options={{
-          title: "Profile",
+          title: t("profile.header"),
           tabBarIcon: ({ color, size }) => (
             <Feather name="user" size={size} color={color} />
           ),

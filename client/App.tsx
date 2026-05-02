@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { StyleSheet, Platform } from "react-native";
 import { NavigationContainer } from "@react-navigation/native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
@@ -10,6 +10,7 @@ import * as SplashScreen from "expo-splash-screen";
 
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "@/lib/query-client";
+import { initI18n } from "@/lib/i18n";
 
 import RootStackNavigator from "@/navigation/RootStackNavigator";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -36,14 +37,33 @@ export default function App() {
     MPLUSRounded1c_700Bold,
   });
 
+  // i18n bootstraps from AsyncStorage (solence_language) → device locale
+  // → DEFAULT_LANGUAGE. We gate the splash on both fonts AND i18n so the
+  // first frame the user sees is already in the correct language — no
+  // English flash on Spanish devices.
+  const [i18nReady, setI18nReady] = useState(false);
   useEffect(() => {
-    if (fontsLoaded || fontError) {
+    let cancelled = false;
+    initI18n()
+      .catch((err) => {
+        console.warn("i18n init failed:", err);
+      })
+      .finally(() => {
+        if (!cancelled) setI18nReady(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if ((fontsLoaded || fontError) && i18nReady) {
       SplashScreen.hideAsync();
       applyWebFont();
     }
-  }, [fontsLoaded, fontError]);
+  }, [fontsLoaded, fontError, i18nReady]);
 
-  if (!fontsLoaded && !fontError) return null;
+  if ((!fontsLoaded && !fontError) || !i18nReady) return null;
 
   return (
     <ErrorBoundary>

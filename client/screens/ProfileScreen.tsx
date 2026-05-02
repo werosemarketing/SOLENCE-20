@@ -22,6 +22,7 @@ import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { Feather } from "@expo/vector-icons";
+import { useTranslation } from "react-i18next";
 
 import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
 import { Card } from "@/components/Card";
@@ -55,16 +56,20 @@ import {
 import { getApiUrl } from "@/lib/query-client";
 import { displayConversationTitle } from "@/lib/conversation-title";
 import {
+  DEFAULT_LANGUAGE,
   DEFAULT_VOICE,
   EMPTY_PREFERENCES,
   INTENT_LABELS,
+  LANGUAGES,
+  LANGUAGE_LABELS,
   TONE_LABELS,
   VOICES,
   VOICE_DESCRIPTIONS,
   VOICE_LABELS,
   type ClientPreferences,
 } from "@/lib/preferences";
-import type { Intent, Tone, Voice } from "@shared/schema";
+import { setAppLanguage } from "@/lib/i18n";
+import type { Intent, Language, Tone, Voice } from "@shared/schema";
 import type { RootStackParamList } from "@/navigation/RootStackNavigator";
 
 const STORAGE_KEY_AUTH_TOKEN = "solence_auth_token";
@@ -224,35 +229,44 @@ function formatTokens(value: number): string {
   return `${value}`;
 }
 
-function formatDayLabel(iso: string, isToday: boolean): string {
-  if (isToday) return "Today";
+function formatDayLabel(
+  iso: string,
+  isToday: boolean,
+  t: (key: string) => string,
+  locale?: string,
+): string {
+  if (isToday) return t("time.today");
   const d = new Date(iso);
-  return d.toLocaleDateString(undefined, { weekday: "short" });
+  return d.toLocaleDateString(locale, { weekday: "short" });
 }
 
-function formatFullDate(iso: string): string {
+function formatFullDate(iso: string, locale?: string): string {
   const d = new Date(iso);
-  return d.toLocaleDateString(undefined, {
+  return d.toLocaleDateString(locale, {
     weekday: "long",
     month: "short",
     day: "numeric",
   });
 }
 
-function formatRelativeTime(iso: string): string {
+function formatRelativeTime(
+  iso: string,
+  t: (key: string, opts?: Record<string, unknown>) => string,
+  locale?: string,
+): string {
   const then = new Date(iso).getTime();
   const now = Date.now();
   const diffMs = Math.max(0, now - then);
   const diffSec = Math.round(diffMs / 1000);
-  if (diffSec < 60) return "just now";
+  if (diffSec < 60) return t("time.now");
   const diffMin = Math.round(diffSec / 60);
-  if (diffMin < 60) return `${diffMin}m ago`;
+  if (diffMin < 60) return t("time.minutesAgoShort", { count: diffMin });
   const diffHr = Math.round(diffMin / 60);
-  if (diffHr < 24) return `${diffHr}h ago`;
+  if (diffHr < 24) return t("time.hoursAgoShort", { count: diffHr });
   const diffDay = Math.round(diffHr / 24);
-  if (diffDay < 7) return `${diffDay}d ago`;
+  if (diffDay < 7) return t("time.daysAgoShort", { count: diffDay });
   const d = new Date(iso);
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return d.toLocaleDateString(locale, { month: "short", day: "numeric" });
 }
 
 export default function ProfileScreen() {
@@ -364,6 +378,15 @@ export default function ProfileScreen() {
     null,
   );
 
+  // "Language" picker state — mirrors the voice picker's optimistic save +
+  // rollback pattern. The selected language is also persisted to
+  // AsyncStorage and pushed into i18next so the UI re-renders in the new
+  // language without a reload.
+  const [languageSaving, setLanguageSaving] = useState<Language | null>(null);
+  const [languageError, setLanguageError] = useState<string | null>(null);
+  const { t, i18n } = useTranslation();
+  const locale = i18n.language;
+
   const loadPreferences = useCallback(async (signal?: AbortSignal) => {
     try {
       setPreferencesLoading(true);
@@ -386,6 +409,7 @@ export default function ProfileScreen() {
         intents: data.preferences.intents ?? [],
         tone: data.preferences.tone ?? null,
         voice: data.preferences.voice ?? null,
+        language: data.preferences.language ?? null,
         onboardingCompletedAt: data.preferences.onboardingCompletedAt ?? null,
       });
     } catch (e) {
@@ -632,6 +656,71 @@ export default function ProfileScreen() {
     }
   };
 
+  const handleSelectLanguage = async (next: Language) => {
+    if (languageSaving) return;
+    // Same race-guard as the voice picker: don't fight the initial GET.
+    if (preferencesLoading) return;
+    if ((preferences.language ?? DEFAULT_LANGUAGE) === next) return;
+    const previous = preferences.language;
+    setPreferences((p) => ({ ...p, language: next }));
+    setLanguageSaving(next);
+    setLanguageError(null);
+    // Switch the in-app language immediately so the rest of the UI feels
+    // instant. If the server save fails we'll roll both back below.
+    try {
+      await setAppLanguage(next);
+    } catch {
+      // Non-fatal — i18n changeLanguage failure is rare and we still
+      // attempt the server save.
+    }
+    try {
+      const token = await AsyncStorage.getItem(STORAGE_KEY_AUTH_TOKEN);
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const apiUrl = getApiUrl();
+      const response = await fetch(`${apiUrl}/api/preferences`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ language: next }),
+      });
+      if (!response.ok) {
+        let message =
+          t("profile.language.errorGeneric") ??
+          `Couldn't save language (${response.status})`;
+        try {
+          const data = await response.json();
+          if (data && typeof data.error === "string") message = data.error;
+        } catch {
+          // ignore parse failure
+        }
+        throw new Error(message);
+      }
+      const data = (await response.json()) as {
+        preferences: ClientPreferences;
+      };
+      setPreferences((p) => ({
+        ...p,
+        language: data.preferences.language ?? next,
+      }));
+    } catch (e) {
+      // Roll back both the optimistic state change and the i18n switch.
+      setPreferences((p) => ({ ...p, language: previous }));
+      const fallback = previous ?? DEFAULT_LANGUAGE;
+      try {
+        await setAppLanguage(fallback);
+      } catch {
+        // ignore — error message below still surfaces.
+      }
+      setLanguageError(
+        e instanceof Error ? e.message : t("profile.language.errorGeneric"),
+      );
+    } finally {
+      setLanguageSaving(null);
+    }
+  };
+
   const handlePreviewVoice = async (voice: Voice) => {
     if (previewLoading) return;
     setPreviewError(null);
@@ -756,6 +845,8 @@ export default function ProfileScreen() {
         // Personalization PATCH doesn't touch voice — preserve whatever the
         // user already had selected so the voice picker UI stays in sync.
         voice: data.preferences.voice ?? prev.voice ?? null,
+        // Same for language: not part of personalization, preserve existing.
+        language: data.preferences.language ?? prev.language ?? null,
         onboardingCompletedAt:
           data.preferences.onboardingCompletedAt ??
           prev.onboardingCompletedAt,
@@ -1271,13 +1362,13 @@ export default function ProfileScreen() {
         <View style={styles.personalizationHeader}>
           <View style={styles.personalizationHeaderText}>
             <ThemedText type="h4" style={styles.cardTitle}>
-              Personalization
+              {t("profile.personalization.title")}
             </ThemedText>
             <ThemedText
               type="small"
               style={[styles.cardDescription, { color: theme.textMuted }]}
             >
-              Shape how Solence greets you and the tone she leans into.
+              {t("profile.personalization.subtitle")}
             </ThemedText>
           </View>
           <Pressable
@@ -1291,7 +1382,7 @@ export default function ProfileScreen() {
             ]}
             testID="profile-personalization-edit"
             accessibilityRole="button"
-            accessibilityLabel="Edit personalization"
+            accessibilityLabel={t("profile.personalization.editA11y")}
           >
             <Feather name="edit-2" size={14} color={theme.orbPrimary} />
             <Text
@@ -1300,7 +1391,7 @@ export default function ProfileScreen() {
                 { color: theme.orbPrimary },
               ]}
             >
-              Edit
+              {t("profile.personalization.edit")}
             </Text>
           </Pressable>
         </View>
@@ -1334,7 +1425,7 @@ export default function ProfileScreen() {
                   { color: theme.orbPrimary },
                 ]}
               >
-                Retry
+                {t("profile.personalization.retry")}
               </Text>
             </Pressable>
           </View>
@@ -1347,7 +1438,7 @@ export default function ProfileScreen() {
                   { color: theme.textMuted },
                 ]}
               >
-                Name
+                {t("profile.personalization.fields.name")}
               </Text>
               <Text
                 style={[
@@ -1360,7 +1451,7 @@ export default function ProfileScreen() {
                 ]}
                 testID="profile-personalization-name"
               >
-                {preferences.displayName ?? "Not set"}
+                {preferences.displayName ?? t("profile.personalization.fields.notSet")}
               </Text>
             </View>
             <View style={styles.personalizationRow}>
@@ -1370,7 +1461,7 @@ export default function ProfileScreen() {
                   { color: theme.textMuted },
                 ]}
               >
-                Focus
+                {t("profile.personalization.fields.focus")}
               </Text>
               {preferences.intents.length > 0 ? (
                 <View style={styles.personalizationChipsWrap}>
@@ -1392,7 +1483,7 @@ export default function ProfileScreen() {
                           { color: theme.text },
                         ]}
                       >
-                        {INTENT_LABELS[intent]}
+                        {t(`intents.${intent}`)}
                       </Text>
                     </View>
                   ))}
@@ -1404,7 +1495,7 @@ export default function ProfileScreen() {
                     { color: theme.textMuted, fontStyle: "italic" },
                   ]}
                 >
-                  Not set
+                  {t("profile.personalization.fields.notSet")}
                 </Text>
               )}
             </View>
@@ -1415,7 +1506,7 @@ export default function ProfileScreen() {
                   { color: theme.textMuted },
                 ]}
               >
-                Tone
+                {t("profile.personalization.fields.tone")}
               </Text>
               <Text
                 style={[
@@ -1428,7 +1519,9 @@ export default function ProfileScreen() {
                 ]}
                 testID="profile-personalization-tone"
               >
-                {preferences.tone ? TONE_LABELS[preferences.tone] : "Not set"}
+                {preferences.tone
+                  ? t(`tones.${preferences.tone}.label`)
+                  : t("profile.personalization.fields.notSet")}
               </Text>
             </View>
           </View>
@@ -1512,15 +1605,118 @@ export default function ProfileScreen() {
         </View>
       </Card>
 
-      <Card elevation={1} style={styles.voiceCard}>
+      <Card elevation={1} style={styles.languageCard}>
         <ThemedText type="h4" style={styles.cardTitle}>
-          Solence&rsquo;s voice
+          {t("profile.language.title")}
         </ThemedText>
         <ThemedText
           type="small"
           style={[styles.cardDescription, { color: theme.textMuted }]}
         >
-          Pick the voice Solence speaks with. Tap Preview to hear a short sample.
+          {t("profile.language.subtitle")}
+        </ThemedText>
+
+        {languageError ? (
+          <Text
+            style={[styles.voiceErrorText, { color: theme.textMuted }]}
+            testID="profile-language-save-error"
+          >
+            {languageError}
+          </Text>
+        ) : null}
+
+        <View style={styles.voiceList} testID="profile-language-list">
+          {LANGUAGES.map((language) => {
+            const isSelected =
+              (preferences.language ?? DEFAULT_LANGUAGE) === language;
+            const isSaving = languageSaving === language;
+            return (
+              <View
+                key={language}
+                style={[
+                  styles.voiceRow,
+                  {
+                    backgroundColor: isSelected
+                      ? theme.backgroundSecondary
+                      : "transparent",
+                    borderColor: isSelected
+                      ? theme.orbPrimary
+                      : theme.backgroundSecondary,
+                  },
+                ]}
+                testID={`profile-language-row-${language}`}
+              >
+                <Pressable
+                  onPress={() => handleSelectLanguage(language)}
+                  disabled={isSaving || preferencesLoading}
+                  style={({ pressed }) => [
+                    styles.voiceRowMain,
+                    pressed && { opacity: 0.6 },
+                  ]}
+                  testID={`profile-language-select-${language}`}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected: isSelected }}
+                  accessibilityLabel={t("profile.language.selectA11y", {
+                    language: LANGUAGE_LABELS[language],
+                  })}
+                >
+                  <View style={styles.voiceRowText}>
+                    <Text
+                      style={[styles.voiceRowTitle, { color: theme.text }]}
+                      testID={`profile-language-label-${language}`}
+                    >
+                      {LANGUAGE_LABELS[language]}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.voiceRowDescription,
+                        { color: theme.textMuted },
+                      ]}
+                    >
+                      {t(`profile.language.options.${language}.description`)}
+                    </Text>
+                  </View>
+                  <View
+                    style={[
+                      styles.voiceRadio,
+                      {
+                        borderColor: isSelected
+                          ? theme.orbPrimary
+                          : theme.textMuted,
+                      },
+                    ]}
+                  >
+                    {isSaving ? (
+                      <ActivityIndicator
+                        size="small"
+                        color={theme.orbPrimary}
+                      />
+                    ) : isSelected ? (
+                      <View
+                        style={[
+                          styles.voiceRadioDot,
+                          { backgroundColor: theme.orbPrimary },
+                        ]}
+                        testID={`profile-language-selected-${language}`}
+                      />
+                    ) : null}
+                  </View>
+                </Pressable>
+              </View>
+            );
+          })}
+        </View>
+      </Card>
+
+      <Card elevation={1} style={styles.voiceCard}>
+        <ThemedText type="h4" style={styles.cardTitle}>
+          {t("profile.voice.title")}
+        </ThemedText>
+        <ThemedText
+          type="small"
+          style={[styles.cardDescription, { color: theme.textMuted }]}
+        >
+          {t("profile.voice.subtitle")}
         </ThemedText>
 
         {voiceError ? (
@@ -1573,14 +1769,16 @@ export default function ProfileScreen() {
                   testID={`profile-voice-select-${voice}`}
                   accessibilityRole="radio"
                   accessibilityState={{ selected: isSelected }}
-                  accessibilityLabel={`Select voice ${VOICE_LABELS[voice]}`}
+                  accessibilityLabel={t("profile.voice.selectA11y", {
+                    voice: t(`voices.${voice}.label`),
+                  })}
                 >
                   <View style={styles.voiceRowText}>
                     <Text
                       style={[styles.voiceRowTitle, { color: theme.text }]}
                       testID={`profile-voice-label-${voice}`}
                     >
-                      {VOICE_LABELS[voice]}
+                      {t(`voices.${voice}.label`)}
                     </Text>
                     <Text
                       style={[
@@ -1588,7 +1786,7 @@ export default function ProfileScreen() {
                         { color: theme.textMuted },
                       ]}
                     >
-                      {VOICE_DESCRIPTIONS[voice]}
+                      {t(`voices.${voice}.description`)}
                     </Text>
                   </View>
                   <View
@@ -1631,8 +1829,12 @@ export default function ProfileScreen() {
                   accessibilityRole="button"
                   accessibilityLabel={
                     isPlaying
-                      ? `Stop preview of ${VOICE_LABELS[voice]}`
-                      : `Preview ${VOICE_LABELS[voice]}`
+                      ? t("profile.voice.stopPreviewA11y", {
+                          voice: t(`voices.${voice}.label`),
+                        })
+                      : t("profile.voice.previewA11y", {
+                          voice: t(`voices.${voice}.label`),
+                        })
                   }
                 >
                   {isLoadingPreview ? (
@@ -1653,7 +1855,7 @@ export default function ProfileScreen() {
                           { color: theme.orbPrimary },
                         ]}
                       >
-                        {isPlaying ? "Stop" : "Preview"}
+                        {isPlaying ? t("profile.voice.stop") : t("profile.voice.preview")}
                       </Text>
                     </>
                   )}
@@ -1801,10 +2003,10 @@ export default function ProfileScreen() {
 
       <Card elevation={1} style={styles.historyCard}>
         <ThemedText type="h4" style={styles.cardTitle}>
-          Last {HISTORY_DAYS} days
+          {t("profile.tokens.title", { days: HISTORY_DAYS })}
         </ThemedText>
         <ThemedText type="small" style={[styles.cardDescription, { color: theme.textMuted }]}>
-          Your daily token usage compared to the {formatTokens(tokenLimit)} daily cap.
+          {t("profile.tokens.description", { cap: formatTokens(tokenLimit) })}
         </ThemedText>
 
         {loading ? (
@@ -1829,8 +2031,8 @@ export default function ProfileScreen() {
                 const labelColor = isToday ? theme.orbPrimary : theme.textMuted;
                 const barColor = isToday ? theme.orbPrimary : theme.orbSecondary;
                 const trackColor = theme.backgroundSecondary;
-                const dateLabel = formatDayLabel(day.periodStart, isToday);
-                const accessibilityLabel = `${formatFullDate(day.periodStart)}: ${formatTokens(day.tokensUsed)} of ${formatTokens(tokenLimit)} tokens used`;
+                const dateLabel = formatDayLabel(day.periodStart, isToday, t, locale);
+                const accessibilityLabel = `${formatFullDate(day.periodStart, locale)}: ${formatTokens(day.tokensUsed)} of ${formatTokens(tokenLimit)} tokens used`;
                 return (
                   <View
                     key={day.periodStart}
@@ -1878,7 +2080,7 @@ export default function ProfileScreen() {
                   {formatTokens(totalUsed)}
                 </Text>
                 <Text style={[styles.legendLabel, { color: theme.textMuted }]}>
-                  Total used
+                  {t("profile.tokens.total")}
                 </Text>
               </View>
               <View style={styles.legendItem}>
@@ -1886,7 +2088,7 @@ export default function ProfileScreen() {
                   {formatTokens(dailyAverage)}
                 </Text>
                 <Text style={[styles.legendLabel, { color: theme.textMuted }]}>
-                  Daily average
+                  {t("profile.tokens.average")}
                 </Text>
               </View>
               <View style={styles.legendItem}>
@@ -1894,7 +2096,7 @@ export default function ProfileScreen() {
                   {formatTokens(tokenLimit)}
                 </Text>
                 <Text style={[styles.legendLabel, { color: theme.textMuted }]}>
-                  Daily cap
+                  {t("profile.tokens.cap")}
                 </Text>
               </View>
             </View>
@@ -1904,13 +2106,13 @@ export default function ProfileScreen() {
 
       <Card elevation={1} style={styles.savedMomentsCard}>
         <ThemedText type="h4" style={styles.cardTitle}>
-          Saved moments
+          {t("profile.favorites.title")}
         </ThemedText>
         <ThemedText
           type="small"
           style={[styles.cardDescription, { color: theme.textMuted }]}
         >
-          Replies you bookmarked from your conversations.
+          {t("profile.favorites.subtitle")}
         </ThemedText>
 
         {savedMomentActionError ? (
@@ -1968,7 +2170,7 @@ export default function ProfileScreen() {
                     ]}
                     testID={`profile-saved-moment-row-${moment.id}`}
                     accessibilityRole="button"
-                    accessibilityLabel={`Open saved moment from ${titleLabel}`}
+                    accessibilityLabel={t("profile.favorites.openA11y", { title: titleLabel })}
                     accessibilityHint="Long-press to share or copy this moment"
                   >
                     <View style={styles.savedMomentHeader}>
@@ -1989,7 +2191,7 @@ export default function ProfileScreen() {
                         ]}
                         numberOfLines={1}
                       >
-                        {formatRelativeTime(moment.favoritedAt)}
+                        {formatRelativeTime(moment.favoritedAt, t, locale)}
                       </Text>
                     </View>
                     <Text
@@ -2015,7 +2217,7 @@ export default function ProfileScreen() {
                     ]}
                     testID={`profile-saved-moment-remove-${moment.id}`}
                     accessibilityRole="button"
-                    accessibilityLabel={`Remove saved moment from ${titleLabel}`}
+                    accessibilityLabel={t("profile.favorites.removeA11y", { title: titleLabel })}
                   >
                     {isRemoving ? (
                       <ActivityIndicator
@@ -2040,7 +2242,7 @@ export default function ProfileScreen() {
             testID="profile-saved-moments-empty"
           >
             <Text style={[styles.errorText, { color: theme.textMuted }]}>
-              Tap the bookmark on any reply from Solence to keep it here.
+              {t("profile.favorites.emptyExpanded")}
             </Text>
           </View>
         )}
@@ -2048,13 +2250,13 @@ export default function ProfileScreen() {
 
       <Card elevation={1} style={styles.moodCard}>
         <ThemedText type="h4" style={styles.cardTitle}>
-          Mood this week
+          {t("profile.mood.title")}
         </ThemedText>
         <ThemedText
           type="small"
           style={[styles.cardDescription, { color: theme.textMuted }]}
         >
-          A gentle look at how you&apos;ve been showing up.
+          {t("profile.mood.subtitle")}
         </ThemedText>
 
         {moodLoading ? (
@@ -2105,7 +2307,6 @@ export default function ProfileScreen() {
               ? inBucket.reduce((sum, e) => sum + e.score, 0) / inBucket.length
               : 0;
             const mostRecent = inBucket[0] ?? null;
-            const dayLabels = ["S", "M", "T", "W", "T", "F", "S"];
 
             return (
               <View testID="profile-mood-content">
@@ -2147,7 +2348,7 @@ export default function ProfileScreen() {
                             { color: theme.textMuted },
                           ]}
                         >
-                          {dayLabels[bucket.date.getDay()]}
+                          {t(`profile.mood.dayLabels.${bucket.date.getDay()}`)}
                         </Text>
                       </View>
                     );
@@ -2168,7 +2369,7 @@ export default function ProfileScreen() {
                           { color: theme.textMuted },
                         ]}
                       >
-                        Average
+                        {t("profile.mood.average")}
                       </Text>
                       <Text
                         style={[
@@ -2177,7 +2378,7 @@ export default function ProfileScreen() {
                         ]}
                         testID="profile-mood-average"
                       >
-                        {avg.toFixed(1)} / 5
+                        {t("profile.mood.averageValue", { value: avg.toFixed(1) })}
                       </Text>
                     </View>
                     <View
@@ -2193,7 +2394,7 @@ export default function ProfileScreen() {
                           { color: theme.textMuted },
                         ]}
                       >
-                        Most recent
+                        {t("profile.mood.mostRecent")}
                       </Text>
                       <Text
                         style={[
@@ -2203,8 +2404,8 @@ export default function ProfileScreen() {
                         testID="profile-mood-most-recent"
                       >
                         {mostRecent
-                          ? MOOD_LABELS[mostRecent.score] ?? mostRecent.score
-                          : "—"}
+                          ? t(`profile.mood.labels.${mostRecent.score}`)
+                          : t("profile.mood.noEntry")}
                       </Text>
                     </View>
                   </View>
@@ -2215,7 +2416,7 @@ export default function ProfileScreen() {
         ) : (
           <View style={styles.emptyContainer} testID="profile-mood-empty">
             <Text style={[styles.errorText, { color: theme.textMuted }]}>
-              Your mood check-ins will show up here once you start a session.
+              {t("profile.mood.emptyExpanded")}
             </Text>
           </View>
         )}
@@ -2263,13 +2464,13 @@ export default function ProfileScreen() {
             testID="profile-reflections-card"
           >
             <ThemedText type="h4" style={styles.cardTitle}>
-              Recent reflections
+              {t("profile.reflections.title")}
             </ThemedText>
             <ThemedText
               type="small"
               style={[styles.cardDescription, { color: theme.textMuted }]}
             >
-              Short journal-style takeaways from your recent sessions.
+              {t("profile.reflections.subtitle")}
             </ThemedText>
             <View testID="profile-reflections-list">
               {reflectionItems.map((c, index) => {
@@ -2294,7 +2495,7 @@ export default function ProfileScreen() {
                     ]}
                     testID={`profile-reflection-row-${c.id}`}
                     accessibilityRole="button"
-                    accessibilityLabel={`Open conversation ${titleLabel}`}
+                    accessibilityLabel={t("profile.conversations.openA11y", { title: titleLabel })}
                   >
                     <View style={styles.reflectionRowHeader}>
                       <Text
@@ -2313,7 +2514,7 @@ export default function ProfileScreen() {
                         ]}
                         numberOfLines={1}
                       >
-                        {formatRelativeTime(c.reflectionGeneratedAt)}
+                        {formatRelativeTime(c.reflectionGeneratedAt, t, locale)}
                       </Text>
                     </View>
                     <Text
@@ -2506,13 +2707,13 @@ export default function ProfileScreen() {
 
       <Card elevation={1} style={styles.conversationsCard}>
         <ThemedText type="h4" style={styles.cardTitle}>
-          Recent conversations
+          {t("profile.conversations.title")}
         </ThemedText>
         <ThemedText
           type="small"
           style={[styles.cardDescription, { color: theme.textMuted }]}
         >
-          Tap any session to revisit what you talked about with Solence.
+          {t("profile.conversations.subtitle")}
         </ThemedText>
 
         {conversationsLoading ? (
@@ -2536,14 +2737,15 @@ export default function ProfileScreen() {
             {conversations.map((conversation, index) => {
               const isLast = index === conversations.length - 1;
               const preview = conversation.lastMessage?.content?.trim() ?? "";
-              const previewLabel = preview.length > 0 ? preview : "No messages yet";
+              const previewLabel =
+                preview.length > 0 ? preview : t("profile.conversations.noMessages");
               const stampSource =
                 conversation.lastMessage?.createdAt ?? conversation.createdAt;
               const rolePrefix =
                 conversation.lastMessage?.role === "assistant"
-                  ? "Solence: "
+                  ? t("profile.conversations.rolePrefix.assistant")
                   : conversation.lastMessage?.role === "user"
-                    ? "You: "
+                    ? t("profile.conversations.rolePrefix.user")
                     : "";
               const titleLabel = displayConversationTitle(
                 conversation.title,
@@ -2568,7 +2770,7 @@ export default function ProfileScreen() {
                     ]}
                     testID={`profile-conversation-row-${conversation.id}`}
                     accessibilityRole="button"
-                    accessibilityLabel={`Open conversation ${titleLabel}`}
+                    accessibilityLabel={t("profile.conversations.openA11y", { title: titleLabel })}
                   >
                     <View style={styles.conversationHeader}>
                       <Text
@@ -2589,7 +2791,7 @@ export default function ProfileScreen() {
                         numberOfLines={1}
                         testID={`profile-conversation-time-${conversation.id}`}
                       >
-                        {formatRelativeTime(stampSource)}
+                        {formatRelativeTime(stampSource, t, locale)}
                       </Text>
                     </View>
                     {conversation.reflectionTakeaway ? (
@@ -2626,7 +2828,7 @@ export default function ProfileScreen() {
                     ]}
                     testID={`profile-conversation-rename-${conversation.id}`}
                     accessibilityRole="button"
-                    accessibilityLabel={`Rename conversation ${conversation.title}`}
+                    accessibilityLabel={t("profile.conversations.renameA11y", { title: titleLabel })}
                   >
                     <Feather
                       name="edit-2"
@@ -2644,7 +2846,7 @@ export default function ProfileScreen() {
                     ]}
                     testID={`profile-conversation-delete-${conversation.id}`}
                     accessibilityRole="button"
-                    accessibilityLabel={`Delete conversation ${titleLabel}`}
+                    accessibilityLabel={t("profile.conversations.deleteA11y", { title: titleLabel })}
                   >
                     <Feather
                       name="trash-2"
@@ -2662,7 +2864,7 @@ export default function ProfileScreen() {
             testID="profile-conversations-empty"
           >
             <Text style={[styles.errorText, { color: theme.textMuted }]}>
-              You haven&rsquo;t had any sessions yet. Open Solence to start one.
+              {t("profile.conversations.emptyExpanded")}
             </Text>
           </View>
         )}
@@ -2740,11 +2942,11 @@ export default function ProfileScreen() {
 
       <RenameDialog
         visible={pendingRename !== null}
-        title="Rename conversation"
-        description="Give this session a name that will help you find it later."
+        title={t("profile.conversations.renameDialog.title")}
+        description={t("profile.conversations.renameDialog.description")}
         initialValue={pendingRename?.title ?? ""}
-        placeholder="Conversation title"
-        confirmLabel="Save"
+        placeholder={t("profile.conversations.renameDialog.placeholder")}
+        confirmLabel={t("profile.conversations.renameDialog.confirm")}
         loading={renameSubmitting}
         errorMessage={renameError}
         onConfirm={confirmRenameConversation}
@@ -2754,16 +2956,21 @@ export default function ProfileScreen() {
 
       <ConfirmDialog
         visible={pendingDelete !== null}
-        title="Delete this conversation?"
+        title={t("profile.conversations.deleteConfirm.title")}
         message={
           deleteError
             ? deleteError
             : pendingDelete
-              ? `"${displayConversationTitle(pendingDelete.title, pendingDelete.createdAt)}" and all of its messages will be permanently removed. This can't be undone.`
+              ? t("profile.conversations.deleteConfirm.messageWithTitle", {
+                  title: displayConversationTitle(
+                    pendingDelete.title,
+                    pendingDelete.createdAt,
+                  ),
+                })
               : undefined
         }
-        confirmLabel="Delete"
-        cancelLabel="Cancel"
+        confirmLabel={t("profile.conversations.deleteConfirm.confirm")}
+        cancelLabel={t("profile.conversations.deleteConfirm.cancel")}
         destructive
         loading={deleteSubmitting}
         onConfirm={confirmDeleteConversation}
@@ -2894,6 +3101,10 @@ const styles = StyleSheet.create({
   lockTimerChipText: {
     ...Typography.small,
     fontFamily: fontForWeight("600"),
+  },
+  languageCard: {
+    marginTop: Spacing.lg,
+    paddingVertical: Spacing.xl,
   },
   voiceList: {
     gap: Spacing.sm,

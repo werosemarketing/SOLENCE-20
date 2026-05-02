@@ -16,6 +16,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useHeaderHeight } from "@react-navigation/elements";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { Feather } from "@expo/vector-icons";
+import { useTranslation } from "react-i18next";
 
 import { Card } from "@/components/Card";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -34,6 +35,7 @@ import {
 } from "@/constants/theme";
 import { getApiUrl } from "@/lib/query-client";
 import { displayConversationTitle } from "@/lib/conversation-title";
+import { getCurrentLanguage } from "@/lib/i18n";
 import type { RootStackParamList } from "@/navigation/RootStackNavigator";
 
 const STORAGE_KEY_AUTH_TOKEN = "solence_auth_token";
@@ -76,6 +78,7 @@ export default function ConversationDetailScreen({ route, navigation }: Props) {
   const insets = useSafeAreaInsets();
   const headerHeight = useHeaderHeight();
   const { theme } = useTheme();
+  const { t } = useTranslation();
 
   const handleContinue = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
@@ -153,8 +156,9 @@ export default function ConversationDetailScreen({ route, navigation }: Props) {
       ? displayConversationTitle(
           data.conversation.title,
           data.conversation.createdAt,
+          getCurrentLanguage(),
         )
-      : title ?? "Conversation";
+      : title ?? t("conversationDetail.header");
 
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -168,7 +172,7 @@ export default function ConversationDetailScreen({ route, navigation }: Props) {
             }}
             hitSlop={10}
             accessibilityRole="button"
-            accessibilityLabel="Rename this conversation"
+            accessibilityLabel={t("conversationDetail.renameA11y")}
             testID="conversation-detail-rename-button"
             style={({ pressed }) => [
               styles.headerActionButton,
@@ -184,7 +188,7 @@ export default function ConversationDetailScreen({ route, navigation }: Props) {
             }}
             hitSlop={10}
             accessibilityRole="button"
-            accessibilityLabel="Delete this conversation"
+            accessibilityLabel={t("conversationDetail.deleteA11y")}
             testID="conversation-detail-delete-button"
             style={({ pressed }) => [
               styles.headerActionButton,
@@ -202,7 +206,7 @@ export default function ConversationDetailScreen({ route, navigation }: Props) {
     if (renameSubmitting) return;
     const trimmed = nextTitle.trim();
     if (trimmed.length === 0) {
-      setRenameError("Please enter a title.");
+      setRenameError(t("conversationDetail.renameDialog.errorEmpty"));
       return;
     }
     // Compare against the currently displayed title (which already accounts
@@ -261,7 +265,9 @@ export default function ConversationDetailScreen({ route, navigation }: Props) {
       setRenameVisible(false);
     } catch (e) {
       const message =
-        e instanceof Error ? e.message : "Could not rename this conversation";
+        e instanceof Error
+          ? e.message
+          : t("conversationDetail.renameDialog.errorGeneric");
       setRenameError(message);
     } finally {
       setRenameSubmitting(false);
@@ -294,7 +300,7 @@ export default function ConversationDetailScreen({ route, navigation }: Props) {
       navigation.goBack();
     } catch (e) {
       const message =
-        e instanceof Error ? e.message : "Could not delete this conversation";
+        e instanceof Error ? e.message : t("common.error");
       setDeleteError(message);
     } finally {
       setDeleteSubmitting(false);
@@ -398,10 +404,8 @@ export default function ConversationDetailScreen({ route, navigation }: Props) {
             }
           : prev,
       );
-      const fallback = nextValue
-        ? "Couldn't save this moment. Try again?"
-        : "Couldn't remove this from your saved moments.";
-      const messageText = e instanceof Error ? e.message : fallback;
+      const messageText =
+        e instanceof Error ? e.message : t("common.error");
       setFavoriteError(messageText);
     } finally {
       setFavoriteBusy((current) => {
@@ -435,7 +439,7 @@ export default function ConversationDetailScreen({ route, navigation }: Props) {
       } catch (e) {
         if (cancelled) return;
         const message =
-          e instanceof Error ? e.message : "Could not load conversation";
+          e instanceof Error ? e.message : t("conversationDetail.loadError");
         setError(message);
       } finally {
         if (!cancelled) setLoading(false);
@@ -550,7 +554,7 @@ export default function ConversationDetailScreen({ route, navigation }: Props) {
               <Text
                 style={[styles.reflectionLabel, { color: theme.textMuted }]}
               >
-                Reflection
+                {t("conversationDetail.reflectionLabel")}
               </Text>
               <Text
                 style={[styles.reflectionTakeaway, { color: theme.text }]}
@@ -673,8 +677,8 @@ export default function ConversationDetailScreen({ route, navigation }: Props) {
                         accessibilityState={{ selected: isFavorite }}
                         accessibilityLabel={
                           isFavorite
-                            ? "Remove from saved moments"
-                            : "Save this moment"
+                            ? t("conversationDetail.savedA11yOn")
+                            : t("conversationDetail.savedA11yOff")
                         }
                       >
                         <Feather
@@ -695,13 +699,7 @@ export default function ConversationDetailScreen({ route, navigation }: Props) {
       ) : (
         <Card elevation={1}>
           <ThemedText type="h4" style={styles.emptyTitle}>
-            No messages yet
-          </ThemedText>
-          <ThemedText
-            type="small"
-            style={[styles.emptyDescription, { color: theme.textMuted }]}
-          >
-            This conversation doesn&rsquo;t have any messages saved.
+            {t("conversationDetail.noMessages")}
           </ThemedText>
         </Card>
       )}
@@ -717,26 +715,26 @@ export default function ConversationDetailScreen({ route, navigation }: Props) {
             },
           ]}
           accessibilityRole="button"
-          accessibilityLabel="Continue this conversation"
+          accessibilityLabel={t("conversationDetail.continue")}
           testID="button-continue-conversation"
         >
           <Feather name="message-circle" size={18} color={theme.buttonText} />
           <Text style={[styles.continueButtonText, { color: theme.buttonText }]}>
-            Continue this conversation
+            {t("conversationDetail.continue")}
           </Text>
         </Pressable>
       ) : null}
 
       <ConfirmDialog
         visible={confirmVisible}
-        title="Delete this conversation?"
+        title={t("conversationDetail.deleteConfirm.title")}
         message={
           deleteError
             ? deleteError
-            : `"${headerTitle}" and all of its messages will be permanently removed. This can't be undone.`
+            : t("conversationDetail.deleteConfirm.message")
         }
-        confirmLabel="Delete"
-        cancelLabel="Cancel"
+        confirmLabel={t("conversationDetail.deleteConfirm.confirm")}
+        cancelLabel={t("conversationDetail.deleteConfirm.cancel")}
         destructive
         loading={deleteSubmitting}
         onConfirm={handleConfirmDelete}
@@ -746,11 +744,11 @@ export default function ConversationDetailScreen({ route, navigation }: Props) {
 
       <RenameDialog
         visible={renameVisible}
-        title="Rename conversation"
-        description="Give this session a name that will help you find it later."
+        title={t("conversationDetail.renameDialog.title")}
+        description={t("conversationDetail.renameDialog.description")}
         initialValue={headerTitle}
-        placeholder="Conversation title"
-        confirmLabel="Save"
+        placeholder={t("conversationDetail.renameDialog.placeholder")}
+        confirmLabel={t("common.save")}
         loading={renameSubmitting}
         errorMessage={renameError}
         onConfirm={handleConfirmRename}

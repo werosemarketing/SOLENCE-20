@@ -1,5 +1,6 @@
 import React from "react";
 import { createNativeBottomTabNavigator } from "@react-navigation/bottom-tabs/unstable";
+import { useTranslation } from "react-i18next";
 
 import HomeStackNavigator from "@/navigation/HomeStackNavigator";
 import ProfileStackNavigator from "@/navigation/ProfileStackNavigator";
@@ -12,6 +13,7 @@ export type MainTabParamList = {
 const Tab = createNativeBottomTabNavigator<MainTabParamList>();
 
 export default function MainTabNavigator26() {
+  const { t } = useTranslation();
   return (
     <Tab.Navigator
       initialRouteName="HomeTab"
@@ -23,7 +25,7 @@ export default function MainTabNavigator26() {
         name="HomeTab"
         component={HomeStackNavigator}
         options={{
-          title: "Home",
+          title: t("headerTitle.appName"),
           icon: {
             sfSymbolName: "house",
           },
@@ -36,7 +38,7 @@ export default function MainTabNavigator26() {
         name="ProfileTab"
         component={ProfileStackNavigator}
         options={{
-          title: "Profile",
+          title: t("profile.header"),
           icon: {
             sfSymbolName: "person",
           },

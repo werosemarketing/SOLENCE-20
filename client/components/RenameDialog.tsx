@@ -9,6 +9,7 @@ import {
   View,
 } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
+import { useTranslation } from "react-i18next";
 
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
@@ -41,8 +42,8 @@ export function RenameDialog({
   description,
   initialValue,
   placeholder,
-  confirmLabel = "Save",
-  cancelLabel = "Cancel",
+  confirmLabel,
+  cancelLabel,
   maxLength = 80,
   loading = false,
   errorMessage,
@@ -51,6 +52,9 @@ export function RenameDialog({
   testID,
 }: RenameDialogProps) {
   const { theme } = useTheme();
+  const { t } = useTranslation();
+  const resolvedConfirmLabel = confirmLabel ?? t("renameDialog.defaultConfirm");
+  const resolvedCancelLabel = cancelLabel ?? t("renameDialog.defaultCancel");
   const [value, setValue] = useState(initialValue);
   const inputRef = useRef<TextInput>(null);
 
@@ -84,7 +88,7 @@ export function RenameDialog({
           <Pressable
             style={StyleSheet.absoluteFill}
             onPress={loading ? undefined : onCancel}
-            accessibilityLabel="Dismiss rename"
+            accessibilityLabel={t("renameDialog.dismissA11y")}
             testID={testID ? `${testID}-backdrop` : undefined}
           />
           <View
@@ -151,7 +155,7 @@ export function RenameDialog({
                 testID={testID ? `${testID}-cancel` : undefined}
               >
                 <Text style={[styles.actionText, { color: theme.text }]}>
-                  {cancelLabel}
+                  {resolvedCancelLabel}
                 </Text>
               </Pressable>
               <Pressable
@@ -171,7 +175,7 @@ export function RenameDialog({
                   <ActivityIndicator color="#FFFFFF" />
                 ) : (
                   <Text style={[styles.actionText, { color: "#FFFFFF" }]}>
-                    {confirmLabel}
+                    {resolvedConfirmLabel}
                   </Text>
                 )}
               </Pressable>

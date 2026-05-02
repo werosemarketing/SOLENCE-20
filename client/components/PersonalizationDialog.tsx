@@ -10,6 +10,7 @@ import {
   View,
 } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
+import { useTranslation } from "react-i18next";
 
 import { useTheme } from "@/hooks/useTheme";
 import {
@@ -19,14 +20,7 @@ import {
   fontForWeight,
   FontFamily,
 } from "@/constants/theme";
-import {
-  INTENTS,
-  INTENT_LABELS,
-  TONES,
-  TONE_DESCRIPTIONS,
-  TONE_LABELS,
-  type ClientPreferences,
-} from "@/lib/preferences";
+import { INTENTS, TONES, type ClientPreferences } from "@/lib/preferences";
 import type { Intent, Tone } from "@shared/schema";
 
 type Props = {
@@ -51,6 +45,7 @@ export function PersonalizationDialog({
   onCancel,
 }: Props) {
   const { theme, isDark } = useTheme();
+  const { t } = useTranslation();
   const [name, setName] = useState(initial.displayName ?? "");
   const [intents, setIntents] = useState<Intent[]>(initial.intents);
   const [tone, setTone] = useState<Tone | null>(initial.tone);
@@ -112,7 +107,7 @@ export function PersonalizationDialog({
           style={StyleSheet.absoluteFill}
           onPress={loading ? undefined : onCancel}
           accessibilityRole="button"
-          accessibilityLabel="Dismiss personalization editor"
+          accessibilityLabel={t("personalization.dismissA11y")}
         />
         <View
           style={[
@@ -131,22 +126,21 @@ export function PersonalizationDialog({
             showsVerticalScrollIndicator={false}
           >
             <Text style={[styles.title, { color: theme.text }]}>
-              Personalize Solence
+              {t("personalization.title")}
             </Text>
             <Text style={[styles.subtitle, { color: theme.textMuted }]}>
-              These shape how she greets you and the tone she leans into.
-              Leave anything blank to keep it neutral.
+              {t("personalization.subtitle")}
             </Text>
 
             <View style={styles.section}>
               <Text style={[styles.sectionLabel, { color: theme.text }]}>
-                What should she call you?
+                {t("personalization.nameLabel")}
               </Text>
               <TextInput
                 ref={inputRef}
                 value={name}
                 onChangeText={setName}
-                placeholder="Your name"
+                placeholder={t("personalization.namePlaceholder")}
                 placeholderTextColor={
                   isDark ? "rgba(255,255,255,0.3)" : "rgba(0,0,0,0.3)"
                 }
@@ -168,7 +162,7 @@ export function PersonalizationDialog({
 
             <View style={styles.section}>
               <Text style={[styles.sectionLabel, { color: theme.text }]}>
-                What you're working on
+                {t("personalization.intentsLabel")}
               </Text>
               <View style={styles.chipsWrap}>
                 {INTENTS.map((intent) => {
@@ -204,7 +198,7 @@ export function PersonalizationDialog({
                           },
                         ]}
                       >
-                        {INTENT_LABELS[intent]}
+                        {t(`intents.${intent}`)}
                       </Text>
                     </Pressable>
                   );
@@ -214,15 +208,15 @@ export function PersonalizationDialog({
 
             <View style={styles.section}>
               <Text style={[styles.sectionLabel, { color: theme.text }]}>
-                Conversation tone
+                {t("personalization.toneLabel")}
               </Text>
               <View style={styles.toneStack}>
-                {TONES.map((t) => {
-                  const selected = tone === t;
+                {TONES.map((toneOption) => {
+                  const selected = tone === toneOption;
                   return (
                     <Pressable
-                      key={t}
-                      onPress={() => selectTone(t)}
+                      key={toneOption}
+                      onPress={() => selectTone(toneOption)}
                       style={({ pressed }) => [
                         styles.toneCard,
                         {
@@ -235,12 +229,12 @@ export function PersonalizationDialog({
                           opacity: pressed ? 0.85 : 1,
                         },
                       ]}
-                      testID={`personalization-tone-${t}`}
+                      testID={`personalization-tone-${toneOption}`}
                       accessibilityRole="button"
                       accessibilityState={{ selected }}
                     >
                       <Text style={[styles.toneTitle, { color: theme.text }]}>
-                        {TONE_LABELS[t]}
+                        {t(`tones.${toneOption}.label`)}
                       </Text>
                       <Text
                         style={[
@@ -248,7 +242,7 @@ export function PersonalizationDialog({
                           { color: theme.textMuted },
                         ]}
                       >
-                        {TONE_DESCRIPTIONS[t]}
+                        {t(`tones.${toneOption}.description`)}
                       </Text>
                     </Pressable>
                   );
@@ -285,7 +279,7 @@ export function PersonalizationDialog({
               testID="personalization-cancel"
             >
               <Text style={[styles.cancelText, { color: theme.textMuted }]}>
-                Cancel
+                {t("personalization.cancel")}
               </Text>
             </Pressable>
             <Pressable
@@ -303,7 +297,9 @@ export function PersonalizationDialog({
               {loading ? (
                 <ActivityIndicator color="#fff" />
               ) : (
-                <Text style={styles.confirmText}>Save</Text>
+                <Text style={styles.confirmText}>
+                  {t("personalization.save")}
+                </Text>
               )}
             </Pressable>
           </View>

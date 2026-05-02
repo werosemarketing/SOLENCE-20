@@ -21,10 +21,13 @@ import {
   INTENT_OPTIONS,
   VOICE_OPTIONS,
   DEFAULT_VOICE,
+  LANGUAGE_OPTIONS,
+  DEFAULT_LANGUAGE,
   updatePreferencesSchema,
   type Tone,
   type Intent,
   type Voice,
+  type Language,
   type MoodPhase,
   type UserPreferences,
 } from "@shared/schema";
@@ -124,8 +127,17 @@ const smartTitleBackfillCursor = new Map<string, number>();
 async function generateSmartConversationTitle(
   userMessage: string,
   assistantMessage: string,
+  language: Language = DEFAULT_LANGUAGE,
 ): Promise<string | null> {
   try {
+    const systemContent =
+      language === "es"
+        ? "Generas títulos cortos y descriptivos para conversaciones de diario y reflexión emocional. Responde SOLO con el título — de 3 a 6 palabras, con la primera letra de cada palabra principal en mayúscula (estilo título), sin comillas, sin puntuación final y sin prefijos como 'Título:'. El título DEBE estar escrito en español. Captura el tema o la emoción que se explora (por ejemplo, 'Ansiedad por la Semana Laboral', 'Extrañar a un Viejo Amigo', 'Problemas de Sueño este Mes'). Evita frases genéricas como 'Reflexión Personal' o 'Resumen de Conversación'."
+        : "You generate short, descriptive titles for journaling and emotional-reflection conversations. Reply with ONLY the title — 3 to 6 words, in title case, no quotes, no trailing punctuation, no prefixes like 'Title:'. Capture the topic or feeling being explored (e.g. 'Anxiety About Work Week', 'Missing An Old Friend', 'Sleep Trouble This Month'). Avoid generic phrases like 'Personal Reflection' or 'Conversation Summary'.";
+    const userContent =
+      language === "es"
+        ? `Primer mensaje del usuario:\n${userMessage}\n\nRespuesta del asistente:\n${assistantMessage}\n\nEscribe ahora un título en español de 3 a 6 palabras que capture de qué trata esta conversación.`
+        : `First user message:\n${userMessage}\n\nAssistant reply:\n${assistantMessage}\n\nWrite a 3–6 word title that captures what this conversation is about.`;
     const response = await openai.chat.completions.create({
       model: SMART_TITLE_MODEL,
       temperature: 0.4,
@@ -133,12 +145,11 @@ async function generateSmartConversationTitle(
       messages: [
         {
           role: "system",
-          content:
-            "You generate short, descriptive titles for journaling and emotional-reflection conversations. Reply with ONLY the title — 3 to 6 words, in title case, no quotes, no trailing punctuation, no prefixes like 'Title:'. Capture the topic or feeling being explored (e.g. 'Anxiety About Work Week', 'Missing An Old Friend', 'Sleep Trouble This Month'). Avoid generic phrases like 'Personal Reflection' or 'Conversation Summary'.",
+          content: systemContent,
         },
         {
           role: "user",
-          content: `First user message:\n${userMessage}\n\nAssistant reply:\n${assistantMessage}\n\nWrite a 3–6 word title that captures what this conversation is about.`,
+          content: userContent,
         },
       ],
     });
@@ -181,6 +192,7 @@ function scheduleSmartTitleBackfill(
   currentTitle: string,
   firstUserContent: string | null | undefined,
   firstAssistantContent: string | null | undefined,
+  language: Language = DEFAULT_LANGUAGE,
 ): boolean {
   if (!firstUserContent || !firstAssistantContent) return false;
   const userTrimmed = firstUserContent.trim();
@@ -208,6 +220,7 @@ function scheduleSmartTitleBackfill(
       const smartTitle = await generateSmartConversationTitle(
         firstUserContent,
         firstAssistantContent,
+        language,
       );
       if (!smartTitle) return;
       if (smartTitle === currentTitle) return;
@@ -247,6 +260,25 @@ function scheduleSmartTitleBackfill(
 // well beyond the slice the list endpoint itself returns.
 async function runSmartTitleBackfillScan(userId: string): Promise<void> {
   try {
+    // Load the user's preferred language once so all backfill jobs scheduled
+    // by this scan use the right language for title generation.
+    let userLanguage: Language = DEFAULT_LANGUAGE;
+    try {
+      const [userRow] = await db
+        .select({ language: users.language })
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1);
+      const stored = userRow?.language ?? null;
+      if (
+        stored &&
+        (LANGUAGE_OPTIONS as readonly string[]).includes(stored)
+      ) {
+        userLanguage = stored as Language;
+      }
+    } catch {
+      // best-effort: fall back to the default language
+    }
     const cursor = smartTitleBackfillCursor.get(userId);
     let scanRows = await db
       .select({ id: conversations.id, title: conversations.title })
@@ -316,6 +348,7 @@ async function runSmartTitleBackfillScan(userId: string): Promise<void> {
         c.title,
         firstUserByConv.get(c.id),
         firstAssistantByConv.get(c.id),
+        userLanguage,
       );
       if (triggered) scheduled += 1;
     }
@@ -362,15 +395,26 @@ type ReflectionResult = { summary: string; takeaway: string };
 // caller can leave the row untouched and try again later.
 async function generateReflection(
   conversationMessages: Array<{ role: string; content: string }>,
+  language: Language = DEFAULT_LANGUAGE,
 ): Promise<ReflectionResult | null> {
   const trimmedMessages = conversationMessages.slice(-REFLECTION_MAX_MESSAGES);
+  const userRoleLabel = language === "es" ? "Usuario" : "User";
   const transcript = trimmedMessages
     .map((m) => {
-      const role = m.role === "assistant" ? "Solence" : "User";
+      const role = m.role === "assistant" ? "Solence" : userRoleLabel;
       return `${role}: ${m.content}`;
     })
     .join("\n");
   if (transcript.trim().length === 0) return null;
+
+  const systemContent =
+    language === "es"
+      ? "Escribes reflexiones suaves al estilo de un diario que resumen conversaciones de apoyo emocional. Habla directamente al usuario (en segunda persona, 'tú'). El tono es cálido, sereno, nunca clínico ni sermoneador. NUNCA des consejos ni instrucciones. NUNCA uses frases prescriptivas como 'recuerda' o 'asegúrate de'. NUNCA menciones que eres una IA ni te refieras a Solence por su nombre. Responde con JSON con la forma exacta {\"summary\": string, \"takeaway\": string}. AMBOS campos DEBEN estar escritos en español. El 'summary' tiene de 3 a 5 oraciones que capturan lo que el usuario tenía en mente, las emociones con las que estaba, y cualquier pequeño cambio de perspectiva que haya surgido. El 'takeaway' es una sola oración corta (menos de 20 palabras) — una frase suave y verdadera que el usuario pueda llevarse consigo, NO una instrucción."
+      : "You write gentle journal-style reflections summarizing emotional-support conversations. Speak directly to the user (second person, 'you'). Tone is warm, grounded, never clinical, never preachy. NEVER give advice or instructions. NEVER use prescribed-feeling phrases like 'remember to' or 'make sure'. NEVER mention that you are an AI or refer to Solence by name. Reply with JSON in the exact shape {\"summary\": string, \"takeaway\": string}. The summary is 3 to 5 sentences capturing what was on the user's mind, the feelings they were sitting with, and any small shift in perspective that emerged. The takeaway is a single short sentence (under 20 words) — a gentle, true-feeling phrase the user could carry with them, NOT an instruction.";
+  const userContent =
+    language === "es"
+      ? `Transcripción de la conversación:\n${transcript}\n\nEscribe ahora el JSON de la reflexión, con 'summary' y 'takeaway' en español.`
+      : `Conversation transcript:\n${transcript}\n\nWrite the reflection JSON now.`;
 
   try {
     const response = await openai.chat.completions.create({
@@ -381,12 +425,11 @@ async function generateReflection(
       messages: [
         {
           role: "system",
-          content:
-            "You write gentle journal-style reflections summarizing emotional-support conversations. Speak directly to the user (second person, 'you'). Tone is warm, grounded, never clinical, never preachy. NEVER give advice or instructions. NEVER use prescribed-feeling phrases like 'remember to' or 'make sure'. NEVER mention that you are an AI or refer to Solence by name. Reply with JSON in the exact shape {\"summary\": string, \"takeaway\": string}. The summary is 3 to 5 sentences capturing what was on the user's mind, the feelings they were sitting with, and any small shift in perspective that emerged. The takeaway is a single short sentence (under 20 words) — a gentle, true-feeling phrase the user could carry with them, NOT an instruction.",
+          content: systemContent,
         },
         {
           role: "user",
-          content: `Conversation transcript:\n${transcript}\n\nWrite the reflection JSON now.`,
+          content: userContent,
         },
       ],
     });
@@ -429,6 +472,7 @@ async function generateReflection(
 // so a concurrent generator can't clobber the first writer.
 async function generateAndPersistReflection(
   conversationId: number,
+  language: Language = DEFAULT_LANGUAGE,
 ): Promise<{
   summary: string;
   takeaway: string;
@@ -473,7 +517,7 @@ async function generateAndPersistReflection(
     const hasAssistant = rows.some((m) => m.role === "assistant");
     if (!hasUser || !hasAssistant) return null;
 
-    const reflection = await generateReflection(rows);
+    const reflection = await generateReflection(rows, language);
     if (!reflection) return null;
 
     const now = new Date();
@@ -598,11 +642,20 @@ function serializePreferences(user: UserRow): UserPreferences {
     storedVoice && (VOICE_OPTIONS as readonly string[]).includes(storedVoice)
       ? (storedVoice as Voice)
       : null;
+  // Same allow-list dance for language. Anything off the list resolves to
+  // null so the client falls back to its device-locale default.
+  const storedLanguage = user.language ?? null;
+  const language =
+    storedLanguage &&
+    (LANGUAGE_OPTIONS as readonly string[]).includes(storedLanguage)
+      ? (storedLanguage as Language)
+      : null;
   return {
     displayName: user.displayName ?? null,
     intents: (user.intents ?? []) as Intent[],
     tone: (user.tone ?? null) as Tone | null,
     voice,
+    language,
     onboardingCompletedAt: user.onboardingCompletedAt
       ? user.onboardingCompletedAt.toISOString()
       : null,
@@ -1214,6 +1267,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if ("voice" in parsed.data) {
           updates.voice = parsed.data.voice ?? null;
         }
+        if ("language" in parsed.data) {
+          updates.language = parsed.data.language ?? null;
+        }
         if (parsed.data.markOnboardingComplete) {
           updates.onboardingCompletedAt = new Date();
         }
@@ -1254,8 +1310,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const VOICE_PREVIEW_WINDOW_MS = 60_000;
   const VOICE_PREVIEW_LIMIT = 10;
   const voicePreviewHits = new Map<string, number[]>();
-  const VOICE_PREVIEW_LINE =
-    "Hi, I'm Solence. I'm here whenever you need me.";
+  const VOICE_PREVIEW_LINES: Record<Language, string> = {
+    en: "Hi, I'm Solence. I'm here whenever you need me.",
+    es: "Hola, soy Solence. Estoy aquí cuando me necesites.",
+  };
 
   app.post(
     "/api/voice-preview",
@@ -1291,8 +1349,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
         recent.push(now);
         voicePreviewHits.set(userId, recent);
 
+        // Match the preview line to the user's saved language so the sample
+        // voices the user against their actual locale, not a hard-coded
+        // English line. Falls back to English on any miss.
+        let previewLanguage: Language = DEFAULT_LANGUAGE;
+        try {
+          const [userRow] = await db
+            .select({ language: users.language })
+            .from(users)
+            .where(eq(users.id, userId))
+            .limit(1);
+          const stored = userRow?.language ?? null;
+          if (
+            stored &&
+            (LANGUAGE_OPTIONS as readonly string[]).includes(stored)
+          ) {
+            previewLanguage = stored as Language;
+          }
+        } catch {
+          // best-effort: keep the default English preview line
+        }
+
         const audioBuffer = await textToSpeech(
-          VOICE_PREVIEW_LINE,
+          VOICE_PREVIEW_LINES[previewLanguage],
           voice,
           "mp3",
         );
@@ -1633,7 +1712,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return res.status(404).json({ error: "Conversation not found" });
         }
 
-        const reflection = await generateAndPersistReflection(id);
+        // Resolve the user's preferred language so the reflection comes back
+        // in the language they chose. Best-effort — any failure here just
+        // falls back to English, which still yields a valid reflection.
+        let reflectionLanguage: Language = DEFAULT_LANGUAGE;
+        try {
+          const [userRow] = await db
+            .select({ language: users.language })
+            .from(users)
+            .where(eq(users.id, userId))
+            .limit(1);
+          const stored = userRow?.language ?? null;
+          if (
+            stored &&
+            (LANGUAGE_OPTIONS as readonly string[]).includes(stored)
+          ) {
+            reflectionLanguage = stored as Language;
+          }
+        } catch {
+          // best-effort: fall back to the default language
+        }
+
+        const reflection = await generateAndPersistReflection(
+          id,
+          reflectionLanguage,
+        );
         if (!reflection) {
           return res.json({ conversationId: id, reflection: null });
         }
@@ -2496,6 +2599,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // user row just degrades to no personalization.
       let personalizationBlock = "";
       let selectedVoice: Voice = DEFAULT_VOICE;
+      let userLanguage: Language = DEFAULT_LANGUAGE;
       try {
         const [userRow] = await db
           .select()
@@ -2506,6 +2610,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const prefs = serializePreferences(userRow);
           personalizationBlock = buildPersonalizationBlock(prefs);
           if (prefs.voice) selectedVoice = prefs.voice;
+          if (prefs.language) userLanguage = prefs.language;
         }
       } catch (prefError) {
         console.error(
@@ -2513,6 +2618,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
           prefError instanceof Error ? prefError.message : prefError,
         );
       }
+
+      // When the user has chosen Spanish, instruct the model to reply in
+      // Spanish. We append this AFTER personalization so the language
+      // directive is the most recent line of the system prompt and harder
+      // for the model to wash out.
+      const languageDirective =
+        userLanguage === "es"
+          ? "\n\nLANGUAGE: Always reply in Spanish (español). Use natural, warm, conversational Latin American Spanish. Match the user's register and vocabulary. Keep your usual calm, grounded tone — just in Spanish. Do not switch back to English unless the user explicitly asks you to."
+          : "";
 
       // Only inject the pre-session mood on the FIRST exchange of a
       // session. We deliberately keep this hint short and instruction-y
@@ -2527,7 +2641,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const chatHistory: ChatMessage[] = [
         {
           role: "system",
-          content: SOLENCE_SYSTEM_PROMPT + personalizationBlock + pastContext + moodHint,
+          content:
+            SOLENCE_SYSTEM_PROMPT +
+            personalizationBlock +
+            pastContext +
+            moodHint +
+            languageDirective,
         },
         ...currentMessages.map((m) => ({
           role: m.role as "user" | "assistant",
@@ -2620,6 +2739,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             const smartTitle = await generateSmartConversationTitle(
               userTranscript,
               assistantTranscript,
+              userLanguage,
             );
             if (!smartTitle) return;
             await db

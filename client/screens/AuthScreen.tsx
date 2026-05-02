@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import * as AppleAuthentication from "expo-apple-authentication";
 import Animated, { FadeIn, FadeInDown } from "react-native-reanimated";
+import { useTranslation } from "react-i18next";
 
 import { useTheme } from "@/hooks/useTheme";
 import { Spacing, BorderRadius, FontFamily } from "@/constants/theme";
@@ -33,6 +34,7 @@ export default function AuthScreen({
 }: Props) {
   const insets = useSafeAreaInsets();
   const { theme, isDark } = useTheme();
+  const { t } = useTranslation();
 
   // If a deep-link delivered a referral code, default to sign-up so the
   // user actually sees / can edit the prefilled code.
@@ -74,17 +76,17 @@ export default function AuthScreen({
     setInfo("");
 
     if (!email.trim() || !password) {
-      setError("Please enter your email and password");
+      setError(t("auth.errors.missingFields"));
       return;
     }
 
     if (isSignUp && password !== confirmPassword) {
-      setError("Passwords do not match");
+      setError(t("auth.errors.passwordMismatch"));
       return;
     }
 
     if (isSignUp && password.length < 6) {
-      setError("Password must be at least 6 characters");
+      setError(t("auth.errors.passwordTooShort"));
       return;
     }
 
@@ -111,13 +113,13 @@ export default function AuthScreen({
       const data = await response.json();
 
       if (!response.ok) {
-        setError(data.error || "Something went wrong");
+        setError(data.error || t("auth.errors.generic"));
         return;
       }
 
       onAuthenticated(data.token);
     } catch {
-      setError("Unable to connect. Please try again.");
+      setError(t("auth.errors.network"));
     } finally {
       setIsLoading(false);
     }
@@ -203,10 +205,10 @@ export default function AuthScreen({
         >
           <Animated.View entering={FadeIn.duration(800)} style={styles.header}>
             <Text style={[styles.title, { color: theme.text }]}>
-              SOLENCE
+              {t("auth.appName")}
             </Text>
             <Text style={[styles.subtitle, { color: theme.textMuted }]}>
-              {isSignUp ? "Create your account" : "Welcome back"}
+              {isSignUp ? t("auth.createAccount") : t("auth.welcomeBack")}
             </Text>
           </Animated.View>
 
@@ -288,7 +290,7 @@ export default function AuthScreen({
             >
               <TextInput
                 style={[styles.input, { color: theme.text }]}
-                placeholder="Email"
+                placeholder={t("auth.emailPlaceholder")}
                 placeholderTextColor={theme.textMuted}
                 value={email}
                 onChangeText={setEmail}
@@ -314,7 +316,7 @@ export default function AuthScreen({
             >
               <TextInput
                 style={[styles.input, { color: theme.text }]}
-                placeholder="Password"
+                placeholder={t("auth.passwordPlaceholder")}
                 placeholderTextColor={theme.textMuted}
                 value={password}
                 onChangeText={setPassword}
@@ -339,7 +341,7 @@ export default function AuthScreen({
               >
                 <TextInput
                   style={[styles.input, { color: theme.text }]}
-                  placeholder="Confirm password"
+                  placeholder={t("auth.confirmPasswordPlaceholder")}
                   placeholderTextColor={theme.textMuted}
                   value={confirmPassword}
                   onChangeText={setConfirmPassword}
@@ -409,18 +411,18 @@ export default function AuthScreen({
                 <ActivityIndicator color="#fff" />
               ) : (
                 <Text style={styles.submitButtonText}>
-                  {isSignUp ? "Create Account" : "Sign In"}
+                  {isSignUp
+                    ? t("auth.createAccountButton")
+                    : t("auth.signIn")}
                 </Text>
               )}
             </Pressable>
 
             <Pressable onPress={toggleMode} style={styles.toggleButton} testID="button-toggle-mode">
               <Text style={[styles.toggleText, { color: theme.textMuted }]}>
-                {isSignUp
-                  ? "Already have an account? "
-                  : "Don't have an account? "}
+                {isSignUp ? t("auth.haveAccount") : t("auth.noAccount")}
                 <Text style={{ color: theme.link }}>
-                  {isSignUp ? "Sign In" : "Sign Up"}
+                  {isSignUp ? t("auth.signIn") : t("auth.signUp")}
                 </Text>
               </Text>
             </Pressable>

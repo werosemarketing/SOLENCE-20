@@ -7,6 +7,7 @@ import {
   Text,
   View,
 } from "react-native";
+import { useTranslation } from "react-i18next";
 
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
@@ -48,14 +49,13 @@ export function MoodSheet({
   onSkip,
 }: MoodSheetProps) {
   const { theme, isDark } = useTheme();
+  const { t } = useTranslation();
   const [pending, setPending] = useState<number | null>(null);
 
   const title =
-    variant === "pre" ? "How are you feeling?" : "How are you feeling now?";
+    variant === "pre" ? t("mood.preTitle") : t("mood.postTitle");
   const subtitle =
-    variant === "pre"
-      ? "A quick check-in before we start. No right answer."
-      : "Take a breath. How did this conversation land?";
+    variant === "pre" ? t("mood.preSubtitle") : t("mood.postSubtitle");
 
   const handlePress = (score: number, label: string) => {
     if (submitting) return;
@@ -80,7 +80,7 @@ export function MoodSheet({
         <Pressable
           style={StyleSheet.absoluteFill}
           onPress={submitting ? undefined : handleSkip}
-          accessibilityLabel="Dismiss mood check-in"
+          accessibilityLabel={t("mood.dismissA11y")}
         />
         <View
           style={[
@@ -101,6 +101,7 @@ export function MoodSheet({
           <View style={styles.row}>
             {MOOD_OPTIONS.map((opt) => {
               const isPending = pending === opt.score && submitting;
+              const localizedLabel = t(`mood.options.${opt.score}`);
               return (
                 <Pressable
                   key={opt.score}
@@ -120,7 +121,10 @@ export function MoodSheet({
                   ]}
                   testID={`mood-option-${variant}-${opt.score}`}
                   accessibilityRole="button"
-                  accessibilityLabel={`${opt.label}, ${opt.score} out of 5`}
+                  accessibilityLabel={t("mood.scoreA11y", {
+                    label: localizedLabel,
+                    score: opt.score,
+                  })}
                 >
                   {isPending ? (
                     <ActivityIndicator size="small" color={theme.orbPrimary} />
@@ -130,7 +134,7 @@ export function MoodSheet({
                     </Text>
                   )}
                   <Text style={[styles.dotLabel, { color: theme.textMuted }]}>
-                    {opt.label}
+                    {localizedLabel}
                   </Text>
                 </Pressable>
               );
@@ -148,7 +152,7 @@ export function MoodSheet({
             accessibilityRole="button"
           >
             <Text style={[styles.skipText, { color: theme.textMuted }]}>
-              Skip for now
+              {t("mood.skip")}
             </Text>
           </Pressable>
         </View>

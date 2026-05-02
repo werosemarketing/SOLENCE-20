@@ -44,6 +44,7 @@ import {
   type BottomTabNavigationProp,
   type BottomTabScreenProps,
 } from "@react-navigation/bottom-tabs";
+import { useTranslation } from "react-i18next";
 
 import { useTheme } from "@/hooks/useTheme";
 import { Spacing, BorderRadius, FontFamily } from "@/constants/theme";
@@ -89,12 +90,12 @@ type VoiceState = "idle" | "listening" | "responding" | "speaking";
 
 const AUTO_STOP_DELAY = 15000;
 
-const STARTER_PROMPTS = [
-  "Can I tell you something real?",
-  "I don't even know where to start.",
-  "What do I do with this feeling?",
-  "Who are you, really?",
-];
+const STARTER_PROMPT_KEYS = [
+  "solence.starterPrompts.1",
+  "solence.starterPrompts.2",
+  "solence.starterPrompts.3",
+  "solence.starterPrompts.4",
+] as const;
 
 function AmbientParticle({ delay, size, startX, startY, isDark }: { 
   delay: number; 
@@ -454,6 +455,8 @@ export default function SolenceScreen({
   const insets = useSafeAreaInsets();
   const tabBarHeight = useBottomTabBarHeight();
   const { theme, isDark } = useTheme();
+  const { t, i18n } = useTranslation();
+  const locale = i18n.language;
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const routeActiveConversationId = route?.params?.activeConversationId ?? null;
   const routeActiveConversationTitle =
@@ -766,13 +769,13 @@ export default function SolenceScreen({
   };
 
   const formatResetTime = (iso: string | null): string => {
-    if (!iso) return "tomorrow";
+    if (!iso) return t("solence.reset.tomorrow");
     try {
       const reset = new Date(iso);
       const now = new Date();
       const diffMs = reset.getTime() - now.getTime();
       const diffMin = Math.round(diffMs / 60000);
-      const time = reset.toLocaleTimeString(undefined, {
+      const time = reset.toLocaleTimeString(locale, {
         hour: "numeric",
         minute: "2-digit",
       });
@@ -780,26 +783,26 @@ export default function SolenceScreen({
       // "in 4 hours" is more actionable than a clock time the user has to
       // mentally compare against the current time.
       if (diffMin > 0 && diffMin < 60) {
-        return `in ${diffMin} minute${diffMin === 1 ? "" : "s"}`;
+        return t("solence.reset.inMinutes", { count: diffMin });
       }
       const diffHr = Math.round(diffMin / 60);
       if (diffMin > 0 && diffHr <= 12) {
-        return `in about ${diffHr} hour${diffHr === 1 ? "" : "s"}`;
+        return t("solence.reset.inHours", { count: diffHr });
       }
       const sameDay = reset.toDateString() === now.toDateString();
-      if (sameDay) return `at ${time}`;
+      if (sameDay) return t("solence.reset.atTime", { time });
       const tomorrow = new Date(now);
       tomorrow.setDate(now.getDate() + 1);
       if (reset.toDateString() === tomorrow.toDateString()) {
-        return `tomorrow at ${time}`;
+        return t("solence.reset.tomorrowAt", { time });
       }
-      return reset.toLocaleString(undefined, {
+      return reset.toLocaleString(locale, {
         weekday: "short",
         hour: "numeric",
         minute: "2-digit",
       });
     } catch {
-      return "tomorrow";
+      return t("solence.reset.tomorrow");
     }
   };
 
@@ -912,7 +915,7 @@ export default function SolenceScreen({
       if (uri) {
         sendAudioToAPI(uri);
       } else {
-        setCurrentMessage("Recording was too short. Please try again.");
+        setCurrentMessage(t("solence.errors.recordingTooShort"));
         setVoiceState("idle");
       }
     } catch (e: unknown) {
@@ -945,7 +948,7 @@ export default function SolenceScreen({
       audioBase64 = await readRecordingAsBase64(recordingUri);
 
       if (audioBase64.length < 100) {
-        setCurrentMessage("Recording was too short. Please try again.");
+        setCurrentMessage(t("solence.errors.recordingTooShort"));
         setVoiceState("idle");
         return;
       }
@@ -981,7 +984,7 @@ export default function SolenceScreen({
         if (response.status === 400) {
           const errData = await response.json();
           updateTokensFromResponse(errData);
-          setCurrentMessage(errData.error || "I couldn't quite catch that. Try again?");
+          setCurrentMessage(errData.error || t("solence.errors.couldNotCatch"));
           setVoiceState("idle");
           if (isConversationActive && canSendMessage()) {
             setTimeout(() => startRecording(), 1000);
@@ -1025,7 +1028,7 @@ export default function SolenceScreen({
       }
     } catch (e: unknown) {
       console.log("Error sending audio:", e instanceof Error ? e.message : e);
-      setCurrentMessage("Something went wrong. Tap retry to try again.");
+      setCurrentMessage(t("solence.errors.somethingWentWrong"));
       setVoiceState("idle");
       // Pause the auto-listen loop, but keep the conversation active so the
       // retry pill resumes the same session seamlessly. The user can tap
@@ -1102,7 +1105,7 @@ export default function SolenceScreen({
       }
     } catch (e: unknown) {
       console.log("Error sending text:", e instanceof Error ? e.message : e);
-      setCurrentMessage("Something went wrong. Tap retry to try again.");
+      setCurrentMessage(t("solence.errors.somethingWentWrong"));
       setVoiceState("idle");
       setLastVoiceError({ kind: "text", payload: text });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -1153,7 +1156,7 @@ export default function SolenceScreen({
         if (response.status === 400) {
           const errData = await response.json();
           updateTokensFromResponse(errData);
-          setCurrentMessage(errData.error || "I couldn't quite catch that. Try again?");
+          setCurrentMessage(errData.error || t("solence.errors.couldNotCatch"));
           setVoiceState("idle");
           setIsConversationActive(false);
           return;
@@ -1188,7 +1191,7 @@ export default function SolenceScreen({
       }
     } catch (e: unknown) {
       console.log("Retry failed:", e instanceof Error ? e.message : e);
-      setCurrentMessage("Still having trouble connecting. Tap retry to try again.");
+      setCurrentMessage(t("solence.errors.stillTrouble"));
       setVoiceState("idle");
       setLastVoiceError(saved);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -1486,21 +1489,21 @@ export default function SolenceScreen({
     : "rgba(0, 0, 0, 0.06)";
 
   const getStateText = () => {
-    if (permissionDenied) return "Microphone access required";
+    if (permissionDenied) return t("solence.permissionDeniedShort");
     if (tokensRemaining <= 0 && !isSubscribed) {
-      return `Comes back ${formatResetTime(nextResetAt)}`;
+      return t("solence.comesBack", { when: formatResetTime(nextResetAt) });
     }
     switch (voiceState) {
       case "idle":
-        return "Tap to begin";
+        return t("solence.tapToBegin");
       case "listening":
-        return "Listening...";
+        return t("solence.listening");
       case "responding":
-        return "Thinking...";
+        return t("solence.thinking");
       case "speaking":
-        return "Speaking...";
+        return t("solence.speaking");
       default:
-        return "Tap to begin";
+        return t("solence.tapToBegin");
     }
   };
 
@@ -1557,8 +1560,14 @@ export default function SolenceScreen({
                   testID="usage-indicator"
                   accessibilityLabel={
                     isOutOfTokens
-                      ? `Daily limit reached. Resets ${formatResetTime(nextResetAt)}.`
-                      : `${formatTokens(tokensUsed)} of ${formatTokens(tokenLimit)} tokens used today. Resets ${formatResetTime(nextResetAt)}.`
+                      ? t("solence.usage.a11yLimitReached", {
+                          when: formatResetTime(nextResetAt),
+                        })
+                      : t("solence.usage.a11yUsed", {
+                          used: formatTokens(tokensUsed),
+                          limit: formatTokens(tokenLimit),
+                          when: formatResetTime(nextResetAt),
+                        })
                   }
                 >
                   <Text
@@ -1568,7 +1577,10 @@ export default function SolenceScreen({
                     ]}
                     testID="text-usage-label"
                   >
-                    {formatTokens(tokensUsed)} of {formatTokens(tokenLimit)} used today
+                    {t("solence.usage.label", {
+                      used: formatTokens(tokensUsed),
+                      limit: formatTokens(tokenLimit),
+                    })}
                   </Text>
                   <View
                     style={[styles.usageTrack, { backgroundColor: usageTrackColor }]}
@@ -1590,7 +1602,7 @@ export default function SolenceScreen({
                     style={[styles.usageReset, { color: theme.textMuted }]}
                     testID="text-usage-reset"
                   >
-                    Resets {formatResetTime(nextResetAt)}
+                    {t("solence.usage.resets", { when: formatResetTime(nextResetAt) })}
                   </Text>
                 </Animated.View>
               ) : null}
@@ -1600,7 +1612,7 @@ export default function SolenceScreen({
                 testID="button-sign-out"
               >
                 <Text style={[styles.signOutText, { color: theme.textMuted }]}>
-                  Sign Out
+                  {t("solence.signOut")}
                 </Text>
               </Pressable>
             </View>
@@ -1639,8 +1651,10 @@ export default function SolenceScreen({
                 accessibilityRole="button"
                 accessibilityLabel={
                   activeConversationTitle && activeConversationTitle.trim()
-                    ? `Open ${activeConversationTitle.trim()} to read past messages`
-                    : "Open your last conversation to read past messages"
+                    ? t("solence.openLastA11y", {
+                        title: activeConversationTitle.trim(),
+                      })
+                    : t("solence.openLastDefaultA11y")
                 }
                 testID="open-resumed-conversation-button"
                 style={({ pressed }) => [
@@ -1661,17 +1675,18 @@ export default function SolenceScreen({
                   numberOfLines={1}
                   testID="text-resumed-conversation"
                 >
-                  Continuing{" "}
                   {activeConversationTitle && activeConversationTitle.trim()
-                    ? activeConversationTitle.trim()
-                    : "your last conversation"}
+                    ? t("solence.continuing", {
+                        title: activeConversationTitle.trim(),
+                      })
+                    : t("solence.continuingDefault")}
                 </Text>
               </Pressable>
               <Pressable
                 onPress={dismissResumedConversation}
                 hitSlop={8}
                 accessibilityRole="button"
-                accessibilityLabel="Start a new conversation instead"
+                accessibilityLabel={t("solence.newConversationA11y")}
                 testID="dismiss-resumed-conversation-button"
                 style={({ pressed }) => [
                   styles.resumedBannerClose,
@@ -1720,7 +1735,7 @@ export default function SolenceScreen({
                 testID="end-conversation-button"
               >
                 <Text style={[styles.endButtonText, { color: theme.textMuted }]}>
-                  End conversation
+                  {t("solence.endConversation")}
                 </Text>
               </Pressable>
             ) : null}
@@ -1732,7 +1747,7 @@ export default function SolenceScreen({
                 testID="settings-button"
               >
                 <Text style={[styles.settingsButtonText, { color: theme.link }]}>
-                  Open Settings
+                  {t("solence.errors.openSettings")}
                 </Text>
               </Pressable>
             ) : null}
@@ -1742,7 +1757,7 @@ export default function SolenceScreen({
                 style={[styles.settingsButtonText, { color: theme.textMuted, textAlign: "center", paddingHorizontal: 24 }]}
                 testID="text-permission-web-help"
               >
-                Allow microphone access from your browser&apos;s address bar, then tap the orb again.
+                {t("solence.permissionWebHelp")}
               </Text>
             ) : null}
 
@@ -1761,7 +1776,7 @@ export default function SolenceScreen({
               >
                 <Feather name="refresh-cw" size={14} color={theme.orbPrimary} />
                 <Text style={[styles.retryButtonText, { color: theme.orbPrimary }]}>
-                  Try again
+                  {t("solence.tryAgain")}
                 </Text>
               </Pressable>
             ) : null}
@@ -1862,33 +1877,36 @@ export default function SolenceScreen({
                   entering={FadeIn.duration(800).delay(800)}
                   style={styles.startersContainer}
                 >
-                  {STARTER_PROMPTS.map((prompt, index) => (
-                    <Pressable
-                      key={index}
-                      onPress={() => {
-                        setTextInputValue(prompt);
-                      }}
-                      style={({ pressed }) => [
-                        styles.starterChip,
-                        {
-                          backgroundColor: isDark
-                            ? "rgba(255,255,255,0.06)"
-                            : "rgba(0,0,0,0.04)",
-                          borderColor: isDark
-                            ? "rgba(255,255,255,0.08)"
-                            : "rgba(0,0,0,0.06)",
-                          opacity: pressed ? 0.7 : 1,
-                        },
-                      ]}
-                      testID={`starter-prompt-${index}`}
-                    >
-                      <Text
-                        style={[styles.starterText, { color: theme.textMuted }]}
+                  {STARTER_PROMPT_KEYS.map((promptKey, index) => {
+                    const prompt = t(promptKey);
+                    return (
+                      <Pressable
+                        key={index}
+                        onPress={() => {
+                          setTextInputValue(prompt);
+                        }}
+                        style={({ pressed }) => [
+                          styles.starterChip,
+                          {
+                            backgroundColor: isDark
+                              ? "rgba(255,255,255,0.06)"
+                              : "rgba(0,0,0,0.04)",
+                            borderColor: isDark
+                              ? "rgba(255,255,255,0.08)"
+                              : "rgba(0,0,0,0.06)",
+                            opacity: pressed ? 0.7 : 1,
+                          },
+                        ]}
+                        testID={`starter-prompt-${index}`}
                       >
-                        {prompt}
-                      </Text>
-                    </Pressable>
-                  ))}
+                        <Text
+                          style={[styles.starterText, { color: theme.textMuted }]}
+                        >
+                          {prompt}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
                 </Animated.View>
               </>
             ) : null}
@@ -1906,7 +1924,7 @@ export default function SolenceScreen({
                 styles.textInput,
                 { color: theme.text },
               ]}
-              placeholder="Type a message..."
+              placeholder={t("solence.typeMessage")}
               placeholderTextColor={isDark ? "rgba(255,255,255,0.3)" : "rgba(0,0,0,0.3)"}
               value={textInputValue}
               onChangeText={setTextInputValue}
@@ -1953,7 +1971,7 @@ export default function SolenceScreen({
             ]}
           >
             <Text style={[styles.subscriptionTitle, { color: theme.text }]}>
-              Solence needs to rest
+              {t("solence.subscriptionModal.title")}
             </Text>
             <Text
               style={[
@@ -1961,9 +1979,9 @@ export default function SolenceScreen({
                 { color: theme.textMuted },
               ]}
             >
-              You've reached today's limit. Solence comes back{" "}
-              {formatResetTime(nextResetAt)}, or you can upgrade for unlimited
-              conversations now.
+              {t("solence.subscriptionModal.body", {
+                when: formatResetTime(nextResetAt),
+              })}
             </Text>
             <Pressable
               style={({ pressed }) => [
@@ -1981,7 +1999,7 @@ export default function SolenceScreen({
               testID="subscribe-button"
             >
               <Text style={styles.subscribeButtonText}>
-                Upgrade
+                {t("solence.subscriptionModal.upgrade")}
               </Text>
             </Pressable>
             <Pressable
@@ -1995,7 +2013,7 @@ export default function SolenceScreen({
               <Text
                 style={[styles.cancelButtonText, { color: theme.textMuted }]}
               >
-                Maybe Later
+                {t("solence.subscriptionModal.maybeLater")}
               </Text>
             </Pressable>
           </Animated.View>

@@ -9,6 +9,7 @@ import {
   Modal,
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
+import { useTranslation } from "react-i18next";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
@@ -21,6 +22,7 @@ export type ErrorFallbackProps = {
 
 export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
   const { theme } = useTheme();
+  const { t } = useTranslation();
   const [isModalVisible, setIsModalVisible] = useState(false);
 
   const handleRestart = async () => {
@@ -59,11 +61,11 @@ export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
 
       <View style={styles.content}>
         <ThemedText type="h1" style={styles.title}>
-          Something went wrong
+          {t("errorBoundary.title")}
         </ThemedText>
 
         <ThemedText type="body" style={styles.message}>
-          Please reload the app to continue.
+          {t("errorBoundary.message")}
         </ThemedText>
 
         <Pressable
@@ -81,7 +83,7 @@ export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
             type="body"
             style={[styles.buttonText, { color: theme.buttonText }]}
           >
-            Try Again
+            {t("errorBoundary.tryAgain")}
           </ThemedText>
         </Pressable>
       </View>
@@ -97,7 +99,7 @@ export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
             <ThemedView style={styles.modalContainer}>
               <View style={styles.modalHeader}>
                 <ThemedText type="h2" style={styles.modalTitle}>
-                  Error Details
+                  {t("errorBoundary.errorDetailsTitle")}
                 </ThemedText>
                 <Pressable
                   onPress={() => setIsModalVisible(false)}

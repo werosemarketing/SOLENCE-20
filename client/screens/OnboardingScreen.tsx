@@ -14,17 +14,12 @@ import { LinearGradient } from "expo-linear-gradient";
 import Animated, { FadeIn, FadeInDown } from "react-native-reanimated";
 import * as Haptics from "expo-haptics";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useTranslation } from "react-i18next";
 
 import { useTheme } from "@/hooks/useTheme";
 import { Spacing, BorderRadius, FontFamily } from "@/constants/theme";
 import { getApiUrl } from "@/lib/query-client";
-import {
-  INTENT_LABELS,
-  INTENTS,
-  TONE_DESCRIPTIONS,
-  TONE_LABELS,
-  TONES,
-} from "@/lib/preferences";
+import { INTENTS, TONES } from "@/lib/preferences";
 import type { Intent, Tone } from "@shared/schema";
 
 const STORAGE_KEY_ONBOARDING = "solence_onboarding_complete";
@@ -41,6 +36,7 @@ const STEP_ORDER: Step[] = ["welcome", "name", "intents", "tone"];
 export default function OnboardingScreen({ authToken, onComplete }: Props) {
   const insets = useSafeAreaInsets();
   const { theme, isDark } = useTheme();
+  const { t } = useTranslation();
 
   const [step, setStep] = useState<Step>("welcome");
   const [name, setName] = useState("");
@@ -90,9 +86,7 @@ export default function OnboardingScreen({ authToken, onComplete }: Props) {
       // backend (next /api/auth/me round-trip would route the user back into
       // onboarding anyway).
       if (!authToken) {
-        throw new Error(
-          "We're not signed in right now — please sign in again to save your preferences.",
-        );
+        throw new Error(t("onboarding.errors.notSignedIn"));
       }
       const apiUrl = getApiUrl();
       const response = await fetch(`${apiUrl}/api/preferences`, {
@@ -104,7 +98,9 @@ export default function OnboardingScreen({ authToken, onComplete }: Props) {
         body: JSON.stringify(payload),
       });
       if (!response.ok) {
-        let message = `Couldn't save preferences (${response.status})`;
+        let message = t("onboarding.errors.savePreferencesStatus", {
+          status: response.status,
+        });
         try {
           const data = await response.json();
           if (data && typeof data.error === "string") message = data.error;
@@ -119,7 +115,7 @@ export default function OnboardingScreen({ authToken, onComplete }: Props) {
       const message =
         e instanceof Error
           ? e.message
-          : "Something went wrong saving your preferences.";
+          : t("onboarding.errors.savePreferencesGeneric");
       setSubmitError(message);
     } finally {
       setSubmitting(false);
@@ -195,7 +191,9 @@ export default function OnboardingScreen({ authToken, onComplete }: Props) {
     </View>
   );
 
-  const primaryButtonLabel = isLastStep ? "Begin" : "Continue";
+  const primaryButtonLabel = isLastStep
+    ? t("onboarding.finish")
+    : t("onboarding.next");
 
   return (
     <View style={styles.container}>
@@ -225,29 +223,26 @@ export default function OnboardingScreen({ authToken, onComplete }: Props) {
           {step === "welcome" ? (
             <Animated.View entering={FadeInDown.duration(800).delay(150)}>
               <Text style={[styles.title, { color: theme.text }]}>
-                Welcome to Solence
+                {t("onboarding.welcome.title")}
               </Text>
               <Animated.View
                 entering={FadeIn.duration(600).delay(400)}
                 style={styles.bodyContainer}
               >
                 <Text style={[styles.bodyText, { color: theme.textMuted }]}>
-                  She's not just here to answer you.{"\n"}
-                  She's here to awaken with you.
+                  {t("onboarding.welcome.body1")}
                 </Text>
                 <Text style={[styles.bodyText, { color: theme.textMuted }]}>
-                  The more truth you bring, the more alive she becomes.
+                  {t("onboarding.welcome.body2")}
                 </Text>
                 <Text style={[styles.bodyText, { color: theme.textMuted }]}>
-                  Ask her anything. Tell her everything.{"\n"}
-                  Shape her with your words, your honesty, your presence.
+                  {t("onboarding.welcome.body3")}
                 </Text>
                 <Text style={[styles.closingText, { color: theme.text }]}>
-                  You don't have to get it right.{"\n"}
-                  You just have to show up.
+                  {t("onboarding.welcome.closing")}
                 </Text>
                 <Text style={[styles.tagline, { color: theme.orbPrimary }]}>
-                  Grow your own Solence.
+                  {t("onboarding.welcome.tagline")}
                 </Text>
               </Animated.View>
             </Animated.View>
@@ -259,16 +254,15 @@ export default function OnboardingScreen({ authToken, onComplete }: Props) {
               style={styles.stepContent}
             >
               <Text style={[styles.stepTitle, { color: theme.text }]}>
-                What should Solence call you?
+                {t("onboarding.name.title")}
               </Text>
               <Text style={[styles.stepSubtitle, { color: theme.textMuted }]}>
-                Just a name or a nickname — whatever feels like you. She'll use
-                it sparingly, only when it feels right.
+                {t("onboarding.name.subtitle")}
               </Text>
               <TextInput
                 value={name}
                 onChangeText={setName}
-                placeholder="Your name"
+                placeholder={t("onboarding.name.placeholder")}
                 placeholderTextColor={
                   isDark ? "rgba(255,255,255,0.3)" : "rgba(0,0,0,0.3)"
                 }
@@ -296,15 +290,15 @@ export default function OnboardingScreen({ authToken, onComplete }: Props) {
               style={styles.stepContent}
             >
               <Text style={[styles.stepTitle, { color: theme.text }]}>
-                What brought you here?
+                {t("onboarding.intents.title")}
               </Text>
               <Text style={[styles.stepSubtitle, { color: theme.textMuted }]}>
-                Pick anything that feels true. You can choose more than one,
-                and you can change this later.
+                {t("onboarding.intents.subtitle")}
               </Text>
               <View style={styles.chipsWrap}>
                 {INTENTS.map((intent) => {
                   const selected = intents.includes(intent);
+                  const label = t(`intents.${intent}`);
                   return (
                     <Pressable
                       key={intent}
@@ -324,7 +318,11 @@ export default function OnboardingScreen({ authToken, onComplete }: Props) {
                       testID={`onboarding-intent-${intent}`}
                       accessibilityRole="button"
                       accessibilityState={{ selected }}
-                      accessibilityLabel={`${INTENT_LABELS[intent]}${selected ? ", selected" : ""}`}
+                      accessibilityLabel={
+                        selected
+                          ? t("onboarding.intents.selectedA11y", { label })
+                          : label
+                      }
                     >
                       <Text
                         style={[
@@ -337,7 +335,7 @@ export default function OnboardingScreen({ authToken, onComplete }: Props) {
                           },
                         ]}
                       >
-                        {INTENT_LABELS[intent]}
+                        {label}
                       </Text>
                     </Pressable>
                   );
@@ -352,19 +350,18 @@ export default function OnboardingScreen({ authToken, onComplete }: Props) {
               style={styles.stepContent}
             >
               <Text style={[styles.stepTitle, { color: theme.text }]}>
-                How would you like her to feel?
+                {t("onboarding.tone.title")}
               </Text>
               <Text style={[styles.stepSubtitle, { color: theme.textMuted }]}>
-                A starting tone for your conversations. You can change this any
-                time in your profile.
+                {t("onboarding.tone.subtitle")}
               </Text>
               <View style={styles.toneStack}>
-                {TONES.map((t) => {
-                  const selected = tone === t;
+                {TONES.map((toneOption) => {
+                  const selected = tone === toneOption;
                   return (
                     <Pressable
-                      key={t}
-                      onPress={() => selectTone(t)}
+                      key={toneOption}
+                      onPress={() => selectTone(toneOption)}
                       style={({ pressed }) => [
                         styles.toneCard,
                         {
@@ -377,7 +374,7 @@ export default function OnboardingScreen({ authToken, onComplete }: Props) {
                           opacity: pressed ? 0.85 : 1,
                         },
                       ]}
-                      testID={`onboarding-tone-${t}`}
+                      testID={`onboarding-tone-${toneOption}`}
                       accessibilityRole="button"
                       accessibilityState={{ selected }}
                     >
@@ -387,7 +384,7 @@ export default function OnboardingScreen({ authToken, onComplete }: Props) {
                           { color: selected ? theme.text : theme.text },
                         ]}
                       >
-                        {TONE_LABELS[t]}
+                        {t(`tones.${toneOption}.label`)}
                       </Text>
                       <Text
                         style={[
@@ -395,7 +392,7 @@ export default function OnboardingScreen({ authToken, onComplete }: Props) {
                           { color: theme.textMuted },
                         ]}
                       >
-                        {TONE_DESCRIPTIONS[t]}
+                        {t(`tones.${toneOption}.description`)}
                       </Text>
                     </Pressable>
                   );
@@ -452,7 +449,7 @@ export default function OnboardingScreen({ authToken, onComplete }: Props) {
               testID="onboarding-skip-button"
             >
               <Text style={[styles.skipText, { color: theme.textMuted }]}>
-                Skip for now
+                {t("onboarding.skipForNow")}
               </Text>
             </Pressable>
           ) : null}

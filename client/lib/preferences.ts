@@ -1,9 +1,12 @@
 import {
+  DEFAULT_LANGUAGE,
   DEFAULT_VOICE,
   INTENT_OPTIONS,
+  LANGUAGE_OPTIONS,
   TONE_OPTIONS,
   VOICE_OPTIONS,
   type Intent,
+  type Language,
   type Tone,
   type Voice,
 } from "@shared/schema";
@@ -34,7 +37,16 @@ export const TONE_DESCRIPTIONS: Record<Tone, string> = {
 export const INTENTS: readonly Intent[] = INTENT_OPTIONS;
 export const TONES: readonly Tone[] = TONE_OPTIONS;
 export const VOICES: readonly Voice[] = VOICE_OPTIONS;
-export { DEFAULT_VOICE };
+export const LANGUAGES: readonly Language[] = LANGUAGE_OPTIONS;
+export { DEFAULT_VOICE, DEFAULT_LANGUAGE };
+
+// Native-name labels so each option reads in its own language regardless of
+// the active app locale. The radio card pairs the label with a localized
+// description that DOES translate.
+export const LANGUAGE_LABELS: Record<Language, string> = {
+  en: "English",
+  es: "Español",
+};
 
 // Short, user-facing label paired with a one-word vibe tag (per task brief
 // e.g. "Warm — Nova"). The tag is the human descriptor; the proper noun is
@@ -58,6 +70,7 @@ export type ClientPreferences = {
   intents: Intent[];
   tone: Tone | null;
   voice: Voice | null;
+  language: Language | null;
   onboardingCompletedAt: string | null;
 };
 
@@ -66,5 +79,6 @@ export const EMPTY_PREFERENCES: ClientPreferences = {
   intents: [],
   tone: null,
   voice: null,
+  language: null,
   onboardingCompletedAt: null,
 };

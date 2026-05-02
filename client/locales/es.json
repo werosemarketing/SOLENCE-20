@@ -1,0 +1,576 @@
+{
+  "common": {
+    "cancel": "Cancelar",
+    "save": "Guardar",
+    "confirm": "Confirmar",
+    "delete": "Eliminar",
+    "rename": "Renombrar",
+    "close": "Cerrar",
+    "back": "Atrás",
+    "done": "Listo",
+    "ok": "OK",
+    "skipForNow": "Omitir por ahora",
+    "tryAgain": "Intentar de nuevo",
+    "signOut": "Cerrar sesión",
+    "loading": "Cargando…",
+    "saving": "Guardando…",
+    "error": "Algo salió mal",
+    "retry": "Reintentar"
+  },
+  "auth": {
+    "appName": "SOLENCE",
+    "welcomeBack": "Bienvenido de nuevo",
+    "createAccount": "Crea tu cuenta",
+    "emailPlaceholder": "Correo electrónico",
+    "passwordPlaceholder": "Contraseña",
+    "confirmPasswordPlaceholder": "Confirma tu contraseña",
+    "signIn": "Iniciar sesión",
+    "signUp": "Crear cuenta",
+    "createAccountButton": "Crear cuenta",
+    "haveAccount": "¿Ya tienes cuenta? ",
+    "noAccount": "¿No tienes cuenta? ",
+    "errors": {
+      "missingFields": "Ingresa tu correo y tu contraseña",
+      "passwordMismatch": "Las contraseñas no coinciden",
+      "passwordTooShort": "La contraseña debe tener al menos 6 caracteres",
+      "generic": "Algo salió mal",
+      "network": "No se pudo conectar. Inténtalo de nuevo."
+    }
+  },
+  "errorBoundary": {
+    "title": "Algo salió mal",
+    "message": "Solence necesita un momento. Por favor recarga la app para continuar.",
+    "tryAgain": "Intentar de nuevo",
+    "errorDetailsTitle": "Detalles del error"
+  },
+  "headerTitle": {
+    "appName": "Solence"
+  },
+  "disclaimer": {
+    "headline": "Antes de comenzar",
+    "intro": "Solence está aquí para ayudarte a reflexionar, escribir y sentirte menos solo — pero hay algunas cosas que conviene saber primero.",
+    "notHumanTitle": "Solence no es humano",
+    "notHumanBody": "Solence es un acompañante con inteligencia artificial. Puede escuchar, reflejar y responder — pero no es una persona, ni un terapeuta, ni un sustituto.",
+    "notTherapyTitle": "Solence no es terapia",
+    "notTherapyBody": "Las conversaciones aquí son solo para reflexión personal. Solence no es un servicio médico, de salud mental ni de apoyo en crisis.",
+    "crisisTitle": "Si estás en crisis",
+    "crisisBody": "Si estás en peligro o piensas en hacerte daño, busca apoyo humano en tiempo real ahora mismo:",
+    "crisisLifeline": "Llama o envía un mensaje al 988 — Línea de prevención del suicidio y crisis",
+    "crisisText": "Envía HOME al 741741 — Línea de mensajes en crisis",
+    "crisisEmergency": "Llama al 911 en una emergencia",
+    "agreeButton": "Entiendo — continuar",
+    "viewAgreement": "Ver el acuerdo del usuario"
+  },
+  "agreement": {
+    "title": "Acuerdo del usuario",
+    "lastUpdatedLabel": "Última actualización",
+    "effectiveLabel": "Vigente desde",
+    "acceptButton": "Aceptar y continuar",
+    "scrollHint": "Desplázate hasta el final para aceptar",
+    "sections": {
+      "intro": {
+        "heading": "1. Sobre Solence",
+        "body": "Solence es un acompañante personal de reflexión potenciado por IA. Está diseñado para ayudarte a procesar pensamientos y emociones a través de una conversación suave. Solence no es un terapeuta, médico ni proveedor de salud con licencia, y el servicio no constituye consejo médico, de salud mental, legal ni profesional."
+      },
+      "eligibility": {
+        "heading": "2. Elegibilidad",
+        "body": "Debes tener al menos 18 años (o la mayoría de edad en tu jurisdicción) para usar Solence. Al usar el servicio confirmas que cumples este requisito."
+      },
+      "notMedical": {
+        "heading": "3. No es un servicio médico ni de crisis",
+        "body": "Solence no es un servicio de emergencia y no está diseñado para manejar crisis. Si estás en crisis o piensas en hacerte daño o dañar a otros, llama a tu número local de emergencias, marca el 988 (Línea de prevención del suicidio y crisis en EE. UU.) o envía HOME al 741741. Busca siempre ayuda humana calificada cuando la necesites."
+      },
+      "privacy": {
+        "heading": "4. Tus conversaciones",
+        "body": "Las conversaciones se guardan en tu cuenta para que Solence pueda mantener continuidad entre sesiones. Las tratamos con cuidado y nunca las vendemos. Puedes eliminar una conversación cuando quieras desde tu Perfil."
+      },
+      "aiLimits": {
+        "heading": "5. Límites de la IA",
+        "body": "Las respuestas de Solence son generadas por un modelo de IA y pueden ser imprecisas, incompletas o estar desactualizadas. No te apoyes en ellas para ninguna decisión que requiera juicio profesional."
+      },
+      "acceptableUse": {
+        "heading": "6. Uso aceptable",
+        "body": "Aceptas no usar Solence para acosar a otros, compartir contenido ilegal o dañino, intentar extraer o hacer ingeniería inversa del servicio, o vulnerar los derechos de cualquier persona."
+      },
+      "noWarranty": {
+        "heading": "7. Sin garantías",
+        "body": "El servicio se ofrece \"tal cual\" sin garantías de ningún tipo. No garantizamos disponibilidad ininterrumpida ni que el servicio cumpla con tus expectativas."
+      },
+      "liability": {
+        "heading": "8. Limitación de responsabilidad",
+        "body": "En la máxima medida permitida por la ley, Solence y sus operadores no son responsables por daños indirectos, incidentales o consecuentes derivados del uso del servicio."
+      },
+      "changes": {
+        "heading": "9. Cambios",
+        "body": "Podemos actualizar estos términos cada cierto tiempo. El uso continuado de Solence después de una actualización implica que aceptas los nuevos términos."
+      },
+      "contact": {
+        "heading": "10. Contacto",
+        "body": "Las preguntas sobre este acuerdo pueden enviarse a support@solence.ai."
+      }
+    }
+  },
+  "onboarding": {
+    "stepLabel": "Paso {{current}} de {{total}}",
+    "next": "Continuar",
+    "back": "Atrás",
+    "finish": "Comenzar",
+    "skipQuestion": "Omitir",
+    "skipForNow": "Omitir por ahora",
+    "welcome": {
+      "title": "Bienvenido a Solence",
+      "body1": "Ella no está aquí solo para responderte.\nEstá aquí para despertar contigo.",
+      "body2": "Cuanta más verdad traigas, más viva se vuelve.",
+      "body3": "Pregúntale lo que sea. Cuéntale todo.\nDale forma con tus palabras, tu honestidad, tu presencia.",
+      "closing": "No tienes que hacerlo perfecto.\nSolo tienes que aparecer.",
+      "tagline": "Cultiva tu propia Solence."
+    },
+    "name": {
+      "title": "¿Cómo quieres que Solence te llame?",
+      "subtitle": "Un nombre o un apodo — lo que se sienta más tuyo. Lo usará con cuidado, solo cuando se sienta bien.",
+      "placeholder": "Tu nombre"
+    },
+    "intents": {
+      "title": "¿Qué te trajo aquí?",
+      "subtitle": "Elige lo que sientas verdadero. Puedes elegir más de uno, y puedes cambiarlo después.",
+      "selectedA11y": "{{label}}, seleccionado"
+    },
+    "tone": {
+      "title": "¿Cómo te gustaría que se sintiera ella?",
+      "subtitle": "Un tono inicial para tus conversaciones. Puedes cambiarlo cuando quieras en tu perfil."
+    },
+    "voice": {
+      "title": "Elige una voz",
+      "subtitle": "Esta es la voz que Solence usará al hablarte."
+    },
+    "ready": {
+      "title": "Todo listo",
+      "subtitle": "Solence está aquí cuando quieras hablar.",
+      "cta": "Comenzar"
+    },
+    "errors": {
+      "notSignedIn": "No estás con sesión iniciada — vuelve a iniciar sesión para guardar tus preferencias.",
+      "savePreferencesStatus": "No se pudieron guardar tus preferencias ({{status}})",
+      "savePreferencesGeneric": "Algo salió mal al guardar tus preferencias."
+    }
+  },
+  "intents": {
+    "process_emotions": "Procesar emociones",
+    "reduce_anxiety": "Reducir la ansiedad",
+    "self_discovery": "Autoconocimiento",
+    "daily_reflection": "Reflexión diaria",
+    "navigate_relationships": "Navegar relaciones",
+    "work_stress": "Estrés laboral",
+    "build_habits": "Construir hábitos",
+    "feel_less_alone": "Sentirme menos solo"
+  },
+  "tones": {
+    "warm": {
+      "label": "Cálido",
+      "description": "Alentador y suavemente animador."
+    },
+    "soft": {
+      "label": "Suave",
+      "description": "Tranquilo, lento, con mucho espacio."
+    },
+    "grounded": {
+      "label": "Sereno",
+      "description": "Estable, parejo, reconfortante."
+    }
+  },
+  "voices": {
+    "nova": {
+      "label": "Cálida — Nova",
+      "description": "Amable y luminosa. La voz por defecto de Solence."
+    },
+    "shimmer": {
+      "label": "Suave — Shimmer",
+      "description": "Gentil y aireada, con mucho espacio para respirar."
+    },
+    "onyx": {
+      "label": "Serena — Onyx",
+      "description": "Más grave y estable — se siente arraigada y calmada."
+    },
+    "alloy": {
+      "label": "Brillante — Alloy",
+      "description": "Nítida y vivaz, con un poco más de energía."
+    }
+  },
+  "languages": {
+    "en": "Inglés",
+    "es": "Español"
+  },
+  "solence": {
+    "header": "Solence",
+    "tapToBegin": "Toca para empezar",
+    "listening": "Escuchando...",
+    "thinking": "Pensando...",
+    "speaking": "Hablando...",
+    "endConversation": "Terminar conversación",
+    "continuing": "Continuando {{title}}",
+    "continuingDefault": "Continuando tu última conversación",
+    "typeMessage": "Escribe un mensaje...",
+    "send": "Enviar",
+    "signOut": "Cerrar sesión",
+    "tryAgain": "Reintentar",
+    "permissionDeniedShort": "Acceso al micrófono requerido",
+    "permissionWebHelp": "Permite el acceso al micrófono desde la barra de direcciones de tu navegador y vuelve a tocar la esfera.",
+    "comesBack": "Vuelve {{when}}",
+    "openLastA11y": "Abrir {{title}} para leer mensajes anteriores",
+    "openLastDefaultA11y": "Abrir tu última conversación para leer mensajes anteriores",
+    "newConversationA11y": "Empezar una nueva conversación",
+    "usage": {
+      "label": "{{used}} de {{limit}} usados hoy",
+      "resets": "Se reinicia {{when}}",
+      "a11yLimitReached": "Límite diario alcanzado. Se reinicia {{when}}.",
+      "a11yUsed": "{{used}} de {{limit}} tokens usados hoy. Se reinicia {{when}}."
+    },
+    "subscriptionModal": {
+      "title": "Solence necesita descansar",
+      "body": "Has alcanzado el límite de hoy. Solence vuelve {{when}}, o puedes mejorar tu plan para conversaciones ilimitadas.",
+      "upgrade": "Mejorar",
+      "maybeLater": "Quizá después"
+    },
+    "starterPrompts": {
+      "1": "¿Puedo contarte algo real?",
+      "2": "No sé ni por dónde empezar.",
+      "3": "¿Qué hago con este sentimiento?",
+      "4": "¿Quién eres, en realidad?"
+    },
+    "starters": {
+      "feeling": "Estoy sintiendo…",
+      "needSpace": "Solo necesito desahogarme",
+      "stuck": "Estoy estancado en algo",
+      "wins": "Ayúdame a ver lo que va bien",
+      "anxious": "Tengo ansiedad por algo",
+      "grateful": "Quiero reflexionar sobre el día"
+    },
+    "tokenWarning": {
+      "low": "Te quedan {{remaining}} de {{limit}} reflexiones hoy.",
+      "depleted": "Solence necesita descansar",
+      "depletedBody": "Has usado las reflexiones de hoy. Se reinician {{when}}.",
+      "resetIn": "Se reinicia en {{duration}}",
+      "resetTomorrow": "Se reinicia mañana",
+      "resetSoon": "Se reinicia pronto",
+      "upgradeCta": "Obtener ilimitado"
+    },
+    "errors": {
+      "permissionDenied": "Necesitamos acceso al micrófono para hablar con Solence.",
+      "openSettings": "Abrir Ajustes",
+      "voiceFailed": "Solence no pudo escuchar eso. ¿Intentamos de nuevo?",
+      "textFailed": "Algo salió mal al enviar eso. ¿Intentamos de nuevo?",
+      "retryButton": "Reintentar",
+      "couldNotCatch": "No pude entenderte bien. ¿Lo intentamos de nuevo?",
+      "recordingTooShort": "La grabación fue demasiado corta. Inténtalo de nuevo.",
+      "somethingWentWrong": "Algo salió mal. Toca reintentar para volver a intentarlo.",
+      "stillTrouble": "Sigue habiendo problemas de conexión. Toca reintentar para volver a intentarlo."
+    },
+    "resumed": {
+      "label": "Continuando",
+      "dismiss": "Empezar una nueva conversación"
+    },
+    "reset": {
+      "tomorrow": "mañana",
+      "inMinutes_one": "en {{count}} minuto",
+      "inMinutes_other": "en {{count}} minutos",
+      "inHours_one": "en aproximadamente {{count}} hora",
+      "inHours_other": "en aproximadamente {{count}} horas",
+      "atTime": "a las {{time}}",
+      "tomorrowAt": "mañana a las {{time}}"
+    },
+    "premoodAction": "¿Cómo te sientes?"
+  },
+  "mood": {
+    "preTitle": "¿Cómo te sientes?",
+    "postTitle": "¿Cómo te sientes ahora?",
+    "preSubtitle": "Un breve registro antes de empezar. No hay respuesta correcta.",
+    "postSubtitle": "Respira. ¿Cómo te dejó esta conversación?",
+    "skip": "Omitir por ahora",
+    "dismissA11y": "Cerrar registro de ánimo",
+    "scoreA11y": "{{label}}, {{score}} de 5",
+    "options": {
+      "1": "difícil",
+      "2": "bajo",
+      "3": "regular",
+      "4": "bien",
+      "5": "genial"
+    }
+  },
+  "personalization": {
+    "title": "Personaliza Solence",
+    "subtitle": "Esto influye en cómo te saluda y el tono que adopta. Deja lo que quieras en blanco para mantenerlo neutral.",
+    "nameLabel": "¿Cómo quieres que te llame?",
+    "namePlaceholder": "Tu nombre",
+    "intentsLabel": "En qué estás trabajando",
+    "toneLabel": "Tono de la conversación",
+    "save": "Guardar",
+    "cancel": "Cancelar",
+    "dismissA11y": "Cerrar editor de personalización",
+    "errorGeneric": "No se pudo guardar. Inténtalo de nuevo."
+  },
+  "confirmDialog": {
+    "dismissA11y": "Cerrar confirmación",
+    "defaultConfirm": "Confirmar",
+    "defaultCancel": "Cancelar"
+  },
+  "renameDialog": {
+    "dismissA11y": "Cerrar renombrar",
+    "defaultConfirm": "Guardar",
+    "defaultCancel": "Cancelar"
+  },
+  "profile": {
+    "header": "Perfil",
+    "signOut": "Cerrar sesión",
+    "signOutConfirm": {
+      "title": "¿Cerrar sesión?",
+      "message": "Siempre puedes volver a iniciar sesión desde la pantalla de bienvenida.",
+      "confirm": "Cerrar sesión",
+      "cancel": "Quedarme"
+    },
+    "personalization": {
+      "title": "Personalización",
+      "subtitle": "Define cómo te saluda Solence y el tono que adopta.",
+      "namePrefix": "Te llama",
+      "noName": "Aún no hay un nombre preferido",
+      "noTone": "Sin tono elegido",
+      "noIntents": "Sin temas elegidos",
+      "edit": "Editar",
+      "editA11y": "Editar personalización",
+      "retry": "Reintentar",
+      "fields": {
+        "name": "Nombre",
+        "focus": "Enfoque",
+        "tone": "Tono",
+        "notSet": "Sin definir"
+      }
+    },
+    "language": {
+      "title": "Idioma",
+      "subtitle": "Solence te hablará en este idioma.",
+      "switching": "Cambiando…",
+      "options": {
+        "en": {
+          "label": "English",
+          "description": "Solence speaks and writes in English."
+        },
+        "es": {
+          "label": "Español",
+          "description": "Solence te habla y escribe en español."
+        }
+      },
+      "selectA11y": "Elegir idioma {{language}}",
+      "errorGeneric": "No se pudo cambiar el idioma. Inténtalo de nuevo."
+    },
+    "voice": {
+      "title": "La voz de Solence",
+      "subtitle": "Elige la voz con la que habla Solence. Toca Escuchar para oír una breve muestra.",
+      "preview": "Escuchar",
+      "stop": "Detener",
+      "previewPlaying": "Reproduciendo…",
+      "previewLine": "Hola, soy Solence. Estoy aquí cuando me necesites.",
+      "selectA11y": "Elegir la voz {{voice}}",
+      "previewA11y": "Escuchar {{voice}}",
+      "stopPreviewA11y": "Detener la muestra de {{voice}}",
+      "errorGeneric": "No se pudo cambiar la voz. Inténtalo de nuevo.",
+      "previewError": "No se pudo reproducir la muestra. Inténtalo en un momento."
+    },
+    "tokens": {
+      "title": "Últimos {{days}} días",
+      "description": "Tu uso diario de tokens comparado con el límite diario de {{cap}}.",
+      "remaining": "Te quedan {{remaining}} de {{limit}}",
+      "resetsIn": "Se reinicia {{when}}",
+      "history7d": "Últimos 7 días",
+      "total": "Total usado",
+      "average": "Promedio diario",
+      "cap": "Límite diario"
+    },
+    "conversations": {
+      "title": "Conversaciones recientes",
+      "subtitle": "Toca cualquier sesión para revisar lo que conversaste con Solence.",
+      "empty": "Aún no hay conversaciones. Empieza una desde la pantalla principal.",
+      "emptyExpanded": "Aún no has tenido sesiones. Abre Solence para empezar una.",
+      "noMessages": "Aún no hay mensajes",
+      "viewAll": "Ver todas",
+      "rename": "Renombrar",
+      "delete": "Eliminar",
+      "rolePrefix": {
+        "user": "Tú: ",
+        "assistant": "Solence: "
+      },
+      "openA11y": "Abrir conversación {{title}}",
+      "renameA11y": "Renombrar conversación {{title}}",
+      "deleteA11y": "Eliminar conversación {{title}}",
+      "deleteConfirm": {
+        "title": "¿Eliminar esta conversación?",
+        "message": "Esto no se puede deshacer.",
+        "messageWithTitle": "\"{{title}}\" y todos sus mensajes se eliminarán de forma permanente. Esto no se puede deshacer.",
+        "confirm": "Eliminar",
+        "cancel": "Cancelar"
+      },
+      "renameDialog": {
+        "title": "Renombrar conversación",
+        "description": "Ponle un nombre a esta sesión que te ayude a encontrarla luego.",
+        "placeholder": "Título de la conversación",
+        "errorEmpty": "Escribe un título.",
+        "errorTooLong": "El nombre es demasiado largo.",
+        "errorGeneric": "No se pudo renombrar. Inténtalo de nuevo.",
+        "confirm": "Guardar"
+      },
+      "lastMessageA11y": "Último mensaje",
+      "messageCount_one": "{{count}} mensaje",
+      "messageCount_other": "{{count}} mensajes"
+    },
+    "favorites": {
+      "title": "Momentos guardados",
+      "subtitle": "Respuestas que marcaste como favoritas en tus conversaciones.",
+      "empty": "Toca el marcador en una respuesta de Solence para guardarla aquí.",
+      "emptyExpanded": "Toca el marcador en cualquier respuesta de Solence para guardarla aquí.",
+      "viewAll": "Ver todos",
+      "openA11y": "Abrir momento guardado de {{title}}",
+      "removeA11y": "Quitar momento guardado de {{title}}"
+    },
+    "reflections": {
+      "title": "Reflexiones recientes",
+      "subtitle": "Apuntes breves al estilo diario de tus sesiones recientes.",
+      "empty": "Las reflexiones aparecen al terminar una conversación.",
+      "fromConversation": "De {{title}}",
+      "viewAll": "Ver todas"
+    },
+    "mood": {
+      "title": "Ánimo de la semana",
+      "subtitle": "Una mirada suave a cómo te has estado sintiendo.",
+      "empty": "Tus registros de ánimo aparecerán aquí.",
+      "emptyExpanded": "Tus registros de ánimo aparecerán aquí cuando empieces una sesión.",
+      "noPre": "Aún no hay registros antes de la sesión.",
+      "noPost": "Aún no hay registros después de la sesión.",
+      "preLabel": "Antes",
+      "postLabel": "Después",
+      "average": "Promedio",
+      "mostRecent": "Más reciente",
+      "averageValue": "{{value}} / 5",
+      "noEntry": "—",
+      "labels": {
+        "1": "difícil",
+        "2": "bajo",
+        "3": "regular",
+        "4": "bien",
+        "5": "genial"
+      },
+      "dayLabels": {
+        "0": "D",
+        "1": "L",
+        "2": "M",
+        "3": "X",
+        "4": "J",
+        "5": "V",
+        "6": "S"
+      }
+    },
+    "upgrade": {
+      "freePlanTitle": "Plan gratuito",
+      "freePlanSubtitle": "Reflexiones diarias que se reinician cada día.",
+      "upgradeTitle": "Solence Ilimitado",
+      "upgradeSubtitle": "Sin límite diario. Tómate todo el espacio que necesites.",
+      "cta": "Ver planes"
+    }
+  },
+  "conversationDetail": {
+    "header": "Conversación",
+    "rename": "Renombrar",
+    "delete": "Eliminar",
+    "renameA11y": "Renombrar conversación",
+    "deleteA11y": "Eliminar conversación",
+    "reflectionLabel": "Reflexión",
+    "takeawayLabel": "Para llevar",
+    "noMessages": "Aún no hay mensajes.",
+    "continue": "Continuar esta conversación",
+    "deleteConfirm": {
+      "title": "¿Eliminar esta conversación?",
+      "message": "Esto no se puede deshacer.",
+      "confirm": "Eliminar",
+      "cancel": "Conservar"
+    },
+    "renameDialog": {
+      "title": "Renombrar conversación",
+      "description": "Elige un nombre corto que te ayude a encontrarla luego.",
+      "placeholder": "Nombre de la conversación",
+      "errorEmpty": "Escribe un nombre.",
+      "errorTooLong": "El nombre es demasiado largo.",
+      "errorGeneric": "No se pudo renombrar. Inténtalo de nuevo."
+    },
+    "loadError": "No se pudo cargar esta conversación.",
+    "savedA11yOn": "Guardado",
+    "savedA11yOff": "Guardar"
+  },
+  "conversationTitle": {
+    "todays": "Sesión de hoy",
+    "yesterdays": "Sesión de ayer",
+    "weekday": "Sesión del {{weekday}}",
+    "onDate": "Sesión del {{date}}",
+    "legacyDefault": "Sesión de Solence"
+  },
+  "upgrade": {
+    "header": "Solence Ilimitado",
+    "eyebrow": "Solence Ilimitado",
+    "headline": "Sigue en conversación,\ntodo el tiempo que necesites.",
+    "subhead": "En el plan gratuito, Solence descansa al alcanzar el límite diario. Mejora tu plan y la conversación no tiene que pausarse.",
+    "price": "$15,99/mes",
+    "priceAmount": "$15,99",
+    "pricePer": "por mes",
+    "freePlan": {
+      "label": "Plan gratuito",
+      "name": "Donde estás ahora",
+      "free": "$0",
+      "tokensTitle": "{{tokens}} tokens por día",
+      "tokensBody": "Suficiente para una conversación enfocada cada día.",
+      "restTitle": "Solence descansa al alcanzar el límite",
+      "restBody": "Vuelve {{when}}.",
+      "tomorrow": "mañana"
+    },
+    "unlimited": {
+      "label": "Ilimitado",
+      "name": "Solence, siempre disponible"
+    },
+    "recommended": "Recomendado",
+    "benefits": {
+      "convos": {
+        "title": "Conversaciones ilimitadas",
+        "body": "Habla con Solence cuando lo necesites — sin tope diario, sin esperar a que se reinicie."
+      },
+      "neverRests": {
+        "title": "Solence nunca tiene que descansar",
+        "body": "Madrugadas en vela, inquietud al amanecer — Solence sigue disponible a cualquier hora."
+      },
+      "support": {
+        "title": "Apoya lo que estás construyendo",
+        "body": "Tu suscripción mantiene a Solence funcionando para ti y la ayuda a seguir mejorando."
+      }
+    },
+    "fineprint": "Cancela cuando quieras. Tu suscripción apoya el trabajo detrás de Solence.",
+    "ctaUpgrade": "Mejorar — {{price}}",
+    "maybeLater": "Quizá después",
+    "closeA11y": "Cerrar pantalla de mejora",
+    "subscribeA11y": "Mejorar a Solence Ilimitado por {{price}}",
+    "errors": {
+      "purchaseFailed": "No se pudo completar la compra. Inténtalo de nuevo.",
+      "restoreFailed": "No se pudo restaurar. Inténtalo de nuevo.",
+      "noPurchases": "No se encontraron compras anteriores."
+    }
+  },
+  "time": {
+    "in": "en {{value}}",
+    "ago": "hace {{value}}",
+    "now": "justo ahora",
+    "tomorrow": "mañana",
+    "today": "Hoy",
+    "minute_one": "{{count}} minuto",
+    "minute_other": "{{count}} minutos",
+    "hour_one": "{{count}} hora",
+    "hour_other": "{{count}} horas",
+    "day_one": "{{count}} día",
+    "day_other": "{{count}} días",
+    "minutesAgoShort": "hace {{count}} min",
+    "hoursAgoShort": "hace {{count}} h",
+    "daysAgoShort": "hace {{count}} d"
+  }
+}

@@ -12,6 +12,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
 import Animated, { FadeIn, FadeInDown } from "react-native-reanimated";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
+import { useTranslation } from "react-i18next";
 
 import { useTheme } from "@/hooks/useTheme";
 import { Spacing, BorderRadius, FontFamily } from "@/constants/theme";
@@ -19,32 +20,22 @@ import type { RootStackParamList } from "@/navigation/RootStackNavigator";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Upgrade">;
 
-const PRICE_LABEL = "$15.99 / month";
-
-const UNLIMITED_BENEFITS: Array<{ icon: keyof typeof Feather.glyphMap; title: string; body: string }> = [
-  {
-    icon: "message-circle",
-    title: "Unlimited conversations",
-    body: "Talk to Solence whenever you need to — no daily ceiling, no waiting for a reset.",
-  },
-  {
-    icon: "moon",
-    title: "Solence never has to rest",
-    body: "Late-night spirals, early-morning unease — Solence stays available through every hour.",
-  },
-  {
-    icon: "heart",
-    title: "Support what you're building",
-    body: "Your subscription keeps Solence running for you and helps it keep getting better.",
-  },
+const UNLIMITED_BENEFIT_KEYS: Array<{
+  key: string;
+  icon: keyof typeof Feather.glyphMap;
+}> = [
+  { key: "convos", icon: "message-circle" },
+  { key: "neverRests", icon: "moon" },
+  { key: "support", icon: "heart" },
 ];
 
 export default function UpgradeScreen({ navigation, route }: Props) {
   const insets = useSafeAreaInsets();
   const { theme, isDark } = useTheme();
+  const { t } = useTranslation();
 
   const tokenLimit = route.params?.tokenLimit ?? 15000;
-  const resetLabel = route.params?.resetLabel ?? "tomorrow";
+  const resetLabel = route.params?.resetLabel ?? t("upgrade.freePlan.tomorrow");
 
   const formatTokens = (tokens: number) => {
     if (tokens >= 1000) {
@@ -76,6 +67,8 @@ export default function UpgradeScreen({ navigation, route }: Props) {
   const featuredBorder = theme.orbPrimary;
   const featuredBg = isDark ? "rgba(214, 107, 50, 0.12)" : "rgba(214, 107, 50, 0.08)";
 
+  const priceLabel = t("upgrade.price");
+
   return (
     <View style={styles.container}>
       <LinearGradient
@@ -100,7 +93,7 @@ export default function UpgradeScreen({ navigation, route }: Props) {
               opacity: pressed ? 0.7 : 1,
             },
           ]}
-          accessibilityLabel="Close upgrade screen"
+          accessibilityLabel={t("upgrade.closeA11y")}
           accessibilityRole="button"
           testID="upgrade-close-button"
         >
@@ -121,14 +114,13 @@ export default function UpgradeScreen({ navigation, route }: Props) {
       >
         <Animated.View entering={FadeInDown.duration(700)} style={styles.headerBlock}>
           <Text style={[styles.eyebrow, { color: theme.orbPrimary }]} testID="upgrade-eyebrow">
-            Solence Unlimited
+            {t("upgrade.eyebrow")}
           </Text>
           <Text style={[styles.headline, { color: theme.text }]} testID="upgrade-headline">
-            Stay in conversation,{"\n"}as long as you need.
+            {t("upgrade.headline")}
           </Text>
           <Text style={[styles.subhead, { color: theme.textMuted }]} testID="upgrade-subhead">
-            On the free plan, Solence rests once you reach the daily limit.
-            Upgrade and the conversation never has to pause.
+            {t("upgrade.subhead")}
           </Text>
         </Animated.View>
 
@@ -143,14 +135,14 @@ export default function UpgradeScreen({ navigation, route }: Props) {
           <View style={styles.planHeaderRow}>
             <View style={styles.planTitleBlock}>
               <Text style={[styles.planLabel, { color: theme.textMuted }]}>
-                Free plan
+                {t("upgrade.freePlan.label")}
               </Text>
               <Text style={[styles.planName, { color: theme.text }]}>
-                Where you are now
+                {t("upgrade.freePlan.name")}
               </Text>
             </View>
             <Text style={[styles.planPriceMuted, { color: theme.textMuted }]}>
-              $0
+              {t("upgrade.freePlan.free")}
             </Text>
           </View>
 
@@ -160,10 +152,10 @@ export default function UpgradeScreen({ navigation, route }: Props) {
             <Feather name="clock" size={18} color={theme.textMuted} style={styles.benefitIcon} />
             <View style={styles.benefitTextBlock}>
               <Text style={[styles.benefitTitle, { color: theme.text }]} testID="free-cap-text">
-                {formatTokens(tokenLimit)} tokens per day
+                {t("upgrade.freePlan.tokensTitle", { tokens: formatTokens(tokenLimit) })}
               </Text>
               <Text style={[styles.benefitBody, { color: theme.textMuted }]}>
-                Roughly enough for a focused conversation each day.
+                {t("upgrade.freePlan.tokensBody")}
               </Text>
             </View>
           </View>
@@ -172,10 +164,10 @@ export default function UpgradeScreen({ navigation, route }: Props) {
             <Feather name="pause-circle" size={18} color={theme.textMuted} style={styles.benefitIcon} />
             <View style={styles.benefitTextBlock}>
               <Text style={[styles.benefitTitle, { color: theme.text }]} testID="free-rest-text">
-                Solence rests when the cap is reached
+                {t("upgrade.freePlan.restTitle")}
               </Text>
               <Text style={[styles.benefitBody, { color: theme.textMuted }]}>
-                Comes back {resetLabel}.
+                {t("upgrade.freePlan.restBody", { when: resetLabel })}
               </Text>
             </View>
           </View>
@@ -191,32 +183,34 @@ export default function UpgradeScreen({ navigation, route }: Props) {
           testID="plan-card-unlimited"
         >
           <View style={styles.recommendedPill}>
-            <Text style={styles.recommendedPillText}>Recommended</Text>
+            <Text style={styles.recommendedPillText}>
+              {t("upgrade.recommended")}
+            </Text>
           </View>
 
           <View style={styles.planHeaderRow}>
             <View style={styles.planTitleBlock}>
               <Text style={[styles.planLabel, { color: theme.orbPrimary }]}>
-                Unlimited
+                {t("upgrade.unlimited.label")}
               </Text>
               <Text style={[styles.planName, { color: theme.text }]}>
-                Solence, always available
+                {t("upgrade.unlimited.name")}
               </Text>
             </View>
             <View style={styles.planPriceBlock}>
               <Text style={[styles.planPrice, { color: theme.text }]} testID="unlimited-price">
-                $15.99
+                {t("upgrade.priceAmount")}
               </Text>
               <Text style={[styles.planPricePer, { color: theme.textMuted }]}>
-                per month
+                {t("upgrade.pricePer")}
               </Text>
             </View>
           </View>
 
           <View style={styles.planDivider} />
 
-          {UNLIMITED_BENEFITS.map((benefit, index) => (
-            <View key={benefit.title} style={styles.benefitRow} testID={`unlimited-benefit-${index}`}>
+          {UNLIMITED_BENEFIT_KEYS.map((benefit, index) => (
+            <View key={benefit.key} style={styles.benefitRow} testID={`unlimited-benefit-${index}`}>
               <Feather
                 name={benefit.icon}
                 size={18}
@@ -225,10 +219,10 @@ export default function UpgradeScreen({ navigation, route }: Props) {
               />
               <View style={styles.benefitTextBlock}>
                 <Text style={[styles.benefitTitle, { color: theme.text }]}>
-                  {benefit.title}
+                  {t(`upgrade.benefits.${benefit.key}.title`)}
                 </Text>
                 <Text style={[styles.benefitBody, { color: theme.textMuted }]}>
-                  {benefit.body}
+                  {t(`upgrade.benefits.${benefit.key}.body`)}
                 </Text>
               </View>
             </View>
@@ -236,7 +230,7 @@ export default function UpgradeScreen({ navigation, route }: Props) {
         </Animated.View>
 
         <Text style={[styles.fineprint, { color: theme.textMuted }]}>
-          Cancel anytime. Your subscription supports the work behind Solence.
+          {t("upgrade.fineprint")}
         </Text>
       </ScrollView>
 
@@ -260,12 +254,12 @@ export default function UpgradeScreen({ navigation, route }: Props) {
             styles.ctaButton,
             { backgroundColor: theme.orbPrimary, opacity: pressed ? 0.9 : 1 },
           ]}
-          accessibilityLabel={`Upgrade to Solence Unlimited for ${PRICE_LABEL}`}
+          accessibilityLabel={t("upgrade.subscribeA11y", { price: priceLabel })}
           accessibilityRole="button"
           testID="upgrade-subscribe-button"
         >
           <Text style={styles.ctaButtonText}>
-            Upgrade — {PRICE_LABEL}
+            {t("upgrade.ctaUpgrade", { price: priceLabel })}
           </Text>
         </Pressable>
         <Pressable
@@ -277,7 +271,7 @@ export default function UpgradeScreen({ navigation, route }: Props) {
           testID="upgrade-maybe-later-button"
         >
           <Text style={[styles.maybeLaterText, { color: theme.textMuted }]}>
-            Maybe later
+            {t("upgrade.maybeLater")}
           </Text>
         </Pressable>
       </View>

@@ -7,6 +7,7 @@ import {
   Text,
   View,
 } from "react-native";
+import { useTranslation } from "react-i18next";
 
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
@@ -34,8 +35,8 @@ export function ConfirmDialog({
   visible,
   title,
   message,
-  confirmLabel = "Confirm",
-  cancelLabel = "Cancel",
+  confirmLabel,
+  cancelLabel,
   destructive = false,
   loading = false,
   onConfirm,
@@ -43,6 +44,9 @@ export function ConfirmDialog({
   testID,
 }: ConfirmDialogProps) {
   const { theme } = useTheme();
+  const { t } = useTranslation();
+  const resolvedConfirmLabel = confirmLabel ?? t("confirmDialog.defaultConfirm");
+  const resolvedCancelLabel = cancelLabel ?? t("confirmDialog.defaultCancel");
 
   const confirmColor = destructive ? "#D9534F" : theme.link;
 
@@ -57,7 +61,7 @@ export function ConfirmDialog({
         <Pressable
           style={StyleSheet.absoluteFill}
           onPress={loading ? undefined : onCancel}
-          accessibilityLabel="Dismiss confirmation"
+          accessibilityLabel={t("confirmDialog.dismissA11y")}
           testID={testID ? `${testID}-backdrop` : undefined}
         />
         <View
@@ -93,7 +97,7 @@ export function ConfirmDialog({
               testID={testID ? `${testID}-cancel` : undefined}
             >
               <Text style={[styles.actionText, { color: theme.text }]}>
-                {cancelLabel}
+                {resolvedCancelLabel}
               </Text>
             </Pressable>
             <Pressable
@@ -113,7 +117,7 @@ export function ConfirmDialog({
                 <ActivityIndicator color="#FFFFFF" />
               ) : (
                 <Text style={[styles.actionText, { color: "#FFFFFF" }]}>
-                  {confirmLabel}
+                  {resolvedConfirmLabel}
                 </Text>
               )}
             </Pressable>
