@@ -797,6 +797,108 @@ async function runReflectionBackfillScan(userId: string): Promise<void> {
   }
 }
 
+// ----- Weekly themes -------------------------------------------------------
+//
+// The Weekly Summary screen shows a small set of recurring "themes" pulled
+// from the week's reflection takeaways/summaries + memories. We previously
+// produced these by counting non-stop-words, which works in English but
+// produces noisy single-word output in Spanish (and any non-English
+// language) and never captures multi-word concepts like "work stress" or
+// "sleep quality". This helper asks a lightweight chat model to summarize
+// the corpus into 2–3 short, human-readable phrases instead. Returns null
+// on any failure (parse error, network, empty model output) so the caller
+// can fall back to the keyword extractor and never fail the endpoint.
+
+const WEEKLY_THEMES_MODEL = "gpt-4o-mini";
+// Cap each theme phrase so the chip layout stays tidy if the model ever
+// returns something verbose. Mirrors the chip's visual budget — anything
+// longer is dropped, not truncated, since a half-sentence theme reads
+// worse than no theme at all.
+const WEEKLY_THEME_MAX_LEN = 40;
+const WEEKLY_THEMES_MAX_COUNT = 3;
+// Bound the corpus we send to the model. Even a chatty user with dozens
+// of reflections in a single week stays well under this when joined,
+// but the cap protects token cost on outliers.
+const WEEKLY_THEMES_CORPUS_MAX_CHARS = 6000;
+
+async function generateWeeklyThemes(
+  corpusItems: string[],
+  language: Language = DEFAULT_LANGUAGE,
+): Promise<string[] | null> {
+  const cleaned = corpusItems
+    .map((s) => (s ?? "").replace(/\s+/g, " ").trim())
+    .filter((s) => s.length > 0);
+  if (cleaned.length === 0) return null;
+
+  // Join with newlines so the model sees each reflection / memory as its
+  // own item. Truncate the joined corpus on a character budget — we'd
+  // rather drop trailing items than send a multi-thousand-token prompt.
+  let corpus = cleaned.join("\n");
+  if (corpus.length > WEEKLY_THEMES_CORPUS_MAX_CHARS) {
+    corpus = corpus.slice(0, WEEKLY_THEMES_CORPUS_MAX_CHARS);
+  }
+
+  const systemContent =
+    language === "es"
+      ? `Identificas los temas recurrentes en una semana de reflexiones de diario emocional. Responde SOLO con JSON con la forma exacta {"themes": string[]}. Devuelve entre 2 y ${WEEKLY_THEMES_MAX_COUNT} temas, cada uno como una frase corta de 1 a 4 palabras (por ejemplo, "estrés laboral", "calidad del sueño", "extrañar a un amigo"). Los temas DEBEN estar escritos en español, en minúsculas (excepto nombres propios), sin comillas, sin puntuación final y sin frases genéricas como "reflexión personal" o "estado de ánimo". Si el corpus es demasiado escaso para identificar temas claros, devuelve {"themes": []}.`
+      : `You identify the recurring themes in a week of emotional journal reflections. Reply with ONLY JSON in the exact shape {"themes": string[]}. Return between 2 and ${WEEKLY_THEMES_MAX_COUNT} themes, each a short 1–4 word phrase (e.g. "work stress", "sleep quality", "missing a friend"). Themes must be lowercase (except proper nouns), no quotes, no trailing punctuation, no generic phrases like "personal reflection" or "general mood". If the corpus is too sparse to identify clear themes, return {"themes": []}.`;
+
+  const userContent =
+    language === "es"
+      ? `Reflexiones y memorias de la semana (una por línea):\n${corpus}\n\nDevuelve ahora el JSON con los temas en español.`
+      : `This week's reflections and memories (one per line):\n${corpus}\n\nReturn the themes JSON now.`;
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: WEEKLY_THEMES_MODEL,
+      temperature: 0.3,
+      max_tokens: 120,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: systemContent },
+        { role: "user", content: userContent },
+      ],
+    });
+    const raw = response.choices[0]?.message?.content?.trim() ?? "";
+    if (!raw) return null;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+    if (!parsed || typeof parsed !== "object") return null;
+    const themesField = (parsed as { themes?: unknown }).themes;
+    if (!Array.isArray(themesField)) return null;
+
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const item of themesField) {
+      if (typeof item !== "string") continue;
+      const phrase = item
+        .replace(/\s+/g, " ")
+        .replace(/^["'`\s]+|["'`\s]+$/g, "")
+        .replace(/[.!?,;:]+$/g, "")
+        .trim();
+      if (phrase.length === 0) continue;
+      if (phrase.length > WEEKLY_THEME_MAX_LEN) continue;
+      const key = phrase.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(phrase);
+      if (out.length >= WEEKLY_THEMES_MAX_COUNT) break;
+    }
+    if (out.length === 0) return null;
+    return out;
+  } catch (error) {
+    console.error(
+      "Weekly themes generation failed:",
+      error instanceof Error ? error.message : error,
+    );
+    return null;
+  }
+}
+
 if (!process.env.SESSION_SECRET) {
   throw new Error("SESSION_SECRET environment variable is required");
 }
@@ -2598,25 +2700,84 @@ export async function registerRoutes(app: Express): Promise<Server> {
             ),
           );
 
-        const counts = new Map<string, number>();
-        const ingest = (text: string) => {
-          for (const raw of text.toLowerCase().split(/[^a-záéíóúñü]+/i)) {
-            const word = raw.trim();
-            if (word.length < 4) continue;
-            if (STOP_WORDS.has(word)) continue;
-            counts.set(word, (counts.get(word) ?? 0) + 1);
-          }
-        };
+        // Build the corpus once — it's used by both the LLM path
+        // (preferred) and the keyword fallback below. Each reflection
+        // contributes its takeaway + summary as a single item; each
+        // memory contributes its text. Empty strings are filtered out
+        // by generateWeeklyThemes itself.
+        const corpusItems: string[] = [];
         for (const c of weekConversations) {
-          ingest(`${c.reflectionTakeaway ?? ""} ${c.reflectionSummary ?? ""}`);
+          const combined = `${c.reflectionTakeaway ?? ""} ${c.reflectionSummary ?? ""}`.trim();
+          if (combined.length > 0) corpusItems.push(combined);
         }
         for (const m of weekMemories) {
-          ingest(m.text ?? "");
+          const text = (m.text ?? "").trim();
+          if (text.length > 0) corpusItems.push(text);
         }
-        const themes = [...counts.entries()]
-          .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-          .slice(0, 3)
-          .map(([word]) => word);
+
+        // Look up the user's preferred language so the LLM responds in
+        // the right tongue. Best-effort: any failure falls through to
+        // the default language and the prompt still works.
+        let userLanguage: Language = DEFAULT_LANGUAGE;
+        try {
+          const [userRow] = await db
+            .select({ language: users.language })
+            .from(users)
+            .where(eq(users.id, userId))
+            .limit(1);
+          const stored = userRow?.language ?? null;
+          if (
+            stored &&
+            (LANGUAGE_OPTIONS as readonly string[]).includes(stored)
+          ) {
+            userLanguage = stored as Language;
+          }
+        } catch {
+          // best-effort: fall back to default
+        }
+
+        // Try the LLM first — it produces multi-word, language-aware
+        // phrases like "work stress" / "estrés laboral" instead of
+        // single tokens. On any failure (including no corpus content)
+        // we fall back to the keyword extractor so the endpoint never
+        // returns a broken themes block.
+        let themes: string[] = [];
+        if (corpusItems.length > 0) {
+          const llmThemes = await generateWeeklyThemes(
+            corpusItems,
+            userLanguage,
+          );
+          // Require at least 2 themes to honour the 2–3 contract — a
+          // lone single phrase reads more like a label than a "themes"
+          // section, so we'd rather fall through to the keyword
+          // extractor in that case.
+          if (llmThemes && llmThemes.length >= 2) {
+            themes = llmThemes;
+          }
+        }
+
+        if (themes.length === 0) {
+          // Keyword fallback: tokenize, drop stop words, count, and
+          // surface the top 3. Cheap and predictable — used when the
+          // model call fails, returns nothing usable, or there's no
+          // corpus to summarize at all.
+          const counts = new Map<string, number>();
+          const ingest = (text: string) => {
+            for (const raw of text.toLowerCase().split(/[^a-záéíóúñü]+/i)) {
+              const word = raw.trim();
+              if (word.length < 4) continue;
+              if (STOP_WORDS.has(word)) continue;
+              counts.set(word, (counts.get(word) ?? 0) + 1);
+            }
+          };
+          for (const item of corpusItems) {
+            ingest(item);
+          }
+          themes = [...counts.entries()]
+            .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+            .slice(0, 3)
+            .map(([word]) => word);
+        }
 
         // Highlight quote: first try a favorited assistant message from
         // the week (the user explicitly said "this stays with me"),
