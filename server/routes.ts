@@ -1682,6 +1682,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         userTranscript,
         audioBase64: audioData,
         audioFormat: "mp3",
+        // Echo the conversationId so the client can adopt it after the
+        // first turn of a brand-new session. Downstream features (post-
+        // session mood, history navigation) need this id locally without
+        // having to refetch the conversations list.
+        conversationId,
         tokensUsed: updatedTokensUsed,
         tokensRemaining,
         tokenLimit: FREE_TOKEN_LIMIT,
