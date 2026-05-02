@@ -18,6 +18,7 @@ interface CardProps {
   children?: React.ReactNode;
   onPress?: () => void;
   style?: ViewStyle;
+  testID?: string;
 }
 
 const springConfig: WithSpringConfig = {
@@ -53,6 +54,7 @@ export function Card({
   children,
   onPress,
   style,
+  testID,
 }: CardProps) {
   const { theme } = useTheme();
   const scale = useSharedValue(1);
@@ -76,6 +78,7 @@ export function Card({
       onPress={onPress}
       onPressIn={handlePressIn}
       onPressOut={handlePressOut}
+      testID={testID}
       style={[
         styles.card,
         {
