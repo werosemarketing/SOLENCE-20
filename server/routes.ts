@@ -12,6 +12,7 @@ import {
   messages,
   favorites,
   moodEntries,
+  tokenUsage,
   MOOD_PHASES,
   MOOD_SCORE_MIN,
   MOOD_SCORE_MAX,
@@ -36,6 +37,7 @@ import {
   grantReferralCredit,
   normalizeReferralCode,
 } from "./referrals";
+import JSZip from "jszip";
 import { eq, desc, inArray, and, lt, gte, isNull } from "drizzle-orm";
 import {
   MIN_TOKENS_FOR_REQUEST,
@@ -2008,6 +2010,231 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } catch (error) {
         console.error("List mood entries error:", error);
         res.status(500).json({ error: "Failed to load mood entries" });
+      }
+    },
+  );
+
+  // ── Data export ────────────────────────────────────────────────────
+  // Stream a zip of the caller's data back to them. One JSON file per
+  // category, scoped strictly to userId. Rate-limited per user to a
+  // single export every EXPORT_COOLDOWN_MS so it can't be hammered.
+  const EXPORT_COOLDOWN_MS = 5 * 60 * 1000;
+  const exportLastRunAt = new Map<string, number>();
+
+  app.post(
+    "/api/export",
+    requireAuth,
+    async (req: Request, res: Response) => {
+      const userId = req.user!.userId;
+      try {
+        const now = Date.now();
+        const last = exportLastRunAt.get(userId);
+        if (last !== undefined && now - last < EXPORT_COOLDOWN_MS) {
+          const retryAfterSec = Math.max(
+            1,
+            Math.ceil((EXPORT_COOLDOWN_MS - (now - last)) / 1000),
+          );
+          res.setHeader("Retry-After", String(retryAfterSec));
+          return res.status(429).json({
+            error:
+              "You can export your data again in a few minutes. Thanks for your patience.",
+            retryAfterSec,
+          });
+        }
+        // Reserve the slot now so two simultaneous taps can't both pass
+        // the gate. If the build fails we roll the timestamp back below.
+        exportLastRunAt.set(userId, now);
+
+        const [user] = await db
+          .select()
+          .from(users)
+          .where(eq(users.id, userId))
+          .limit(1);
+        if (!user) {
+          exportLastRunAt.delete(userId);
+          return res.status(404).json({ error: "User not found" });
+        }
+
+        // Pull every category in parallel. All queries are scoped to
+        // userId (directly or through the conversation join) so there is
+        // no chance of leaking another user's rows into this archive.
+        const [
+          conversationRows,
+          messageRows,
+          favoriteRows,
+          moodRows,
+          tokenUsageRows,
+        ] = await Promise.all([
+          db
+            .select()
+            .from(conversations)
+            .where(eq(conversations.userId, userId))
+            .orderBy(desc(conversations.createdAt)),
+          db
+            .select({
+              id: messages.id,
+              conversationId: messages.conversationId,
+              role: messages.role,
+              content: messages.content,
+              createdAt: messages.createdAt,
+            })
+            .from(messages)
+            .innerJoin(
+              conversations,
+              eq(conversations.id, messages.conversationId),
+            )
+            .where(eq(conversations.userId, userId))
+            .orderBy(desc(messages.createdAt)),
+          db
+            .select({
+              id: favorites.id,
+              messageId: favorites.messageId,
+              createdAt: favorites.createdAt,
+            })
+            .from(favorites)
+            .where(eq(favorites.userId, userId))
+            .orderBy(desc(favorites.createdAt)),
+          db
+            .select()
+            .from(moodEntries)
+            .where(eq(moodEntries.userId, userId))
+            .orderBy(desc(moodEntries.createdAt)),
+          db
+            .select()
+            .from(tokenUsage)
+            .where(eq(tokenUsage.userId, userId))
+            .orderBy(desc(tokenUsage.periodStart)),
+        ]);
+
+        const generatedAt = new Date().toISOString();
+        const account = {
+          id: user.id,
+          email: user.email,
+          displayName: user.displayName,
+          createdAt: user.createdAt,
+          onboardingCompletedAt: user.onboardingCompletedAt,
+        };
+        const preferences = serializePreferences(user);
+
+        const zip = new JSZip();
+        const stamp = (d: Date | string | null | undefined): string | null =>
+          d == null
+            ? null
+            : d instanceof Date
+              ? d.toISOString()
+              : new Date(d).toISOString();
+
+        const writeJson = (name: string, payload: unknown): void => {
+          zip.file(name, `${JSON.stringify(payload, null, 2)}\n`);
+        };
+
+        writeJson("account.json", { generatedAt, account });
+        writeJson("preferences.json", { generatedAt, preferences });
+        writeJson("conversations.json", {
+          generatedAt,
+          count: conversationRows.length,
+          conversations: conversationRows.map((c) => ({
+            id: c.id,
+            title: c.title,
+            reflectionSummary: c.reflectionSummary,
+            reflectionTakeaway: c.reflectionTakeaway,
+            reflectionGeneratedAt: stamp(c.reflectionGeneratedAt),
+            createdAt: stamp(c.createdAt),
+          })),
+        });
+        writeJson("messages.json", {
+          generatedAt,
+          count: messageRows.length,
+          messages: messageRows.map((m) => ({
+            id: m.id,
+            conversationId: m.conversationId,
+            role: m.role,
+            content: m.content,
+            createdAt: stamp(m.createdAt),
+          })),
+        });
+        writeJson("favorites.json", {
+          generatedAt,
+          count: favoriteRows.length,
+          favorites: favoriteRows.map((f) => ({
+            id: f.id,
+            messageId: f.messageId,
+            createdAt: stamp(f.createdAt),
+          })),
+        });
+        writeJson("mood_entries.json", {
+          generatedAt,
+          count: moodRows.length,
+          entries: moodRows.map((e) => ({
+            id: e.id,
+            phase: e.phase,
+            score: e.score,
+            conversationId: e.conversationId,
+            createdAt: stamp(e.createdAt),
+          })),
+        });
+        writeJson("token_usage.json", {
+          generatedAt,
+          count: tokenUsageRows.length,
+          entries: tokenUsageRows.map((t) => ({
+            id: t.id,
+            tokensUsed: t.tokensUsed,
+            periodStart: stamp(t.periodStart),
+            createdAt: stamp(t.createdAt),
+          })),
+        });
+        zip.file(
+          "README.txt",
+          [
+            "Solence — your data export",
+            "",
+            `Generated for ${user.email} at ${generatedAt}.`,
+            "",
+            "Each .json file contains one category of your data:",
+            "  • account.json       — basic profile (id, email, sign-up date)",
+            "  • preferences.json   — name, focus areas, tone, voice",
+            "  • conversations.json — every session you've had with Solence",
+            "  • messages.json      — the full transcript of those sessions",
+            "  • favorites.json     — replies you bookmarked as saved moments",
+            "  • mood_entries.json  — pre/post-session mood check-ins",
+            "  • token_usage.json   — daily usage of the free token allowance",
+            "",
+            "Sensitive material (your password hash, auth tokens, billing",
+            "details) is never included in this archive.",
+            "",
+          ].join("\n"),
+        );
+
+        const buffer = await zip.generateAsync({
+          type: "nodebuffer",
+          compression: "DEFLATE",
+          compressionOptions: { level: 6 },
+        });
+
+        const emailPrefix =
+          (user.email.split("@")[0] ?? "user")
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/^-+|-+$/g, "")
+            .slice(0, 32) || "user";
+        const dateStamp = generatedAt.slice(0, 10).replace(/-/g, "");
+        const filename = `solence-export-${emailPrefix}-${dateStamp}.zip`;
+
+        res.setHeader("Content-Type", "application/zip");
+        res.setHeader(
+          "Content-Disposition",
+          `attachment; filename="${filename}"`,
+        );
+        res.setHeader("Content-Length", String(buffer.length));
+        res.status(200).end(buffer);
+      } catch (error) {
+        console.error("Data export error:", error);
+        // Roll the cooldown back so the user can retry without waiting
+        // five minutes after a server-side failure.
+        exportLastRunAt.delete(userId);
+        if (!res.headersSent) {
+          res.status(500).json({ error: "Failed to build data export" });
+        }
       }
     },
   );

@@ -11,6 +11,7 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useAudioPlayer, setAudioModeAsync } from "expo-audio";
 import * as FileSystem from "expo-file-system/legacy";
+import * as Sharing from "expo-sharing";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useHeaderHeight } from "@react-navigation/elements";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
@@ -53,6 +54,25 @@ import type { RootStackParamList } from "@/navigation/RootStackNavigator";
 
 const STORAGE_KEY_AUTH_TOKEN = "solence_auth_token";
 const HISTORY_DAYS = 7;
+
+// Convert a binary response (the export zip) to base64 so we can hand it to
+// expo-file-system on native. We do this in 32 KB chunks because passing a
+// huge byte array straight to String.fromCharCode(...spread) blows the JS
+// call-stack limit on large archives.
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, Math.min(i + chunkSize, bytes.length));
+    binary += String.fromCharCode.apply(
+      null,
+      Array.from(chunk) as unknown as number[],
+    );
+  }
+  return globalThis.btoa(binary);
+}
+
 const DEFAULT_TOKEN_LIMIT = 15000;
 const RECENT_CONVERSATIONS_LIMIT = 10;
 
@@ -300,6 +320,13 @@ export default function ProfileScreen() {
   const [previewError, setPreviewError] = useState<string | null>(null);
   const previewPlayer = useAudioPlayer("");
   const previewPlayingRef = useRef<Voice | null>(null);
+
+  // "Your data" export state. The button shows a brief inline status while
+  // the zip is being built and shared. Errors (including the 5-min rate
+  // limit) are surfaced beneath the button rather than in a modal.
+  const [exporting, setExporting] = useState(false);
+  const [exportStatus, setExportStatus] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   const loadPreferences = useCallback(async (signal?: AbortSignal) => {
     try {
@@ -916,6 +943,87 @@ export default function ProfileScreen() {
       setDeleteError(message);
     } finally {
       setDeleteSubmitting(false);
+    }
+  };
+
+  // Builds and downloads/shares the user's data archive. The server returns
+  // the zip in a single response (mobile fetch can't stream); on native we
+  // write it to the cache and hand it to the OS share sheet, on web we
+  // trigger a normal browser download via an anchor click.
+  const handleExportData = async () => {
+    if (exporting) return;
+    setExporting(true);
+    setExportError(null);
+    setExportStatus("Packaging your data\u2026");
+    try {
+      const token = await AsyncStorage.getItem(STORAGE_KEY_AUTH_TOKEN);
+      const headers: Record<string, string> = {};
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const apiUrl = getApiUrl();
+      const response = await fetch(`${apiUrl}/api/export`, {
+        method: "POST",
+        headers,
+      });
+
+      if (response.status === 429) {
+        const body = (await response
+          .json()
+          .catch(() => null)) as { retryAfterSec?: number } | null;
+        const seconds = body?.retryAfterSec ?? 300;
+        const minutes = Math.max(1, Math.ceil(seconds / 60));
+        throw new Error(
+          `You can export your data again in about ${minutes} minute${minutes === 1 ? "" : "s"}.`,
+        );
+      }
+      if (!response.ok) {
+        throw new Error(`Export failed (${response.status})`);
+      }
+
+      const disposition = response.headers.get("content-disposition") ?? "";
+      const filenameMatch = disposition.match(/filename="?([^";]+)"?/i);
+      const filename =
+        filenameMatch?.[1] ?? `solence-export-${Date.now()}.zip`;
+
+      if (Platform.OS === "web") {
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = filename;
+        document.body.appendChild(anchor);
+        anchor.click();
+        document.body.removeChild(anchor);
+        URL.revokeObjectURL(url);
+        setExportStatus("Your download has started.");
+      } else {
+        const buffer = await response.arrayBuffer();
+        const base64 = arrayBufferToBase64(buffer);
+        const cacheDir = FileSystem.cacheDirectory;
+        if (!cacheDir) {
+          throw new Error("Could not access local storage to save the file");
+        }
+        const uri = `${cacheDir}${filename}`;
+        await FileSystem.writeAsStringAsync(uri, base64, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(uri, {
+            mimeType: "application/zip",
+            UTI: "public.zip-archive",
+            dialogTitle: "Save your Solence data",
+          });
+          setExportStatus("Your data is ready to share or save.");
+        } else {
+          setExportStatus(`Saved to ${uri}`);
+        }
+      }
+    } catch (e) {
+      const message =
+        e instanceof Error ? e.message : "Could not export your data";
+      setExportError(message);
+      setExportStatus(null);
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -2207,6 +2315,67 @@ export default function ProfileScreen() {
         )}
       </Card>
 
+      <Card elevation={1} style={styles.exportCard}>
+        <ThemedText type="h4" style={styles.cardTitle}>
+          Your data
+        </ThemedText>
+        <ThemedText
+          type="small"
+          style={[styles.cardDescription, { color: theme.textMuted }]}
+        >
+          Download an archive of everything Solence has stored for you &mdash;
+          your account, preferences, conversations, messages, saved moments,
+          mood entries, and usage history. One JSON file per category, plus a
+          short README.
+        </ThemedText>
+
+        <Pressable
+          onPress={handleExportData}
+          disabled={exporting}
+          style={({ pressed }) => [
+            styles.exportButton,
+            {
+              backgroundColor: theme.orbPrimary,
+              opacity: exporting ? 0.7 : pressed ? 0.85 : 1,
+            },
+          ]}
+          testID="button-export-data"
+          accessibilityRole="button"
+          accessibilityLabel="Export my data"
+          accessibilityState={{ disabled: exporting, busy: exporting }}
+        >
+          {exporting ? (
+            <ActivityIndicator color={theme.backgroundRoot} />
+          ) : (
+            <Text
+              style={[styles.exportButtonText, { color: theme.backgroundRoot }]}
+            >
+              Export my data
+            </Text>
+          )}
+        </Pressable>
+
+        {exportError ? (
+          <Text
+            style={[styles.exportStatusText, { color: theme.textMuted }]}
+            testID="text-export-error"
+          >
+            {exportError}
+          </Text>
+        ) : exportStatus ? (
+          <Text
+            style={[styles.exportStatusText, { color: theme.textMuted }]}
+            testID="text-export-status"
+          >
+            {exportStatus}
+          </Text>
+        ) : (
+          <Text style={[styles.exportStatusText, { color: theme.textMuted }]}>
+            You can request a fresh archive every 5 minutes.
+          </Text>
+        )}
+      </Card>
+
       <PersonalizationDialog
         visible={showPersonalization}
         initial={preferences}
@@ -2429,6 +2598,29 @@ const styles = StyleSheet.create({
   conversationsCard: {
     marginTop: Spacing.lg,
     paddingVertical: Spacing.xl,
+  },
+  exportCard: {
+    marginTop: Spacing.lg,
+    paddingVertical: Spacing.xl,
+  },
+  exportButton: {
+    marginTop: Spacing.md,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.lg,
+    borderRadius: BorderRadius.full,
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 48,
+  },
+  exportButtonText: {
+    ...Typography.body,
+    fontFamily: fontForWeight("600"),
+  },
+  exportStatusText: {
+    ...Typography.small,
+    fontFamily: fontForWeight("400"),
+    marginTop: Spacing.sm,
+    textAlign: "center",
   },
   savedMomentsCard: {
     marginTop: Spacing.lg,
