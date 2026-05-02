@@ -12,6 +12,7 @@ export const users = pgTable("users", {
   displayName: text("display_name"),
   intents: text("intents").array(),
   tone: text("tone"),
+  voice: text("voice"),
   onboardingCompletedAt: timestamp("onboarding_completed_at"),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
@@ -26,6 +27,12 @@ export type User = typeof users.$inferSelect;
 
 export const TONE_OPTIONS = ["warm", "soft", "grounded"] as const;
 export type Tone = (typeof TONE_OPTIONS)[number];
+
+// Curated subset of OpenAI gpt-audio voices Solence is allowed to use.
+// "nova" is the implicit default when a user hasn't picked one yet.
+export const VOICE_OPTIONS = ["nova", "shimmer", "onyx", "alloy"] as const;
+export type Voice = (typeof VOICE_OPTIONS)[number];
+export const DEFAULT_VOICE: Voice = "nova";
 
 export const INTENT_OPTIONS = [
   "process_emotions",
@@ -52,6 +59,7 @@ export const updatePreferencesSchema = z.object({
     .nullable()
     .optional(),
   tone: z.enum(TONE_OPTIONS).nullable().optional(),
+  voice: z.enum(VOICE_OPTIONS).nullable().optional(),
   markOnboardingComplete: z.boolean().optional(),
 });
 
@@ -61,6 +69,7 @@ export type UserPreferences = {
   displayName: string | null;
   intents: Intent[];
   tone: Tone | null;
+  voice: Voice | null;
   onboardingCompletedAt: string | null;
 };
 

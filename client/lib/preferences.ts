@@ -1,4 +1,12 @@
-import { INTENT_OPTIONS, TONE_OPTIONS, type Intent, type Tone } from "@shared/schema";
+import {
+  DEFAULT_VOICE,
+  INTENT_OPTIONS,
+  TONE_OPTIONS,
+  VOICE_OPTIONS,
+  type Intent,
+  type Tone,
+  type Voice,
+} from "@shared/schema";
 
 export const INTENT_LABELS: Record<Intent, string> = {
   process_emotions: "Process emotions",
@@ -25,11 +33,31 @@ export const TONE_DESCRIPTIONS: Record<Tone, string> = {
 
 export const INTENTS: readonly Intent[] = INTENT_OPTIONS;
 export const TONES: readonly Tone[] = TONE_OPTIONS;
+export const VOICES: readonly Voice[] = VOICE_OPTIONS;
+export { DEFAULT_VOICE };
+
+// Short, user-facing label paired with a one-word vibe tag (per task brief
+// e.g. "Warm — Nova"). The tag is the human descriptor; the proper noun is
+// OpenAI's voice id we send to the API.
+export const VOICE_LABELS: Record<Voice, string> = {
+  nova: "Warm — Nova",
+  shimmer: "Soft — Shimmer",
+  onyx: "Grounded — Onyx",
+  alloy: "Bright — Alloy",
+};
+
+export const VOICE_DESCRIPTIONS: Record<Voice, string> = {
+  nova: "Friendly and bright. The default Solence voice.",
+  shimmer: "Gentle and airy, with lots of breathing room.",
+  onyx: "Lower and steadier — feels grounded and calm.",
+  alloy: "Crisp and lively, with a touch more energy.",
+};
 
 export type ClientPreferences = {
   displayName: string | null;
   intents: Intent[];
   tone: Tone | null;
+  voice: Voice | null;
   onboardingCompletedAt: string | null;
 };
 
@@ -37,5 +65,6 @@ export const EMPTY_PREFERENCES: ClientPreferences = {
   displayName: null,
   intents: [],
   tone: null,
+  voice: null,
   onboardingCompletedAt: null,
 };

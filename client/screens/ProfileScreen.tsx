@@ -1,12 +1,15 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
   View,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useAudioPlayer, setAudioModeAsync } from "expo-audio";
+import * as FileSystem from "expo-file-system/legacy";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useHeaderHeight } from "@react-navigation/elements";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
@@ -30,12 +33,16 @@ import {
 import { getApiUrl } from "@/lib/query-client";
 import { displayConversationTitle } from "@/lib/conversation-title";
 import {
+  DEFAULT_VOICE,
   EMPTY_PREFERENCES,
   INTENT_LABELS,
   TONE_LABELS,
+  VOICES,
+  VOICE_DESCRIPTIONS,
+  VOICE_LABELS,
   type ClientPreferences,
 } from "@/lib/preferences";
-import type { Intent, Tone } from "@shared/schema";
+import type { Intent, Tone, Voice } from "@shared/schema";
 import type { RootStackParamList } from "@/navigation/RootStackNavigator";
 
 const STORAGE_KEY_AUTH_TOKEN = "solence_auth_token";
@@ -70,6 +77,37 @@ type ConversationListItem = {
 type ConversationsResponse = {
   conversations: ConversationListItem[];
 };
+
+// Cache the most recent preview blob URL on web so we can revoke it before
+// creating a new one — otherwise we leak object URLs every time the user
+// previews a different voice.
+let voicePreviewBlobUrl: string | null = null;
+
+async function savePreviewAudio(base64: string): Promise<string> {
+  if (Platform.OS === "web") {
+    if (voicePreviewBlobUrl) {
+      try {
+        URL.revokeObjectURL(voicePreviewBlobUrl);
+      } catch {
+        // ignore revoke errors
+      }
+    }
+    const byteChars = atob(base64);
+    const bytes = new Uint8Array(byteChars.length);
+    for (let i = 0; i < byteChars.length; i++) {
+      bytes[i] = byteChars.charCodeAt(i);
+    }
+    const blob = new Blob([bytes], { type: "audio/mp3" });
+    voicePreviewBlobUrl = URL.createObjectURL(blob);
+    return voicePreviewBlobUrl;
+  }
+  const fileUri =
+    FileSystem.cacheDirectory + `solence_voice_preview_${Date.now()}.mp3`;
+  await FileSystem.writeAsStringAsync(fileUri, base64, {
+    encoding: FileSystem.EncodingType.Base64,
+  });
+  return fileUri;
+}
 
 function formatTokens(value: number): string {
   if (value >= 10000) return `${(value / 1000).toFixed(0)}k`;
@@ -147,6 +185,16 @@ export default function ProfileScreen() {
     string | null
   >(null);
 
+  // "Solence's voice" picker state. Selection saves immediately on tap;
+  // preview hits a separate rate-limited endpoint and plays via expo-audio.
+  const [voiceSaving, setVoiceSaving] = useState<Voice | null>(null);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState<Voice | null>(null);
+  const [previewPlaying, setPreviewPlaying] = useState<Voice | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const previewPlayer = useAudioPlayer("");
+  const previewPlayingRef = useRef<Voice | null>(null);
+
   const loadPreferences = useCallback(async (signal?: AbortSignal) => {
     try {
       setPreferencesLoading(true);
@@ -168,6 +216,7 @@ export default function ProfileScreen() {
         displayName: data.preferences.displayName ?? null,
         intents: data.preferences.intents ?? [],
         tone: data.preferences.tone ?? null,
+        voice: data.preferences.voice ?? null,
         onboardingCompletedAt: data.preferences.onboardingCompletedAt ?? null,
       });
     } catch (e) {
@@ -185,6 +234,163 @@ export default function ProfileScreen() {
     loadPreferences(controller.signal);
     return () => controller.abort();
   }, [loadPreferences]);
+
+  // Track when the preview finishes so we can flip the play indicator off.
+  useEffect(() => {
+    const subscription = previewPlayer.addListener(
+      "playbackStatusUpdate",
+      (status: { didJustFinish?: boolean }) => {
+        if (status.didJustFinish) {
+          previewPlayingRef.current = null;
+          setPreviewPlaying(null);
+        }
+      },
+    );
+    return () => {
+      subscription.remove();
+    };
+  }, [previewPlayer]);
+
+  // Pause any in-flight preview when this screen unmounts so audio doesn't
+  // keep playing in the background. On web, also revoke the cached blob URL
+  // so we don't leak object URLs across screen lifetimes.
+  useEffect(() => {
+    return () => {
+      try {
+        previewPlayer.pause();
+      } catch {
+        // player may already be torn down
+      }
+      if (Platform.OS === "web" && voicePreviewBlobUrl) {
+        try {
+          URL.revokeObjectURL(voicePreviewBlobUrl);
+        } catch {
+          // ignore revoke errors
+        }
+        voicePreviewBlobUrl = null;
+      }
+    };
+  }, [previewPlayer]);
+
+  const handleSelectVoice = async (next: Voice) => {
+    if (voiceSaving) return;
+    // Don't let a tap race against the initial GET — the in-flight load
+    // could otherwise overwrite the user's choice when it resolves.
+    if (preferencesLoading) return;
+    if ((preferences.voice ?? DEFAULT_VOICE) === next) return;
+    const previous = preferences.voice;
+    // Optimistic update so the row feels instant.
+    setPreferences((p) => ({ ...p, voice: next }));
+    setVoiceSaving(next);
+    setVoiceError(null);
+    try {
+      const token = await AsyncStorage.getItem(STORAGE_KEY_AUTH_TOKEN);
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const apiUrl = getApiUrl();
+      const response = await fetch(`${apiUrl}/api/preferences`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ voice: next }),
+      });
+      if (!response.ok) {
+        let message = `Couldn't save voice (${response.status})`;
+        try {
+          const data = await response.json();
+          if (data && typeof data.error === "string") message = data.error;
+        } catch {
+          // ignore parse failure
+        }
+        throw new Error(message);
+      }
+      const data = (await response.json()) as {
+        preferences: ClientPreferences;
+      };
+      setPreferences((p) => ({
+        ...p,
+        voice: data.preferences.voice ?? next,
+      }));
+    } catch (e) {
+      // Roll back optimistic change so the UI matches what the server has.
+      setPreferences((p) => ({ ...p, voice: previous }));
+      setVoiceError(
+        e instanceof Error ? e.message : "Could not save voice choice",
+      );
+    } finally {
+      setVoiceSaving(null);
+    }
+  };
+
+  const handlePreviewVoice = async (voice: Voice) => {
+    if (previewLoading) return;
+    setPreviewError(null);
+    // If the user taps preview on the voice currently playing, treat it as
+    // a stop button.
+    if (previewPlayingRef.current === voice) {
+      try {
+        previewPlayer.pause();
+      } catch {
+        // ignore
+      }
+      previewPlayingRef.current = null;
+      setPreviewPlaying(null);
+      return;
+    }
+    setPreviewLoading(voice);
+    try {
+      const token = await AsyncStorage.getItem(STORAGE_KEY_AUTH_TOKEN);
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const apiUrl = getApiUrl();
+      const response = await fetch(`${apiUrl}/api/voice-preview`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ voice }),
+      });
+      if (!response.ok) {
+        let message = `Preview failed (${response.status})`;
+        try {
+          const data = await response.json();
+          if (data && typeof data.error === "string") message = data.error;
+        } catch {
+          // ignore
+        }
+        throw new Error(message);
+      }
+      const data = (await response.json()) as {
+        audioBase64: string;
+        audioFormat: string;
+      };
+      if (!data.audioBase64) {
+        throw new Error("No audio returned");
+      }
+      const uri = await savePreviewAudio(data.audioBase64);
+      // Best-effort audio routing — same pattern SolenceScreen uses for
+      // playback. Failure here is non-fatal; we still try to play.
+      try {
+        await setAudioModeAsync({
+          playsInSilentMode: true,
+          allowsRecording: false,
+        });
+      } catch {
+        // ignore
+      }
+      previewPlayer.replace(uri);
+      previewPlayer.play();
+      previewPlayingRef.current = voice;
+      setPreviewPlaying(voice);
+    } catch (e) {
+      setPreviewError(
+        e instanceof Error ? e.message : "Couldn't play that preview",
+      );
+    } finally {
+      setPreviewLoading(null);
+    }
+  };
 
   const openPersonalization = () => {
     setPersonalizationError(null);
@@ -234,14 +440,17 @@ export default function ProfileScreen() {
       const data = (await response.json()) as {
         preferences: ClientPreferences;
       };
-      setPreferences({
+      setPreferences((prev) => ({
         displayName: data.preferences.displayName ?? null,
         intents: data.preferences.intents ?? [],
         tone: data.preferences.tone ?? null,
+        // Personalization PATCH doesn't touch voice — preserve whatever the
+        // user already had selected so the voice picker UI stays in sync.
+        voice: data.preferences.voice ?? prev.voice ?? null,
         onboardingCompletedAt:
           data.preferences.onboardingCompletedAt ??
-          preferences.onboardingCompletedAt,
-      });
+          prev.onboardingCompletedAt,
+      }));
       setShowPersonalization(false);
     } catch (e) {
       const message =
@@ -638,6 +847,158 @@ export default function ProfileScreen() {
         )}
       </Card>
 
+      <Card elevation={1} style={styles.voiceCard}>
+        <ThemedText type="h4" style={styles.cardTitle}>
+          Solence&rsquo;s voice
+        </ThemedText>
+        <ThemedText
+          type="small"
+          style={[styles.cardDescription, { color: theme.textMuted }]}
+        >
+          Pick the voice Solence speaks with. Tap Preview to hear a short sample.
+        </ThemedText>
+
+        {voiceError ? (
+          <Text
+            style={[styles.voiceErrorText, { color: theme.textMuted }]}
+            testID="profile-voice-save-error"
+          >
+            {voiceError}
+          </Text>
+        ) : null}
+        {previewError ? (
+          <Text
+            style={[styles.voiceErrorText, { color: theme.textMuted }]}
+            testID="profile-voice-preview-error"
+          >
+            {previewError}
+          </Text>
+        ) : null}
+
+        <View style={styles.voiceList} testID="profile-voice-list">
+          {VOICES.map((voice) => {
+            const isSelected =
+              (preferences.voice ?? DEFAULT_VOICE) === voice;
+            const isSaving = voiceSaving === voice;
+            const isLoadingPreview = previewLoading === voice;
+            const isPlaying = previewPlaying === voice;
+            return (
+              <View
+                key={voice}
+                style={[
+                  styles.voiceRow,
+                  {
+                    backgroundColor: isSelected
+                      ? theme.backgroundSecondary
+                      : "transparent",
+                    borderColor: isSelected
+                      ? theme.orbPrimary
+                      : theme.backgroundSecondary,
+                  },
+                ]}
+                testID={`profile-voice-row-${voice}`}
+              >
+                <Pressable
+                  onPress={() => handleSelectVoice(voice)}
+                  disabled={isSaving || preferencesLoading}
+                  style={({ pressed }) => [
+                    styles.voiceRowMain,
+                    pressed && { opacity: 0.6 },
+                  ]}
+                  testID={`profile-voice-select-${voice}`}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected: isSelected }}
+                  accessibilityLabel={`Select voice ${VOICE_LABELS[voice]}`}
+                >
+                  <View style={styles.voiceRowText}>
+                    <Text
+                      style={[styles.voiceRowTitle, { color: theme.text }]}
+                      testID={`profile-voice-label-${voice}`}
+                    >
+                      {VOICE_LABELS[voice]}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.voiceRowDescription,
+                        { color: theme.textMuted },
+                      ]}
+                    >
+                      {VOICE_DESCRIPTIONS[voice]}
+                    </Text>
+                  </View>
+                  <View
+                    style={[
+                      styles.voiceRadio,
+                      {
+                        borderColor: isSelected
+                          ? theme.orbPrimary
+                          : theme.textMuted,
+                      },
+                    ]}
+                  >
+                    {isSaving ? (
+                      <ActivityIndicator
+                        size="small"
+                        color={theme.orbPrimary}
+                      />
+                    ) : isSelected ? (
+                      <View
+                        style={[
+                          styles.voiceRadioDot,
+                          { backgroundColor: theme.orbPrimary },
+                        ]}
+                        testID={`profile-voice-selected-${voice}`}
+                      />
+                    ) : null}
+                  </View>
+                </Pressable>
+                <Pressable
+                  onPress={() => handlePreviewVoice(voice)}
+                  disabled={isLoadingPreview}
+                  style={({ pressed }) => [
+                    styles.voicePreviewButton,
+                    {
+                      borderColor: theme.orbPrimary,
+                      opacity: pressed ? 0.6 : 1,
+                    },
+                  ]}
+                  testID={`profile-voice-preview-${voice}`}
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    isPlaying
+                      ? `Stop preview of ${VOICE_LABELS[voice]}`
+                      : `Preview ${VOICE_LABELS[voice]}`
+                  }
+                >
+                  {isLoadingPreview ? (
+                    <ActivityIndicator
+                      size="small"
+                      color={theme.orbPrimary}
+                    />
+                  ) : (
+                    <>
+                      <Feather
+                        name={isPlaying ? "square" : "play"}
+                        size={12}
+                        color={theme.orbPrimary}
+                      />
+                      <Text
+                        style={[
+                          styles.voicePreviewText,
+                          { color: theme.orbPrimary },
+                        ]}
+                      >
+                        {isPlaying ? "Stop" : "Preview"}
+                      </Text>
+                    </>
+                  )}
+                </Pressable>
+              </View>
+            );
+          })}
+        </View>
+      </Card>
+
       <Card elevation={1} style={styles.historyCard}>
         <ThemedText type="h4" style={styles.cardTitle}>
           Last {HISTORY_DAYS} days
@@ -944,6 +1305,74 @@ const styles = StyleSheet.create({
   historyCard: {
     marginTop: Spacing.lg,
     paddingVertical: Spacing.xl,
+  },
+  voiceCard: {
+    marginTop: Spacing.lg,
+    paddingVertical: Spacing.xl,
+  },
+  voiceList: {
+    gap: Spacing.sm,
+  },
+  voiceRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.md,
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+  },
+  voiceRowMain: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+  },
+  voiceRowText: {
+    flex: 1,
+    gap: 2,
+  },
+  voiceRowTitle: {
+    ...Typography.body,
+    fontFamily: fontForWeight("600"),
+  },
+  voiceRowDescription: {
+    ...Typography.small,
+    fontFamily: fontForWeight("400"),
+  },
+  voiceRadio: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  voiceRadioDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  voicePreviewButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.xs,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs + 2,
+    borderRadius: BorderRadius.full,
+    borderWidth: 1,
+    minWidth: 84,
+    justifyContent: "center",
+  },
+  voicePreviewText: {
+    ...Typography.small,
+    fontFamily: fontForWeight("600"),
+  },
+  voiceErrorText: {
+    ...Typography.small,
+    fontFamily: fontForWeight("400"),
+    marginBottom: Spacing.sm,
+    textAlign: "center",
   },
   conversationsCard: {
     marginTop: Spacing.lg,

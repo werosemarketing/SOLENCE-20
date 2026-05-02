@@ -8,6 +8,13 @@
       "when": 1777731005890,
       "tag": "0000_add_user_preferences",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1777731293958,
+      "tag": "0001_add_voice_preference",
+      "breakpoints": true
     }
   ]
 }

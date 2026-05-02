@@ -3,7 +3,7 @@ import { createServer, type Server } from "node:http";
 import express from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import { openai, detectAudioFormat, speechToText } from "./replit_integrations/audio";
+import { openai, detectAudioFormat, speechToText, textToSpeech } from "./replit_integrations/audio";
 import { db } from "./db";
 import {
   users,
@@ -12,9 +12,12 @@ import {
   FREE_TOKEN_LIMIT,
   TONE_OPTIONS,
   INTENT_OPTIONS,
+  VOICE_OPTIONS,
+  DEFAULT_VOICE,
   updatePreferencesSchema,
   type Tone,
   type Intent,
+  type Voice,
   type UserPreferences,
 } from "@shared/schema";
 import { eq, desc, inArray, and, lt } from "drizzle-orm";
@@ -344,10 +347,19 @@ function requireAuth(req: Request, res: Response, next: NextFunction): void {
 type UserRow = typeof users.$inferSelect;
 
 function serializePreferences(user: UserRow): UserPreferences {
+  // Only surface the saved voice if it's one we still recognize; if a stored
+  // value somehow ends up off the allow-list (rolled-back release, manual DB
+  // edit), report null and let the server-side default kick in.
+  const storedVoice = user.voice ?? null;
+  const voice =
+    storedVoice && (VOICE_OPTIONS as readonly string[]).includes(storedVoice)
+      ? (storedVoice as Voice)
+      : null;
   return {
     displayName: user.displayName ?? null,
     intents: (user.intents ?? []) as Intent[],
     tone: (user.tone ?? null) as Tone | null,
+    voice,
     onboardingCompletedAt: user.onboardingCompletedAt
       ? user.onboardingCompletedAt.toISOString()
       : null,
@@ -675,6 +687,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if ("tone" in parsed.data) {
           updates.tone = parsed.data.tone ?? null;
         }
+        if ("voice" in parsed.data) {
+          updates.voice = parsed.data.voice ?? null;
+        }
         if (parsed.data.markOnboardingComplete) {
           updates.onboardingCompletedAt = new Date();
         }
@@ -705,6 +720,68 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } catch (error) {
         console.error("Update preferences error:", error);
         res.status(500).json({ error: "Failed to save preferences" });
+      }
+    },
+  );
+
+  // Lightweight per-user rate limiter for the voice preview endpoint so it
+  // can't be abused as a free TTS service. Keeps a sliding 60-second window
+  // of timestamps per user and enforces VOICE_PREVIEW_LIMIT calls per window.
+  const VOICE_PREVIEW_WINDOW_MS = 60_000;
+  const VOICE_PREVIEW_LIMIT = 10;
+  const voicePreviewHits = new Map<string, number[]>();
+  const VOICE_PREVIEW_LINE =
+    "Hi, I'm Solence. I'm here whenever you need me.";
+
+  app.post(
+    "/api/voice-preview",
+    requireAuth,
+    async (req: Request, res: Response) => {
+      try {
+        const userId = req.user!.userId;
+        const requestedRaw =
+          typeof req.body?.voice === "string" ? req.body.voice : "";
+        if (!(VOICE_OPTIONS as readonly string[]).includes(requestedRaw)) {
+          return res
+            .status(400)
+            .json({ error: "Unsupported voice option" });
+        }
+        const voice = requestedRaw as Voice;
+
+        const now = Date.now();
+        const recent = (voicePreviewHits.get(userId) ?? []).filter(
+          (t) => now - t < VOICE_PREVIEW_WINDOW_MS,
+        );
+        if (recent.length >= VOICE_PREVIEW_LIMIT) {
+          const oldest = recent[0];
+          const retryAfterSec = Math.max(
+            1,
+            Math.ceil((VOICE_PREVIEW_WINDOW_MS - (now - oldest)) / 1000),
+          );
+          res.setHeader("Retry-After", String(retryAfterSec));
+          return res.status(429).json({
+            error: "Too many voice previews. Try again in a moment.",
+            retryAfterSec,
+          });
+        }
+        recent.push(now);
+        voicePreviewHits.set(userId, recent);
+
+        const audioBuffer = await textToSpeech(
+          VOICE_PREVIEW_LINE,
+          voice,
+          "mp3",
+        );
+        res.json({
+          voice,
+          audioBase64: audioBuffer.toString("base64"),
+          audioFormat: "mp3",
+        });
+      } catch (error) {
+        console.error("Voice preview error:", error);
+        res
+          .status(500)
+          .json({ error: "Could not generate voice preview" });
       }
     },
   );
@@ -1170,6 +1247,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // saying "I see you signed up to work on X". Best-effort: a missing
       // user row just degrades to no personalization.
       let personalizationBlock = "";
+      let selectedVoice: Voice = DEFAULT_VOICE;
       try {
         const [userRow] = await db
           .select()
@@ -1177,9 +1255,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .where(eq(users.id, userId))
           .limit(1);
         if (userRow) {
-          personalizationBlock = buildPersonalizationBlock(
-            serializePreferences(userRow),
-          );
+          const prefs = serializePreferences(userRow);
+          personalizationBlock = buildPersonalizationBlock(prefs);
+          if (prefs.voice) selectedVoice = prefs.voice;
         }
       } catch (prefError) {
         console.error(
@@ -1202,7 +1280,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const response = await openai.chat.completions.create({
         model: "gpt-audio",
         modalities: ["text", "audio"],
-        audio: { voice: "nova", format: "mp3" },
+        audio: { voice: selectedVoice, format: "mp3" },
         messages: chatHistory as Parameters<typeof openai.chat.completions.create>[0]["messages"],
       });
 
