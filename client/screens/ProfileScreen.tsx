@@ -78,6 +78,27 @@ type ConversationsResponse = {
   conversations: ConversationListItem[];
 };
 
+type MoodEntry = {
+  id: number;
+  phase: "pre" | "post";
+  score: number;
+  conversationId: number | null;
+  createdAt: string;
+};
+
+type MoodResponse = {
+  days: number;
+  entries: MoodEntry[];
+};
+
+const MOOD_LABELS: Record<number, string> = {
+  1: "rough",
+  2: "low",
+  3: "okay",
+  4: "good",
+  5: "great",
+};
+
 type SavedMoment = {
   id: number;
   messageId: number;

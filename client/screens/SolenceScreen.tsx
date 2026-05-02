@@ -48,6 +48,7 @@ import {
 import { useTheme } from "@/hooks/useTheme";
 import { Spacing, BorderRadius, FontFamily } from "@/constants/theme";
 import { getApiUrl } from "@/lib/query-client";
+import { MoodSheet } from "@/components/MoodSheet";
 import type { RootStackParamList } from "@/navigation/RootStackNavigator";
 import type { MainTabParamList } from "@/navigation/MainTabNavigator";
 
@@ -474,6 +475,32 @@ export default function SolenceScreen({
     payload: string;
   } | null>(null);
 
+  // Mood check-in state. The pre-session sheet pops once per app session
+  // before the user starts a chat — `preMoodPromptedRef` gates that. The
+  // post-session sheet pops on explicit endConversation when at least one
+  // user message was sent — `sessionUserMessageCountRef` gates that.
+  // `pendingPreSessionMood` is the score the user just picked; we attach
+  // it to the next /api/chat/voice call so the system prompt can honor
+  // it on the FIRST exchange, then clear it.
+  const [showPreMoodSheet, setShowPreMoodSheet] = useState(false);
+  const [showPostMoodSheet, setShowPostMoodSheet] = useState(false);
+  const [postMoodConversationId, setPostMoodConversationId] =
+    useState<number | null>(null);
+  const [moodSubmitting, setMoodSubmitting] = useState(false);
+  const [pendingPreSessionMood, setPendingPreSessionMood] = useState<
+    { score: number; label: string } | null
+  >(null);
+  const preMoodPromptedRef = useRef(false);
+  const sessionUserMessageCountRef = useRef(0);
+  // When we intercept handleOrbPress / sendTextToAPI to show the pre-mood
+  // sheet first, we stash the original action here and replay it once the
+  // sheet closes (whether the user picked a mood or skipped).
+  const pendingPostMoodActionRef = useRef<
+    | { kind: "orb" }
+    | { kind: "text"; text: string }
+    | null
+  >(null);
+
   const messageOpacity = useSharedValue(0);
 
   const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
@@ -835,6 +862,7 @@ export default function SolenceScreen({
       if (authToken) {
         headers["Authorization"] = `Bearer ${authToken}`;
       }
+      const moodForRequest = pendingPreSessionMood;
       const response = await fetch(`${apiUrl}/api/chat/voice`, {
         method: "POST",
         headers,
@@ -843,6 +871,7 @@ export default function SolenceScreen({
           ...(activeConversationId != null
             ? { conversationId: activeConversationId }
             : {}),
+          ...(moodForRequest ? { preSessionMood: moodForRequest } : {}),
         }),
       });
 
@@ -872,6 +901,17 @@ export default function SolenceScreen({
 
       const data = await response.json();
       updateTokensFromResponse(data);
+      // Adopt the conversationId echoed back by the server. On the very
+      // first turn this is what gives the client a handle on the brand-
+      // new conversation row (so endConversation can attach a post-mood
+      // entry to it). For follow-up turns it's a no-op.
+      if (typeof data.conversationId === "number" && activeConversationId == null) {
+        setActiveConversationId(data.conversationId);
+      }
+      // The pre-session mood hint only fires on the FIRST exchange — burn
+      // the stash so it doesn't accidentally re-inject on later turns.
+      if (moodForRequest) setPendingPreSessionMood(null);
+      sessionUserMessageCountRef.current += 1;
       setCurrentMessage(data.text);
       setLastVoiceError(null);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -919,6 +959,7 @@ export default function SolenceScreen({
       if (authToken) {
         textHeaders["Authorization"] = `Bearer ${authToken}`;
       }
+      const moodForRequest = pendingPreSessionMood;
       const response = await fetch(`${apiUrl}/api/chat/voice`, {
         method: "POST",
         headers: textHeaders,
@@ -927,6 +968,7 @@ export default function SolenceScreen({
           ...(activeConversationId != null
             ? { conversationId: activeConversationId }
             : {}),
+          ...(moodForRequest ? { preSessionMood: moodForRequest } : {}),
         }),
       });
 
@@ -943,6 +985,11 @@ export default function SolenceScreen({
 
       const data = await response.json();
       updateTokensFromResponse(data);
+      if (typeof data.conversationId === "number" && activeConversationId == null) {
+        setActiveConversationId(data.conversationId);
+      }
+      if (moodForRequest) setPendingPreSessionMood(null);
+      sessionUserMessageCountRef.current += 1;
       setCurrentMessage(data.text);
       setLastVoiceError(null);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -1037,11 +1084,17 @@ export default function SolenceScreen({
     const trimmed = textInputValue.trim();
     if (!trimmed) return;
     setTextInputValue("");
+    // The pre-mood sheet runs at most once per app session and is only
+    // relevant to "first turn" of a brand-new conversation. We
+    // intentionally gate after we've cleared the input field so it
+    // doesn't reappear if the user dismisses the sheet.
+    if (maybePromptPreMood({ kind: "text", text: trimmed })) return;
     sendTextToAPI(trimmed);
   };
 
   const handleOrbPress = () => {
     if (voiceState === "idle") {
+      if (maybePromptPreMood({ kind: "orb" })) return;
       setShowStarters(false);
       setIsConversationActive(true);
       shouldContinueListeningRef.current = true;
@@ -1063,7 +1116,105 @@ export default function SolenceScreen({
     }
   };
 
+  // Returns true if we intercepted the action to show the pre-mood sheet.
+  // The action is replayed by handlePreMoodSheetClosed once the sheet is
+  // dismissed (whether the user picked a mood or skipped).
+  const maybePromptPreMood = (
+    action: { kind: "orb" } | { kind: "text"; text: string },
+  ) => {
+    if (preMoodPromptedRef.current) return false;
+    preMoodPromptedRef.current = true;
+    pendingPostMoodActionRef.current = action;
+    setShowPreMoodSheet(true);
+    Haptics.selectionAsync().catch(() => {});
+    return true;
+  };
+
+  const replayPendingAction = () => {
+    const action = pendingPostMoodActionRef.current;
+    pendingPostMoodActionRef.current = null;
+    if (!action) return;
+    if (action.kind === "orb") {
+      setShowStarters(false);
+      setIsConversationActive(true);
+      shouldContinueListeningRef.current = true;
+      startRecording();
+    } else {
+      sendTextToAPI(action.text);
+    }
+  };
+
+  // Best-effort POST to /api/mood. We never block the UI on a network
+  // failure — a missed mood entry is not worth interrupting the user
+  // about. Errors are swallowed and logged.
+  const postMoodEntry = async (
+    phase: "pre" | "post",
+    score: number,
+    conversationId: number | null,
+  ) => {
+    try {
+      const apiUrl = getApiUrl();
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
+      await fetch(`${apiUrl}/api/mood`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          phase,
+          score,
+          ...(conversationId != null ? { conversationId } : {}),
+        }),
+      });
+    } catch (err) {
+      console.log("Mood POST failed:", err instanceof Error ? err.message : err);
+    }
+  };
+
+  const handlePreMoodSelect = async (score: number, label: string) => {
+    setMoodSubmitting(true);
+    setPendingPreSessionMood({ score, label });
+    await postMoodEntry("pre", score, null);
+    setMoodSubmitting(false);
+    setShowPreMoodSheet(false);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
+      () => {},
+    );
+    replayPendingAction();
+  };
+
+  const handlePreMoodSkip = () => {
+    setShowPreMoodSheet(false);
+    replayPendingAction();
+  };
+
+  const handlePostMoodSelect = async (score: number, label: string) => {
+    void label;
+    setMoodSubmitting(true);
+    await postMoodEntry("post", score, postMoodConversationId);
+    setMoodSubmitting(false);
+    setShowPostMoodSheet(false);
+    setPostMoodConversationId(null);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
+      () => {},
+    );
+  };
+
+  const handlePostMoodSkip = () => {
+    setShowPostMoodSheet(false);
+    setPostMoodConversationId(null);
+  };
+
   const endConversation = () => {
+    // Snapshot the just-ended conversation BEFORE we tear state down — the
+    // post-mood sheet needs to attach to this id, and we only show it
+    // when there was at least one user turn in the session (otherwise
+    // there's nothing to reflect on).
+    const endedConversationId = activeConversationId;
+    const hadInteraction = sessionUserMessageCountRef.current > 0;
+    sessionUserMessageCountRef.current = 0;
+
     setIsConversationActive(false);
     shouldContinueListeningRef.current = false;
     clearAutoStopTimer();
@@ -1087,6 +1238,11 @@ export default function SolenceScreen({
     setActiveConversationId(null);
     setActiveConversationTitle(null);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+    if (hadInteraction && endedConversationId != null) {
+      setPostMoodConversationId(endedConversationId);
+      setShowPostMoodSheet(true);
+    }
   };
 
   // Dismissing the resumed-conversation pill clears the override but leaves
@@ -1572,6 +1728,21 @@ export default function SolenceScreen({
           </Animated.View>
         </Pressable>
       ) : null}
+
+      <MoodSheet
+        visible={showPreMoodSheet}
+        variant="pre"
+        submitting={moodSubmitting}
+        onSelect={handlePreMoodSelect}
+        onSkip={handlePreMoodSkip}
+      />
+      <MoodSheet
+        visible={showPostMoodSheet}
+        variant="post"
+        submitting={moodSubmitting}
+        onSelect={handlePostMoodSelect}
+        onSkip={handlePostMoodSkip}
+      />
     </View>
   );
 }
