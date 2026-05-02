@@ -50,6 +50,11 @@ import { Spacing, BorderRadius, FontFamily } from "@/constants/theme";
 import { getApiUrl } from "@/lib/query-client";
 import { CrisisBanner } from "@/components/CrisisBanner";
 import { MoodSheet } from "@/components/MoodSheet";
+import {
+  containsCrisisLanguage,
+  maybeRequestReview,
+  recordSessionDay,
+} from "@/lib/rating";
 import type { RootStackParamList } from "@/navigation/RootStackNavigator";
 import type { MainTabParamList } from "@/navigation/MainTabNavigator";
 
@@ -508,6 +513,14 @@ export default function SolenceScreen({
   >(null);
   const preMoodPromptedRef = useRef(false);
   const sessionUserMessageCountRef = useRef(0);
+  // Wall-clock timestamp of the first user turn in the current session,
+  // used by the App-Store-rating gate (we want sessions that lasted at
+  // least a couple minutes, not blink-and-it's-over taps).
+  const sessionStartedAtRef = useRef<number | null>(null);
+  // Set to true the moment we detect crisis language in user input during
+  // this session — we then suppress the rating prompt entirely for this
+  // conversation, regardless of how long or how chatty it was.
+  const sessionHadCrisisRef = useRef(false);
   // When we intercept handleOrbPress / sendTextToAPI to show the pre-mood
   // sheet first, we stash the original action here and replay it once the
   // sheet closes (whether the user picked a mood or skipped).
@@ -898,8 +911,12 @@ export default function SolenceScreen({
   // Surface the crisis support banner if the server flagged the latest
   // turn AND the user hasn't already dismissed the banner for this app
   // session. Idempotent — safe to call from every API success path.
+  // Also latches `sessionHadCrisisRef` so the App-Store rating prompt
+  // is suppressed for the rest of this session — covers voice turns
+  // and any server-only crisis detections the client text scan misses.
   const maybeShowCrisisBanner = (data: { crisisSupport?: boolean } | null) => {
     if (!data || data.crisisSupport !== true) return;
+    sessionHadCrisisRef.current = true;
     if (crisisBannerDismissedRef.current) return;
     setCrisisBannerVisible(true);
   };
@@ -975,7 +992,9 @@ export default function SolenceScreen({
       // The pre-session mood hint only fires on the FIRST exchange — burn
       // the stash so it doesn't accidentally re-inject on later turns.
       if (moodForRequest) setPendingPreSessionMood(null);
-      sessionUserMessageCountRef.current += 1;
+      // Voice path: we don't have the user's transcribed text on the client,
+      // so we can't crisis-scan it here. The bookkeeping still runs.
+      noteUserTurn(null);
       setCurrentMessage(data.text);
       setLastVoiceError(null);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -1054,7 +1073,9 @@ export default function SolenceScreen({
       }
       maybeShowCrisisBanner(data);
       if (moodForRequest) setPendingPreSessionMood(null);
-      sessionUserMessageCountRef.current += 1;
+      // Text path: scan the user's typed message for crisis language so we
+      // can suppress the rating prompt for this session.
+      noteUserTurn(text);
       setCurrentMessage(data.text);
       setLastVoiceError(null);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -1136,7 +1157,9 @@ export default function SolenceScreen({
       }
       maybeShowCrisisBanner(data);
       if (moodForRequest) setPendingPreSessionMood(null);
-      sessionUserMessageCountRef.current += 1;
+      // Audio retry path: same caveat as the primary voice path — the
+      // transcript isn't available client-side for crisis scanning.
+      noteUserTurn(null);
       setCurrentMessage(data.text);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       if (data.audioBase64) {
@@ -1192,6 +1215,22 @@ export default function SolenceScreen({
       setIsConversationActive(true);
       shouldContinueListeningRef.current = true;
       startRecording();
+    }
+  };
+
+  // Centralizes the bookkeeping every successful user turn needs to do: bump
+  // the session counter, stamp the session start on the FIRST turn, and
+  // mark today as a session day for the App-Store-rating multi-day gate.
+  // Also opportunistically scans typed user input for crisis keywords so we
+  // can suppress the rating prompt for the rest of this session.
+  const noteUserTurn = (userTextIfKnown?: string | null) => {
+    if (sessionUserMessageCountRef.current === 0) {
+      sessionStartedAtRef.current = Date.now();
+      void recordSessionDay();
+    }
+    sessionUserMessageCountRef.current += 1;
+    if (userTextIfKnown && containsCrisisLanguage(userTextIfKnown)) {
+      sessionHadCrisisRef.current = true;
     }
   };
 
@@ -1313,7 +1352,14 @@ export default function SolenceScreen({
     // there's nothing to reflect on).
     const endedConversationId = activeConversationId;
     const hadInteraction = sessionUserMessageCountRef.current > 0;
+    const messageCountForReview = sessionUserMessageCountRef.current;
+    const sessionStartedAt = sessionStartedAtRef.current;
+    const sessionDurationMs =
+      sessionStartedAt != null ? Date.now() - sessionStartedAt : 0;
+    const sessionHadCrisis = sessionHadCrisisRef.current;
     sessionUserMessageCountRef.current = 0;
+    sessionStartedAtRef.current = null;
+    sessionHadCrisisRef.current = false;
 
     setIsConversationActive(false);
     shouldContinueListeningRef.current = false;
@@ -1351,6 +1397,16 @@ export default function SolenceScreen({
       // session will retry implicitly because the columns are still NULL.
       void requestReflectionForConversation(endedConversationId);
     }
+
+    // Best-effort App Store rating prompt. The library handles all the gates
+    // (min messages, min duration, multi-day usage, 4-month cooldown, no-op
+    // on web / unsupported devices). Fire-and-forget: any failure is
+    // swallowed so the user never sees an error from a courtesy prompt.
+    void maybeRequestReview({
+      messageCount: messageCountForReview,
+      sessionDurationMs,
+      hadCrisis: sessionHadCrisis,
+    });
   };
 
   // Dismissing the resumed-conversation pill clears the override but leaves
