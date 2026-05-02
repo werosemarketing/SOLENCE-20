@@ -83,7 +83,13 @@ import {
   scheduleDailyReminder,
   scheduleWeeklySummary,
 } from "@/lib/notifications";
-import type { Intent, Language, Tone, Voice } from "@shared/schema";
+import {
+  USER_MEMORY_TEXT_MAX_LEN,
+  type Intent,
+  type Language,
+  type Tone,
+  type Voice,
+} from "@shared/schema";
 import type { RootStackParamList } from "@/navigation/RootStackNavigator";
 
 const REMINDER_TIME_OPTIONS = [
@@ -426,6 +432,14 @@ export default function ProfileScreen() {
   const [showClearMemoriesConfirm, setShowClearMemoriesConfirm] =
     useState(false);
   const [clearMemoriesSubmitting, setClearMemoriesSubmitting] = useState(false);
+  // In-place edit state for individual memories. The dialog opens when
+  // `pendingEditMemory` is non-null; submitting calls PATCH /api/memories/:id
+  // and replaces the row in state with the server-clamped text on success.
+  const [pendingEditMemory, setPendingEditMemory] = useState<Memory | null>(
+    null,
+  );
+  const [editMemorySubmitting, setEditMemorySubmitting] = useState(false);
+  const [editMemoryError, setEditMemoryError] = useState<string | null>(null);
 
   // "Invite a friend" card state. Lazily loaded — failures degrade the
   // card to a quiet error message instead of blocking the rest of
@@ -1566,6 +1580,88 @@ export default function ProfileScreen() {
       }
     },
     [memories, memoryRemovingId],
+  );
+
+  const requestEditMemory = useCallback((memory: Memory) => {
+    setEditMemoryError(null);
+    setMemoryActionError(null);
+    setPendingEditMemory(memory);
+  }, []);
+
+  const cancelEditMemory = useCallback(() => {
+    if (editMemorySubmitting) return;
+    setPendingEditMemory(null);
+    setEditMemoryError(null);
+  }, [editMemorySubmitting]);
+
+  const confirmEditMemory = useCallback(
+    async (nextText: string) => {
+      if (!pendingEditMemory || editMemorySubmitting) return;
+      const target = pendingEditMemory;
+      const trimmed = nextText.trim();
+      if (trimmed.length === 0) {
+        setEditMemoryError(t("profile.memories.editDialog.errorEmpty"));
+        return;
+      }
+      if (trimmed === target.text) {
+        setPendingEditMemory(null);
+        setEditMemoryError(null);
+        return;
+      }
+      try {
+        setEditMemorySubmitting(true);
+        setEditMemoryError(null);
+        const token = await AsyncStorage.getItem(STORAGE_KEY_AUTH_TOKEN);
+        const headers: Record<string, string> = {
+          "Content-Type": "application/json",
+        };
+        if (token) headers["Authorization"] = `Bearer ${token}`;
+        const apiUrl = getApiUrl();
+        const response = await fetch(
+          `${apiUrl}/api/memories/${target.id}`,
+          {
+            method: "PATCH",
+            headers,
+            body: JSON.stringify({ text: trimmed }),
+          },
+        );
+        if (!response.ok) {
+          let serverMessage: string | null = null;
+          try {
+            const data = await response.json();
+            if (data && typeof data.error === "string") {
+              serverMessage = data.error;
+            }
+          } catch {
+            // ignore body parse errors
+          }
+          throw new Error(
+            serverMessage ?? t("profile.memories.editDialog.errorGeneric"),
+          );
+        }
+        const payload = (await response.json()) as { memory?: Memory };
+        // Use the server's clamped/cleaned text so the UI mirrors what
+        // will actually feed back into future system prompts.
+        const updatedText = payload.memory?.text ?? trimmed;
+        setMemories((current) =>
+          current
+            ? current.map((m) =>
+                m.id === target.id ? { ...m, text: updatedText } : m,
+              )
+            : current,
+        );
+        setPendingEditMemory(null);
+      } catch (e) {
+        setEditMemoryError(
+          e instanceof Error
+            ? e.message
+            : t("profile.memories.editDialog.errorGeneric"),
+        );
+      } finally {
+        setEditMemorySubmitting(false);
+      }
+    },
+    [pendingEditMemory, editMemorySubmitting, t],
   );
 
   const handleConfirmClearMemories = useCallback(async () => {
@@ -3455,6 +3551,26 @@ export default function ProfileScreen() {
                     ) : null}
                   </View>
                   <Pressable
+                    onPress={() => requestEditMemory(memory)}
+                    disabled={isRemoving}
+                    hitSlop={8}
+                    style={({ pressed }) => [
+                      styles.conversationActionButton,
+                      { backgroundColor: theme.backgroundSecondary },
+                      pressed && { opacity: 0.6 },
+                      isRemoving && { opacity: 0.5 },
+                    ]}
+                    testID={`profile-memory-edit-${memory.id}`}
+                    accessibilityRole="button"
+                    accessibilityLabel={t("profile.memories.editA11y")}
+                  >
+                    <Feather
+                      name="edit-2"
+                      size={16}
+                      color={theme.textMuted}
+                    />
+                  </Pressable>
+                  <Pressable
                     onPress={() => handleDeleteMemory(memory)}
                     disabled={isRemoving}
                     hitSlop={8}
@@ -4228,6 +4344,21 @@ export default function ProfileScreen() {
         onConfirm={confirmDeleteConversation}
         onCancel={cancelDeleteConversation}
         testID="profile-delete-confirm"
+      />
+
+      <RenameDialog
+        visible={pendingEditMemory !== null}
+        title={t("profile.memories.editDialog.title")}
+        description={t("profile.memories.editDialog.description")}
+        initialValue={pendingEditMemory?.text ?? ""}
+        placeholder={t("profile.memories.editDialog.placeholder")}
+        confirmLabel={t("profile.memories.editDialog.confirm")}
+        maxLength={USER_MEMORY_TEXT_MAX_LEN}
+        loading={editMemorySubmitting}
+        errorMessage={editMemoryError}
+        onConfirm={confirmEditMemory}
+        onCancel={cancelEditMemory}
+        testID="profile-memory-edit-dialog"
       />
 
       <ConfirmDialog

@@ -2450,6 +2450,57 @@ export async function registerRoutes(app: Express): Promise<Server> {
     },
   );
 
+  // Edit a single memory's text in place. Mirrors the DELETE handler's
+  // ownership check (the WHERE clause restricts to the caller's rows so
+  // a guessed id can't reach another user's memory) and reuses the same
+  // clamp the reflection generator runs on freshly-extracted memories,
+  // so a user-edited memory never grows past the prompt-side budget.
+  app.patch(
+    "/api/memories/:id",
+    requireAuth,
+    async (req: Request, res: Response) => {
+      try {
+        const userId = req.user!.userId;
+        const parsed = Number(req.params.id);
+        if (!Number.isFinite(parsed) || parsed <= 0) {
+          return res.status(400).json({ error: "Invalid memory id" });
+        }
+        const rawText = (req.body ?? {}).text;
+        if (typeof rawText !== "string") {
+          return res.status(400).json({ error: "Memory text is required" });
+        }
+        const cleaned = clampReflectionLength(rawText, MEMORY_TEXT_MAX_LEN);
+        if (cleaned.length === 0) {
+          return res
+            .status(400)
+            .json({ error: "Memory text cannot be empty" });
+        }
+        const [updated] = await db
+          .update(userMemories)
+          .set({ text: cleaned })
+          .where(
+            and(
+              eq(userMemories.id, parsed),
+              eq(userMemories.userId, userId),
+            ),
+          )
+          .returning({
+            id: userMemories.id,
+            text: userMemories.text,
+            sourceConversationId: userMemories.sourceConversationId,
+            createdAt: userMemories.createdAt,
+          });
+        if (!updated) {
+          return res.status(404).json({ error: "Memory not found" });
+        }
+        res.json({ memory: updated });
+      } catch (error) {
+        console.error("Update memory error:", error);
+        res.status(500).json({ error: "Failed to update memory" });
+      }
+    },
+  );
+
   app.delete(
     "/api/memories",
     requireAuth,

@@ -436,11 +436,20 @@
       "empty": "Nada todavía — Solence empezará a recordar pequeñas cosas a medida que conversen.",
       "fromChatOn": "De una conversación del {{date}}",
       "sourceA11y": "Abrir la conversación del {{date}} donde se aprendió esto",
+      "editA11y": "Editar este recuerdo",
       "removeA11y": "Olvidar este recuerdo",
       "clearAll": "Borrar todos los recuerdos",
       "clearConfirmTitle": "¿Borrar todos los recuerdos?",
       "clearConfirmMessage": "Solence olvidará todo lo que ha anotado sobre ti. Esto no se puede deshacer.",
-      "clearConfirmAction": "Borrar todo"
+      "clearConfirmAction": "Borrar todo",
+      "editDialog": {
+        "title": "Editar recuerdo",
+        "description": "Reescríbelo para que Solence lo recuerde bien.",
+        "placeholder": "Lo que Solence debería recordar",
+        "confirm": "Guardar",
+        "errorEmpty": "El recuerdo no puede estar vacío.",
+        "errorGeneric": "No se pudieron guardar los cambios. ¿Intentar de nuevo?"
+      }
     },
     "reflections": {
       "title": "Reflexiones recientes",

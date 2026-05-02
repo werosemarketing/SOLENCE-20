@@ -436,11 +436,20 @@
       "empty": "Nothing yet — Solence will quietly start remembering little things as you talk.",
       "fromChatOn": "From a chat on {{date}}",
       "sourceA11y": "Open the chat on {{date}} where this was learned",
+      "editA11y": "Edit this memory",
       "removeA11y": "Forget this memory",
       "clearAll": "Clear all memories",
       "clearConfirmTitle": "Clear all memories?",
       "clearConfirmMessage": "Solence will forget everything it has noted about you. This can't be undone.",
-      "clearConfirmAction": "Clear all"
+      "clearConfirmAction": "Clear all",
+      "editDialog": {
+        "title": "Edit memory",
+        "description": "Reword this so Solence remembers it correctly.",
+        "placeholder": "What Solence should remember",
+        "confirm": "Save",
+        "errorEmpty": "Memory can't be empty.",
+        "errorGeneric": "Couldn't save your changes. Try again?"
+      }
     },
     "reflections": {
       "title": "Recent reflections",
