@@ -308,6 +308,86 @@ describe("GET /api/conversations enrichment", () => {
   });
 });
 
+describe("GET /api/conversations reflection backfill", () => {
+  test("generates reflection in background for stale, summary-less conversations", async () => {
+    const userId = await makeUser("backfill");
+    const convId = await makeConversation(userId, "Stale chat");
+    await insertMessage(convId, "user", "I keep replaying yesterday in my head");
+    await insertMessage(
+      convId,
+      "assistant",
+      "What part of yesterday is staying with you?",
+    );
+
+    // Force the messages to look "stale" (older than the 15-minute
+    // inactivity cutoff) so the backfill considers this conversation
+    // ended-by-walking-away.
+    const oldTs = new Date(Date.now() - 60 * 60 * 1000); // 1 hour ago
+    await db
+      .update(messages)
+      .set({ createdAt: oldTs })
+      .where(eq(messages.conversationId, convId));
+
+    mockResponseQueue.push({
+      summary:
+        "You came back to a thought from yesterday and let yourself sit with it. There was care in the way you turned it over rather than pushing it away. By the end you sounded a little less stuck inside it.",
+      takeaway: "Returning to a thought is its own form of tending to it.",
+    });
+
+    const token = signToken(userId);
+    const res = await fetch(`${baseUrl}/api/conversations?limit=10`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    assert.equal(res.status, 200);
+
+    // The backfill is fire-and-forget; poll briefly for the row to
+    // gain a reflection (bounded so a real failure still surfaces).
+    let persisted: typeof conversations.$inferSelect | undefined;
+    for (let i = 0; i < 40; i++) {
+      const [row] = await db
+        .select()
+        .from(conversations)
+        .where(eq(conversations.id, convId))
+        .limit(1);
+      if (row?.reflectionSummary) {
+        persisted = row;
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    assert.ok(persisted, "expected backfill to persist a reflection");
+    assert.match(persisted!.reflectionSummary!, /turned it over/);
+    assert.match(persisted!.reflectionTakeaway!, /Returning to a thought/);
+    assert.ok(persisted!.reflectionGeneratedAt);
+  });
+
+  test("does NOT generate reflection for active (recent) conversations", async () => {
+    const userId = await makeUser("active");
+    const convId = await makeConversation(userId, "Active chat");
+    // Recent messages — well within the inactivity window.
+    await insertMessage(convId, "user", "still typing");
+    await insertMessage(convId, "assistant", "take your time");
+
+    const token = signToken(userId);
+    const res = await fetch(`${baseUrl}/api/conversations?limit=10`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    assert.equal(res.status, 200);
+
+    // Give any fire-and-forget work a moment to misbehave, then verify
+    // the conversation is still summary-less.
+    await new Promise((r) => setTimeout(r, 300));
+    const [row] = await db
+      .select()
+      .from(conversations)
+      .where(eq(conversations.id, convId))
+      .limit(1);
+    assert.equal(row.reflectionSummary, null);
+    assert.equal(row.reflectionTakeaway, null);
+    assert.equal(row.reflectionGeneratedAt, null);
+  });
+});
+
 describe("GET /api/conversations/:id/messages enrichment", () => {
   test("includes reflection fields on the conversation object", async () => {
     const userId = await makeUser("detail");

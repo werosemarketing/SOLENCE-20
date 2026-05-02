@@ -379,6 +379,17 @@ const REFLECTION_TAKEAWAY_MAX_LEN = 160;
 // kick off the same generator concurrently.
 const reflectionInFlight = new Set<number>();
 
+// Conversations whose last message is older than this are considered
+// "ended" (inactivity / app close) and become eligible for background
+// reflection generation, even when the client never explicitly POSTed
+// to /api/conversations/:id/end. Tunable; 15 minutes balances "user
+// has clearly walked away" against "user is mid-thought".
+const REFLECTION_INACTIVITY_MS = 15 * 60 * 1000;
+// How many stale conversations we examine per /api/conversations call.
+const REFLECTION_BACKFILL_SCAN_BATCH_SIZE = 25;
+// How many reflections we fire per scan to bound OpenAI cost per request.
+const REFLECTION_BACKFILLS_PER_REQUEST = 2;
+
 function clampReflectionLength(text: string, max: number): string {
   const cleaned = text.replace(/\s+/g, " ").trim();
   if (cleaned.length <= max) return cleaned;
@@ -574,6 +585,95 @@ async function generateAndPersistReflection(
     return null;
   } finally {
     reflectionInFlight.delete(conversationId);
+  }
+}
+
+// Walk one batch of the user's conversations and fire reflection
+// generation for any "stale" sessions (no reflection yet, last message
+// older than REFLECTION_INACTIVITY_MS, with both user + assistant
+// turns). Designed to be called fire-and-forget AFTER the list response
+// has been sent — never blocks the API, never throws. This covers the
+// inactivity / app-close case where the client never POSTed to /:id/end.
+async function runReflectionBackfillScan(userId: string): Promise<void> {
+  try {
+    let userLanguage: Language = DEFAULT_LANGUAGE;
+    try {
+      const [userRow] = await db
+        .select({ language: users.language })
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1);
+      const stored = userRow?.language ?? null;
+      if (
+        stored &&
+        (LANGUAGE_OPTIONS as readonly string[]).includes(stored)
+      ) {
+        userLanguage = stored as Language;
+      }
+    } catch {
+      // best-effort: fall back to default
+    }
+
+    // Pull a batch of summary-less conversations, newest first. We bound
+    // the scan so a long history doesn't translate into a long DB read.
+    const candidates = await db
+      .select({ id: conversations.id })
+      .from(conversations)
+      .where(
+        and(
+          eq(conversations.userId, userId),
+          isNull(conversations.reflectionSummary),
+        ),
+      )
+      .orderBy(desc(conversations.id))
+      .limit(REFLECTION_BACKFILL_SCAN_BATCH_SIZE);
+
+    if (candidates.length === 0) return;
+
+    const ids = candidates.map((c) => c.id);
+    const recent = await db
+      .select({
+        conversationId: messages.conversationId,
+        role: messages.role,
+        createdAt: messages.createdAt,
+      })
+      .from(messages)
+      .where(inArray(messages.conversationId, ids))
+      .orderBy(desc(messages.createdAt));
+
+    // For each conversation: track the most recent message timestamp +
+    // whether it has at least one user and one assistant message.
+    const lastAtByConv = new Map<number, Date>();
+    const hasUserByConv = new Map<number, boolean>();
+    const hasAssistantByConv = new Map<number, boolean>();
+    for (const m of recent) {
+      if (!lastAtByConv.has(m.conversationId)) {
+        lastAtByConv.set(m.conversationId, m.createdAt);
+      }
+      if (m.role === "user") hasUserByConv.set(m.conversationId, true);
+      else if (m.role === "assistant")
+        hasAssistantByConv.set(m.conversationId, true);
+    }
+
+    const cutoff = Date.now() - REFLECTION_INACTIVITY_MS;
+    let scheduled = 0;
+    for (const c of candidates) {
+      if (scheduled >= REFLECTION_BACKFILLS_PER_REQUEST) break;
+      const lastAt = lastAtByConv.get(c.id);
+      if (!lastAt) continue; // no messages → not eligible
+      if (lastAt.getTime() > cutoff) continue; // still active
+      if (!hasUserByConv.get(c.id) || !hasAssistantByConv.get(c.id)) continue;
+      if (reflectionInFlight.has(c.id)) continue;
+      // Fire-and-forget; generateAndPersistReflection handles its own
+      // dedupe + race-guarded UPDATE.
+      void generateAndPersistReflection(c.id, userLanguage).catch(() => {});
+      scheduled += 1;
+    }
+  } catch (err) {
+    console.error(
+      "Reflection backfill scan failed:",
+      err instanceof Error ? err.message : err,
+    );
   }
 }
 
@@ -1566,6 +1666,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // also get smart titles over time. Internally bounded and
       // error-swallowing — never blocks or fails the list response.
       void runSmartTitleBackfillScan(userId);
+
+      // Fire-and-forget reflection backfill scan. Catches conversations
+      // that "ended" via inactivity or app close (no explicit POST to
+      // /:id/end) — when the user reopens the app and lists their
+      // conversations, any session whose last message is older than the
+      // inactivity cutoff and that has both user + assistant turns gets
+      // a reflection generated in the background. Bounded per request,
+      // error-swallowing, never blocks the response.
+      void runReflectionBackfillScan(userId);
     } catch (error) {
       console.error("Conversations list error:", error);
       res.status(500).json({ error: "Failed to fetch conversations" });
