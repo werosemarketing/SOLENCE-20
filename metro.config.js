@@ -6,7 +6,11 @@ const existingBlockList = config.resolver.blockList || [];
 const additionalBlockList = [
   /\.local\/.*/,
   /\.git\/.*/,
+  /\.cache\/.*/,
 ];
+
+config.watchFolders = [__dirname];
+config.resolver.unstable_enableSymlinks = false;
 
 config.resolver.blockList = Array.isArray(existingBlockList)
   ? [...existingBlockList, ...additionalBlockList]
