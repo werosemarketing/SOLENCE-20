@@ -10,6 +10,7 @@ import {
   View,
 } from "react-native";
 import * as Haptics from "expo-haptics";
+import * as Clipboard from "expo-clipboard";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useHeaderHeight } from "@react-navigation/elements";
@@ -20,6 +21,8 @@ import { Card } from "@/components/Card";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { CrisisBanner } from "@/components/CrisisBanner";
 import { RenameDialog } from "@/components/RenameDialog";
+import { MessageActionSheet } from "@/components/MessageActionSheet";
+import { ShareQuoteModal } from "@/components/ShareQuoteModal";
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
 import {
@@ -107,6 +110,16 @@ export default function ConversationDetailScreen({ route, navigation }: Props) {
   // showing again — the banner is meant to be present for the user, but
   // dismissable when they've acknowledged it.
   const [crisisBannerDismissed, setCrisisBannerDismissed] = useState(false);
+  // Long-press / share state. We track the currently selected message
+  // independently from the modal/sheet visibility so a successful share
+  // can leave the preview mounted long enough for the share sheet to
+  // animate away before we tear down the captured view.
+  const [actionSheetMessage, setActionSheetMessage] = useState<Message | null>(
+    null,
+  );
+  const [shareQuoteMessage, setShareQuoteMessage] = useState<Message | null>(
+    null,
+  );
 
   // Refs for scroll-to-message behavior. The ScrollView ref lets us call
   // scrollTo with the measured y of the target row; the layoutByMessage
@@ -292,6 +305,44 @@ export default function ConversationDetailScreen({ route, navigation }: Props) {
     if (deleteSubmitting) return;
     setConfirmVisible(false);
     setDeleteError(null);
+  };
+
+  const handleOpenActionSheet = (message: Message) => {
+    if (message.role !== "assistant") return;
+    Haptics.selectionAsync().catch(() => {});
+    setActionSheetMessage(message);
+  };
+
+  const handleCloseActionSheet = () => {
+    setActionSheetMessage(null);
+  };
+
+  const handleSelectAction = (action: "save" | "share" | "copy") => {
+    const message = actionSheetMessage;
+    if (!message) return;
+    setActionSheetMessage(null);
+    if (action === "save") {
+      handleToggleFavorite(message);
+    } else if (action === "share") {
+      // Defer opening the share modal a tick so the action sheet's
+      // dismissal animation doesn't visibly overlap the preview modal.
+      setTimeout(() => setShareQuoteMessage(message), 120);
+    } else if (action === "copy") {
+      Clipboard.setStringAsync(message.content)
+        .then(() => {
+          Haptics.notificationAsync(
+            Haptics.NotificationFeedbackType.Success,
+          ).catch(() => {});
+          setFavoriteError("Copied to clipboard.");
+        })
+        .catch(() => {
+          setFavoriteError("Couldn't copy that text.");
+        });
+    }
+  };
+
+  const handleCloseShareQuote = () => {
+    setShareQuoteMessage(null);
   };
 
   const handleToggleFavorite = async (message: Message) => {
@@ -562,8 +613,16 @@ export default function ConversationDetailScreen({ route, navigation }: Props) {
                 ]}
                 testID={`conversation-detail-message-${message.id}`}
               >
-                <View
-                  style={[
+                <Pressable
+                  onLongPress={
+                    !isUser ? () => handleOpenActionSheet(message) : undefined
+                  }
+                  delayLongPress={300}
+                  // Disable the default web "highlight on press" so the
+                  // long-press gesture feels native rather than flashing
+                  // a hover state.
+                  android_disableSound
+                  style={({ pressed }) => [
                     styles.bubble,
                     {
                       backgroundColor: bubbleColor,
@@ -573,8 +632,16 @@ export default function ConversationDetailScreen({ route, navigation }: Props) {
                       borderBottomLeftRadius: isUser
                         ? BorderRadius.lg
                         : BorderRadius.xs,
+                      opacity: !isUser && pressed ? 0.85 : 1,
                     },
                   ]}
+                  testID={`conversation-detail-bubble-${message.id}`}
+                  accessibilityRole={!isUser ? "button" : undefined}
+                  accessibilityHint={
+                    !isUser
+                      ? "Long-press for save, share, and copy options"
+                      : undefined
+                  }
                 >
                   <Text style={[styles.bubbleText, { color: textColor }]}>
                     {message.content}
@@ -620,7 +687,7 @@ export default function ConversationDetailScreen({ route, navigation }: Props) {
                       </Pressable>
                     ) : null}
                   </View>
-                </View>
+                </Pressable>
               </Animated.View>
             );
           })}
@@ -689,6 +756,21 @@ export default function ConversationDetailScreen({ route, navigation }: Props) {
         onConfirm={handleConfirmRename}
         onCancel={handleCancelRename}
         testID="conversation-detail-rename-dialog"
+      />
+
+      <MessageActionSheet
+        visible={actionSheetMessage !== null}
+        isFavorite={Boolean(actionSheetMessage?.isFavorite)}
+        onSelect={handleSelectAction}
+        onCancel={handleCloseActionSheet}
+        testID="conversation-detail-action-sheet"
+      />
+
+      <ShareQuoteModal
+        visible={shareQuoteMessage !== null}
+        quote={shareQuoteMessage?.content ?? null}
+        onClose={handleCloseShareQuote}
+        testID="conversation-detail-share-quote"
       />
     </ScrollView>
   );

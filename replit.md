@@ -104,6 +104,16 @@ Solence is a voice-first AI companion app for meditation, reflection, and emotio
      `POST/DELETE /api/messages/:id/favorite` (idempotent, assistant-only) and
      `GET /api/favorites?limit=20`. Messages list endpoint enriches each row with `isFavorite`.
 
+7. **Share as quote card** - Long-press any assistant message (in ConversationDetail or
+   on a saved-moment row in Profile) opens a bottom action sheet with three options:
+   "Save / Remove", "Share as quote card", and "Copy text". Selecting share opens a
+   preview modal rendering a brand-styled QuoteCard (cream background, orange orb mark,
+   "Solence — solence.ai" attribution). Tapping Share captures the card via
+   `react-native-view-shot` and opens the system share sheet via `expo-sharing` on
+   native; on web it triggers a PNG download. Messages over 280 characters render a
+   friendly "too long to fit beautifully" notice and recommend Copy text instead.
+   Components: `client/components/{QuoteCard,MessageActionSheet,ShareQuoteModal}.tsx`.
+
 ## Design System
 Colors are defined in `client/constants/theme.ts`:
 - Light background: #FAF1E7 (warm cream, matching solence.ai)

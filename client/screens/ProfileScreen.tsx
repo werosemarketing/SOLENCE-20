@@ -10,6 +10,8 @@ import {
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useAudioPlayer, setAudioModeAsync } from "expo-audio";
+import * as Clipboard from "expo-clipboard";
+import * as Haptics from "expo-haptics";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -24,6 +26,8 @@ import { Card } from "@/components/Card";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { RenameDialog } from "@/components/RenameDialog";
 import { PersonalizationDialog } from "@/components/PersonalizationDialog";
+import { MessageActionSheet } from "@/components/MessageActionSheet";
+import { ShareQuoteModal } from "@/components/ShareQuoteModal";
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
 import {
@@ -284,6 +288,13 @@ export default function ProfileScreen() {
   const [savedMomentActionError, setSavedMomentActionError] = useState<
     string | null
   >(null);
+  // Long-press / share state for the saved-moments rows. Mirrors the same
+  // pattern used in ConversationDetail so the action sheet and share modal
+  // behave consistently across surfaces.
+  const [actionSheetMoment, setActionSheetMoment] =
+    useState<SavedMoment | null>(null);
+  const [shareQuoteMoment, setShareQuoteMoment] =
+    useState<SavedMoment | null>(null);
 
   // 7-day mood window powering the "Mood this week" card. Loaded on
   // focus so post-session entries created during a chat are reflected
@@ -795,6 +806,45 @@ export default function ProfileScreen() {
       ),
       scrollToMessageId: moment.messageId,
     });
+  };
+
+  const handleOpenSavedMomentActionSheet = (moment: SavedMoment) => {
+    Haptics.selectionAsync().catch(() => {});
+    setActionSheetMoment(moment);
+  };
+
+  const handleCloseSavedMomentActionSheet = () => {
+    setActionSheetMoment(null);
+  };
+
+  const handleSelectSavedMomentAction = (
+    action: "save" | "share" | "copy",
+  ) => {
+    const moment = actionSheetMoment;
+    if (!moment) return;
+    setActionSheetMoment(null);
+    if (action === "save") {
+      // Saved moments are already favorited in this list, so this acts as
+      // an "unsave" shortcut and matches the bookmark icon to the right.
+      handleUnfavoriteMoment(moment);
+    } else if (action === "share") {
+      setTimeout(() => setShareQuoteMoment(moment), 120);
+    } else if (action === "copy") {
+      Clipboard.setStringAsync(moment.message.content)
+        .then(() => {
+          Haptics.notificationAsync(
+            Haptics.NotificationFeedbackType.Success,
+          ).catch(() => {});
+          setSavedMomentActionError("Copied to clipboard.");
+        })
+        .catch(() => {
+          setSavedMomentActionError("Couldn't copy that text.");
+        });
+    }
+  };
+
+  const handleCloseShareSavedMoment = () => {
+    setShareQuoteMoment(null);
   };
 
   const handleUnfavoriteMoment = async (moment: SavedMoment) => {
@@ -1610,6 +1660,8 @@ export default function ProfileScreen() {
                 >
                   <Pressable
                     onPress={() => handleOpenSavedMoment(moment)}
+                    onLongPress={() => handleOpenSavedMomentActionSheet(moment)}
+                    delayLongPress={300}
                     style={({ pressed }) => [
                       styles.savedMomentContent,
                       pressed && { opacity: 0.6 },
@@ -1617,6 +1669,7 @@ export default function ProfileScreen() {
                     testID={`profile-saved-moment-row-${moment.id}`}
                     accessibilityRole="button"
                     accessibilityLabel={`Open saved moment from ${titleLabel}`}
+                    accessibilityHint="Long-press to share or copy this moment"
                   >
                     <View style={styles.savedMomentHeader}>
                       <Text
@@ -2416,6 +2469,21 @@ export default function ProfileScreen() {
         onConfirm={confirmDeleteConversation}
         onCancel={cancelDeleteConversation}
         testID="profile-delete-confirm"
+      />
+
+      <MessageActionSheet
+        visible={actionSheetMoment !== null}
+        isFavorite
+        onSelect={handleSelectSavedMomentAction}
+        onCancel={handleCloseSavedMomentActionSheet}
+        testID="profile-saved-moment-action-sheet"
+      />
+
+      <ShareQuoteModal
+        visible={shareQuoteMoment !== null}
+        quote={shareQuoteMoment?.message.content ?? null}
+        onClose={handleCloseShareSavedMoment}
+        testID="profile-saved-moment-share-quote"
       />
     </KeyboardAwareScrollViewCompat>
   );
