@@ -5,7 +5,18 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { openai, detectAudioFormat, speechToText } from "./replit_integrations/audio";
 import { db } from "./db";
-import { users, conversations, messages, FREE_TOKEN_LIMIT } from "@shared/schema";
+import {
+  users,
+  conversations,
+  messages,
+  FREE_TOKEN_LIMIT,
+  TONE_OPTIONS,
+  INTENT_OPTIONS,
+  updatePreferencesSchema,
+  type Tone,
+  type Intent,
+  type UserPreferences,
+} from "@shared/schema";
 import { eq, desc, inArray, and, lt } from "drizzle-orm";
 import {
   MIN_TOKENS_FOR_REQUEST,
@@ -330,6 +341,60 @@ function requireAuth(req: Request, res: Response, next: NextFunction): void {
   }
 }
 
+type UserRow = typeof users.$inferSelect;
+
+function serializePreferences(user: UserRow): UserPreferences {
+  return {
+    displayName: user.displayName ?? null,
+    intents: (user.intents ?? []) as Intent[],
+    tone: (user.tone ?? null) as Tone | null,
+    onboardingCompletedAt: user.onboardingCompletedAt
+      ? user.onboardingCompletedAt.toISOString()
+      : null,
+  };
+}
+
+const INTENT_LABELS: Record<Intent, string> = {
+  process_emotions: "process emotions",
+  reduce_anxiety: "reduce anxiety",
+  self_discovery: "self-discovery",
+  daily_reflection: "daily reflection",
+  navigate_relationships: "navigate relationships",
+  work_stress: "work stress",
+  build_habits: "build habits",
+  feel_less_alone: "feel less alone",
+};
+
+const TONE_GUIDANCE: Record<Tone, string> = {
+  warm: "Lean a little warmer and more affectionate in your phrasing — encouraging and gently uplifting without being over-the-top.",
+  soft: "Lean softer and quieter — slow your cadence, leave more space, and use gentle, low-volume language.",
+  grounded: "Lean grounded and steady — keep language clear, even, and reassuring without too much emotional flourish.",
+};
+
+function buildPersonalizationBlock(prefs: UserPreferences): string {
+  const parts: string[] = [];
+  if (prefs.displayName && prefs.displayName.trim().length > 0) {
+    parts.push(
+      `The user's preferred name is ${prefs.displayName.trim()}. Use it sparingly and naturally — never every line, only when it would feel warm and personal in the moment.`,
+    );
+  }
+  if (prefs.intents && prefs.intents.length > 0) {
+    const labels = prefs.intents
+      .map((i) => INTENT_LABELS[i])
+      .filter(Boolean);
+    if (labels.length > 0) {
+      parts.push(
+        `When they signed up, they said they wanted help with: ${labels.join(", ")}. Keep this in mind as gentle context — do not lecture them about it or bring it up unprompted unless it clearly fits the moment.`,
+      );
+    }
+  }
+  if (prefs.tone) {
+    parts.push(TONE_GUIDANCE[prefs.tone]);
+  }
+  if (parts.length === 0) return "";
+  return `\n\nPERSONALIZATION (from this user's onboarding preferences — honor these without ever explicitly mentioning that you have them):\n- ${parts.join("\n- ")}`;
+}
+
 async function seedTestAccount(): Promise<void> {
   try {
     const existing = await db
@@ -475,7 +540,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         { expiresIn: JWT_EXPIRES_IN }
       );
 
-      res.status(201).json({ token, user: { id: newUser.id, email: newUser.email } });
+      res.status(201).json({
+        token,
+        user: { id: newUser.id, email: newUser.email },
+        preferences: serializePreferences(newUser),
+      });
     } catch (error) {
       console.error("Registration error:", error);
       res.status(500).json({ error: "Failed to create account" });
@@ -511,7 +580,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         { expiresIn: JWT_EXPIRES_IN }
       );
 
-      res.json({ token, user: { id: user.id, email: user.email } });
+      res.json({
+        token,
+        user: { id: user.id, email: user.email },
+        preferences: serializePreferences(user),
+      });
     } catch (error) {
       console.error("Login error:", error);
       res.status(500).json({ error: "Failed to sign in" });
@@ -530,12 +603,111 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: "User not found" });
       }
 
-      res.json({ user: { id: user.id, email: user.email } });
+      res.json({
+        user: { id: user.id, email: user.email },
+        preferences: serializePreferences(user),
+      });
     } catch (error) {
       console.error("Auth check error:", error);
       res.status(500).json({ error: "Failed to verify authentication" });
     }
   });
+
+  app.get(
+    "/api/preferences",
+    requireAuth,
+    async (req: Request, res: Response) => {
+      try {
+        const [user] = await db
+          .select()
+          .from(users)
+          .where(eq(users.id, req.user!.userId))
+          .limit(1);
+        if (!user) {
+          return res.status(404).json({ error: "User not found" });
+        }
+        res.json({ preferences: serializePreferences(user) });
+      } catch (error) {
+        console.error("Get preferences error:", error);
+        res.status(500).json({ error: "Failed to load preferences" });
+      }
+    },
+  );
+
+  app.patch(
+    "/api/preferences",
+    requireAuth,
+    async (req: Request, res: Response) => {
+      try {
+        const parsed = updatePreferencesSchema.safeParse(req.body);
+        if (!parsed.success) {
+          const first = parsed.error.issues[0];
+          return res.status(400).json({
+            error: first?.message ?? "Invalid preferences payload",
+          });
+        }
+
+        const updates: Partial<UserRow> = {};
+        if ("displayName" in parsed.data) {
+          const raw = parsed.data.displayName;
+          updates.displayName =
+            raw === null || raw === undefined || raw.trim().length === 0
+              ? null
+              : raw.trim();
+        }
+        if ("intents" in parsed.data) {
+          const raw = parsed.data.intents;
+          // Dedupe + preserve order; null/undefined clears.
+          if (raw === null || raw === undefined) {
+            updates.intents = null;
+          } else {
+            const seen = new Set<string>();
+            const cleaned: string[] = [];
+            for (const item of raw) {
+              if (!seen.has(item)) {
+                seen.add(item);
+                cleaned.push(item);
+              }
+            }
+            updates.intents = cleaned;
+          }
+        }
+        if ("tone" in parsed.data) {
+          updates.tone = parsed.data.tone ?? null;
+        }
+        if (parsed.data.markOnboardingComplete) {
+          updates.onboardingCompletedAt = new Date();
+        }
+
+        if (Object.keys(updates).length === 0) {
+          // Nothing to write — just echo current state so the client stays
+          // in sync without us silently doing nothing surprising.
+          const [current] = await db
+            .select()
+            .from(users)
+            .where(eq(users.id, req.user!.userId))
+            .limit(1);
+          if (!current) {
+            return res.status(404).json({ error: "User not found" });
+          }
+          return res.json({ preferences: serializePreferences(current) });
+        }
+
+        const [updated] = await db
+          .update(users)
+          .set(updates)
+          .where(eq(users.id, req.user!.userId))
+          .returning();
+        if (!updated) {
+          return res.status(404).json({ error: "User not found" });
+        }
+        res.json({ preferences: serializePreferences(updated) });
+      } catch (error) {
+        console.error("Update preferences error:", error);
+        res.status(500).json({ error: "Failed to save preferences" });
+      }
+    },
+  );
 
   app.get("/api/tokens", requireAuth, async (req: Request, res: Response) => {
     try {
@@ -993,8 +1165,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
         | { role: "system"; content: string }
         | { role: "user" | "assistant"; content: string };
 
+      // Pull personalization (name / intents / tone) so Solence can honor
+      // what the user told us during onboarding without ever explicitly
+      // saying "I see you signed up to work on X". Best-effort: a missing
+      // user row just degrades to no personalization.
+      let personalizationBlock = "";
+      try {
+        const [userRow] = await db
+          .select()
+          .from(users)
+          .where(eq(users.id, userId))
+          .limit(1);
+        if (userRow) {
+          personalizationBlock = buildPersonalizationBlock(
+            serializePreferences(userRow),
+          );
+        }
+      } catch (prefError) {
+        console.error(
+          "Failed to load personalization for chat:",
+          prefError instanceof Error ? prefError.message : prefError,
+        );
+      }
+
       const chatHistory: ChatMessage[] = [
-        { role: "system", content: SOLENCE_SYSTEM_PROMPT + pastContext },
+        {
+          role: "system",
+          content: SOLENCE_SYSTEM_PROMPT + personalizationBlock + pastContext,
+        },
         ...currentMessages.map((m) => ({
           role: m.role as "user" | "assistant",
           content: m.content,

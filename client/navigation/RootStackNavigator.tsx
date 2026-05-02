@@ -46,6 +46,37 @@ export default function RootStackNavigator() {
     }
   }, [stage]);
 
+  // Treat the server's onboardingCompletedAt as the source of truth so users
+  // who upgrade into a new app version (or sign in on a new device) get the
+  // personalization flow once. The local AsyncStorage flag is kept as a
+  // fast-path cache so brand-new users don't see a flash of the auth screen
+  // while we round-trip to /api/auth/me.
+  const resolveOnboardingFromServer = async (token: string): Promise<boolean> => {
+    try {
+      const apiUrl = getApiUrl();
+      const prefsResponse = await fetch(`${apiUrl}/api/preferences`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (prefsResponse.ok) {
+        const data = await prefsResponse.json();
+        const serverComplete = Boolean(
+          data?.preferences?.onboardingCompletedAt,
+        );
+        if (serverComplete) {
+          await AsyncStorage.setItem(STORAGE_KEY_ONBOARDING, "true");
+        } else {
+          await AsyncStorage.removeItem(STORAGE_KEY_ONBOARDING);
+        }
+        return serverComplete;
+      }
+    } catch {
+      // Network hiccup: fall back to the local cache so we don't strand
+      // returning users on the onboarding screen offline.
+    }
+    const cached = await AsyncStorage.getItem(STORAGE_KEY_ONBOARDING);
+    return cached === "true";
+  };
+
   const checkProgress = async () => {
     try {
       const token = await AsyncStorage.getItem(STORAGE_KEY_AUTH_TOKEN);
@@ -73,8 +104,22 @@ export default function RootStackNavigator() {
         return;
       }
 
-      const onboardingComplete = await AsyncStorage.getItem(STORAGE_KEY_ONBOARDING);
-      if (onboardingComplete !== "true") {
+      // /api/auth/me already returned the preferences payload — reuse it
+      // before issuing a second request.
+      let onboardingComplete = false;
+      try {
+        const me = await response.json();
+        if (me?.preferences?.onboardingCompletedAt) {
+          onboardingComplete = true;
+          await AsyncStorage.setItem(STORAGE_KEY_ONBOARDING, "true");
+        } else {
+          await AsyncStorage.removeItem(STORAGE_KEY_ONBOARDING);
+        }
+      } catch {
+        onboardingComplete = await resolveOnboardingFromServer(token);
+      }
+
+      if (!onboardingComplete) {
         setStage("onboarding");
         return;
       }
@@ -95,8 +140,8 @@ export default function RootStackNavigator() {
       return;
     }
 
-    const onboardingComplete = await AsyncStorage.getItem(STORAGE_KEY_ONBOARDING);
-    if (onboardingComplete !== "true") {
+    const onboardingComplete = await resolveOnboardingFromServer(token);
+    if (!onboardingComplete) {
       setStage("onboarding");
       return;
     }
@@ -132,7 +177,12 @@ export default function RootStackNavigator() {
   }
 
   if (stage === "onboarding") {
-    return <OnboardingScreen onComplete={() => setStage("main")} />;
+    return (
+      <OnboardingScreen
+        authToken={authToken}
+        onComplete={() => setStage("main")}
+      />
+    );
   }
 
   return (

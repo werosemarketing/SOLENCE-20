@@ -18,6 +18,7 @@ import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollV
 import { Card } from "@/components/Card";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { RenameDialog } from "@/components/RenameDialog";
+import { PersonalizationDialog } from "@/components/PersonalizationDialog";
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
 import {
@@ -28,6 +29,13 @@ import {
 } from "@/constants/theme";
 import { getApiUrl } from "@/lib/query-client";
 import { displayConversationTitle } from "@/lib/conversation-title";
+import {
+  EMPTY_PREFERENCES,
+  INTENT_LABELS,
+  TONE_LABELS,
+  type ClientPreferences,
+} from "@/lib/preferences";
+import type { Intent, Tone } from "@shared/schema";
 import type { RootStackParamList } from "@/navigation/RootStackNavigator";
 
 const STORAGE_KEY_AUTH_TOKEN = "solence_auth_token";
@@ -128,6 +136,121 @@ export default function ProfileScreen() {
     useState<ConversationListItem | null>(null);
   const [renameSubmitting, setRenameSubmitting] = useState(false);
   const [renameError, setRenameError] = useState<string | null>(null);
+
+  const [preferences, setPreferences] =
+    useState<ClientPreferences>(EMPTY_PREFERENCES);
+  const [preferencesLoading, setPreferencesLoading] = useState(true);
+  const [preferencesError, setPreferencesError] = useState<string | null>(null);
+  const [showPersonalization, setShowPersonalization] = useState(false);
+  const [personalizationSaving, setPersonalizationSaving] = useState(false);
+  const [personalizationError, setPersonalizationError] = useState<
+    string | null
+  >(null);
+
+  const loadPreferences = useCallback(async (signal?: AbortSignal) => {
+    try {
+      setPreferencesLoading(true);
+      setPreferencesError(null);
+      const token = await AsyncStorage.getItem(STORAGE_KEY_AUTH_TOKEN);
+      const headers: Record<string, string> = {};
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const apiUrl = getApiUrl();
+      const response = await fetch(`${apiUrl}/api/preferences`, {
+        headers,
+        signal,
+      });
+      if (!response.ok) {
+        throw new Error(`Request failed (${response.status})`);
+      }
+      const data = (await response.json()) as { preferences: ClientPreferences };
+      if (signal?.aborted) return;
+      setPreferences({
+        displayName: data.preferences.displayName ?? null,
+        intents: data.preferences.intents ?? [],
+        tone: data.preferences.tone ?? null,
+        onboardingCompletedAt: data.preferences.onboardingCompletedAt ?? null,
+      });
+    } catch (e) {
+      if (signal?.aborted) return;
+      const message =
+        e instanceof Error ? e.message : "Could not load personalization";
+      setPreferencesError(message);
+    } finally {
+      if (!signal?.aborted) setPreferencesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    loadPreferences(controller.signal);
+    return () => controller.abort();
+  }, [loadPreferences]);
+
+  const openPersonalization = () => {
+    setPersonalizationError(null);
+    setShowPersonalization(true);
+  };
+
+  const cancelPersonalization = () => {
+    if (personalizationSaving) return;
+    setShowPersonalization(false);
+    setPersonalizationError(null);
+  };
+
+  const savePersonalization = async (next: {
+    displayName: string | null;
+    intents: Intent[];
+    tone: Tone | null;
+  }) => {
+    if (personalizationSaving) return;
+    try {
+      setPersonalizationSaving(true);
+      setPersonalizationError(null);
+      const token = await AsyncStorage.getItem(STORAGE_KEY_AUTH_TOKEN);
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const apiUrl = getApiUrl();
+      const response = await fetch(`${apiUrl}/api/preferences`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({
+          displayName: next.displayName,
+          intents: next.intents,
+          tone: next.tone,
+        }),
+      });
+      if (!response.ok) {
+        let message = `Couldn't save (${response.status})`;
+        try {
+          const data = await response.json();
+          if (data && typeof data.error === "string") message = data.error;
+        } catch {
+          // ignore JSON parse failure
+        }
+        throw new Error(message);
+      }
+      const data = (await response.json()) as {
+        preferences: ClientPreferences;
+      };
+      setPreferences({
+        displayName: data.preferences.displayName ?? null,
+        intents: data.preferences.intents ?? [],
+        tone: data.preferences.tone ?? null,
+        onboardingCompletedAt:
+          data.preferences.onboardingCompletedAt ??
+          preferences.onboardingCompletedAt,
+      });
+      setShowPersonalization(false);
+    } catch (e) {
+      const message =
+        e instanceof Error ? e.message : "Could not save personalization";
+      setPersonalizationError(message);
+    } finally {
+      setPersonalizationSaving(false);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -348,6 +471,174 @@ export default function ProfileScreen() {
       testID="screen-profile"
     >
       <Card elevation={1} style={styles.headerCard}>
+        <View style={styles.personalizationHeader}>
+          <View style={styles.personalizationHeaderText}>
+            <ThemedText type="h4" style={styles.cardTitle}>
+              Personalization
+            </ThemedText>
+            <ThemedText
+              type="small"
+              style={[styles.cardDescription, { color: theme.textMuted }]}
+            >
+              Shape how Solence greets you and the tone she leans into.
+            </ThemedText>
+          </View>
+          <Pressable
+            onPress={openPersonalization}
+            style={({ pressed }) => [
+              styles.personalizationEdit,
+              {
+                borderColor: theme.orbPrimary,
+                opacity: pressed ? 0.7 : 1,
+              },
+            ]}
+            testID="profile-personalization-edit"
+            accessibilityRole="button"
+            accessibilityLabel="Edit personalization"
+          >
+            <Feather name="edit-2" size={14} color={theme.orbPrimary} />
+            <Text
+              style={[
+                styles.personalizationEditText,
+                { color: theme.orbPrimary },
+              ]}
+            >
+              Edit
+            </Text>
+          </Pressable>
+        </View>
+
+        {preferencesLoading ? (
+          <View
+            style={styles.personalizationLoading}
+            testID="profile-personalization-loading"
+          >
+            <ActivityIndicator color={theme.orbPrimary} />
+          </View>
+        ) : preferencesError ? (
+          <View
+            style={styles.personalizationError}
+            testID="profile-personalization-error"
+          >
+            <Text style={[styles.errorText, { color: theme.textMuted }]}>
+              {preferencesError}
+            </Text>
+            <Pressable
+              onPress={() => loadPreferences()}
+              style={({ pressed }) => [
+                styles.personalizationRetry,
+                { opacity: pressed ? 0.6 : 1 },
+              ]}
+              testID="profile-personalization-retry"
+            >
+              <Text
+                style={[
+                  styles.personalizationRetryText,
+                  { color: theme.orbPrimary },
+                ]}
+              >
+                Retry
+              </Text>
+            </Pressable>
+          </View>
+        ) : (
+          <View style={styles.personalizationFields}>
+            <View style={styles.personalizationRow}>
+              <Text
+                style={[
+                  styles.personalizationLabel,
+                  { color: theme.textMuted },
+                ]}
+              >
+                Name
+              </Text>
+              <Text
+                style={[
+                  styles.personalizationValue,
+                  { color: theme.text },
+                  !preferences.displayName && {
+                    color: theme.textMuted,
+                    fontStyle: "italic",
+                  },
+                ]}
+                testID="profile-personalization-name"
+              >
+                {preferences.displayName ?? "Not set"}
+              </Text>
+            </View>
+            <View style={styles.personalizationRow}>
+              <Text
+                style={[
+                  styles.personalizationLabel,
+                  { color: theme.textMuted },
+                ]}
+              >
+                Focus
+              </Text>
+              {preferences.intents.length > 0 ? (
+                <View style={styles.personalizationChipsWrap}>
+                  {preferences.intents.map((intent) => (
+                    <View
+                      key={intent}
+                      style={[
+                        styles.personalizationChip,
+                        {
+                          backgroundColor: theme.backgroundSecondary,
+                          borderColor: theme.backgroundSecondary,
+                        },
+                      ]}
+                      testID={`profile-personalization-intent-${intent}`}
+                    >
+                      <Text
+                        style={[
+                          styles.personalizationChipText,
+                          { color: theme.text },
+                        ]}
+                      >
+                        {INTENT_LABELS[intent]}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                <Text
+                  style={[
+                    styles.personalizationValue,
+                    { color: theme.textMuted, fontStyle: "italic" },
+                  ]}
+                >
+                  Not set
+                </Text>
+              )}
+            </View>
+            <View style={styles.personalizationRow}>
+              <Text
+                style={[
+                  styles.personalizationLabel,
+                  { color: theme.textMuted },
+                ]}
+              >
+                Tone
+              </Text>
+              <Text
+                style={[
+                  styles.personalizationValue,
+                  { color: theme.text },
+                  !preferences.tone && {
+                    color: theme.textMuted,
+                    fontStyle: "italic",
+                  },
+                ]}
+                testID="profile-personalization-tone"
+              >
+                {preferences.tone ? TONE_LABELS[preferences.tone] : "Not set"}
+              </Text>
+            </View>
+          </View>
+        )}
+      </Card>
+
+      <Card elevation={1} style={styles.historyCard}>
         <ThemedText type="h4" style={styles.cardTitle}>
           Last {HISTORY_DAYS} days
         </ThemedText>
@@ -601,6 +892,15 @@ export default function ProfileScreen() {
         )}
       </Card>
 
+      <PersonalizationDialog
+        visible={showPersonalization}
+        initial={preferences}
+        loading={personalizationSaving}
+        errorMessage={personalizationError}
+        onConfirm={savePersonalization}
+        onCancel={cancelPersonalization}
+      />
+
       <RenameDialog
         visible={pendingRename !== null}
         title="Rename conversation"
@@ -641,9 +941,86 @@ const styles = StyleSheet.create({
   headerCard: {
     paddingVertical: Spacing.xl,
   },
+  historyCard: {
+    marginTop: Spacing.lg,
+    paddingVertical: Spacing.xl,
+  },
   conversationsCard: {
     marginTop: Spacing.lg,
     paddingVertical: Spacing.xl,
+  },
+  personalizationHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: Spacing.md,
+  },
+  personalizationHeaderText: {
+    flex: 1,
+  },
+  personalizationEdit: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.xs,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs + 2,
+    borderRadius: BorderRadius.full,
+    borderWidth: 1,
+  },
+  personalizationEditText: {
+    ...Typography.small,
+    fontFamily: fontForWeight("600"),
+  },
+  personalizationLoading: {
+    paddingVertical: Spacing.xl,
+    alignItems: "center",
+  },
+  personalizationError: {
+    paddingVertical: Spacing.lg,
+    alignItems: "center",
+    gap: Spacing.sm,
+  },
+  personalizationRetry: {
+    paddingVertical: Spacing.xs,
+    paddingHorizontal: Spacing.md,
+  },
+  personalizationRetryText: {
+    ...Typography.small,
+    fontFamily: fontForWeight("600"),
+  },
+  personalizationFields: {
+    marginTop: Spacing.md,
+    gap: Spacing.md,
+  },
+  personalizationRow: {
+    gap: Spacing.xs,
+  },
+  personalizationLabel: {
+    ...Typography.small,
+    fontSize: 12,
+    fontFamily: fontForWeight("500"),
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+  },
+  personalizationValue: {
+    ...Typography.body,
+    fontFamily: fontForWeight("400"),
+  },
+  personalizationChipsWrap: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: Spacing.xs,
+    marginTop: Spacing.xs / 2,
+  },
+  personalizationChip: {
+    paddingHorizontal: Spacing.sm + 2,
+    paddingVertical: Spacing.xs,
+    borderRadius: BorderRadius.full,
+    borderWidth: 1,
+  },
+  personalizationChipText: {
+    fontSize: 13,
+    fontFamily: fontForWeight("500"),
   },
   cardTitle: {
     marginBottom: Spacing.xs,

@@ -9,6 +9,10 @@ export const users = pgTable("users", {
     .default(sql`gen_random_uuid()`),
   email: text("email").notNull().unique(),
   password: text("password").notNull(),
+  displayName: text("display_name"),
+  intents: text("intents").array(),
+  tone: text("tone"),
+  onboardingCompletedAt: timestamp("onboarding_completed_at"),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
@@ -19,6 +23,46 @@ export const insertUserSchema = createInsertSchema(users).pick({
 
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
+
+export const TONE_OPTIONS = ["warm", "soft", "grounded"] as const;
+export type Tone = (typeof TONE_OPTIONS)[number];
+
+export const INTENT_OPTIONS = [
+  "process_emotions",
+  "reduce_anxiety",
+  "self_discovery",
+  "daily_reflection",
+  "navigate_relationships",
+  "work_stress",
+  "build_habits",
+  "feel_less_alone",
+] as const;
+export type Intent = (typeof INTENT_OPTIONS)[number];
+
+export const updatePreferencesSchema = z.object({
+  displayName: z
+    .string()
+    .trim()
+    .max(40, "Name must be 40 characters or fewer")
+    .nullable()
+    .optional(),
+  intents: z
+    .array(z.enum(INTENT_OPTIONS))
+    .max(INTENT_OPTIONS.length)
+    .nullable()
+    .optional(),
+  tone: z.enum(TONE_OPTIONS).nullable().optional(),
+  markOnboardingComplete: z.boolean().optional(),
+});
+
+export type UpdatePreferencesInput = z.infer<typeof updatePreferencesSchema>;
+
+export type UserPreferences = {
+  displayName: string | null;
+  intents: Intent[];
+  tone: Tone | null;
+  onboardingCompletedAt: string | null;
+};
 
 export const conversations = pgTable(
   "conversations",
