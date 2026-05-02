@@ -1,0 +1,28 @@
+Haptic feedback throughout — Subtle taps when the orb starts listening, when Solence responds, when you press buttons. Makes the whole app feel alive on iPhone.
+Conversation history view — A dedicated screen to revisit past conversations. You have the data; users just can't see it yet.
+Save & favorite responses — Let users bookmark Solence's most meaningful replies to revisit later.
+Onboarding personalization — Ask the user's name and what they want from Solence (reflection, motivation, calm, etc.) so she can tailor her tone from day one.
+Voice selection — Let users pick from a few voices for Solence (warm, soft, grounded, etc.) using OpenAI's available voice options.
+Tier 2: Emotional Depth (Strengthens the core experience)
+Mood check-in before/after sessions — A quick "How are you feeling?" slider that Solence references in her response and tracks over time.
+Reflection journal — Auto-generate a short written summary after each session so users have something to revisit.
+Daily themes / gentle prompts — "Today, what felt heaviest?" — a soft daily nudge to encourage engagement without being pushy.
+Memory she references — Solence mentions things from past conversations naturally ("Last week you mentioned…"). Builds the "she evolves" promise.
+Breathing/grounding mini-experience — A 60-second guided breath using the orb animation, for moments of overwhelm.
+Tier 3: Trust, Safety & Privacy (Critical for a wellness app)
+Crisis detection — If Solence detects concerning language, gently surface the 988 hotline mid-conversation, not just on the disclaimer.
+Face ID / passcode lock — Conversations are deeply personal. Let users lock the app.
+Delete conversation history — Easy access in settings, with confirmation.
+Export your data — GDPR-friendly download of all conversations.
+Tier 4: Engagement & Retention (Use carefully — don't make it gamey)
+Optional gentle reminders — "Solence is here when you need her." Not streaks, not pressure — soft.
+Weekly reflection summary — A beautifully designed weekly recap of themes, emotions, and growth.
+Share a moment — Generate a beautiful quote card from a meaningful Solence reply that users can share (great for organic marketing).
+Tier 5: Accessibility & Reach
+Adjustable text size — Important for an emotional/calming app used in vulnerable moments.
+Light mode polish — Make sure light mode is as beautiful as dark mode.
+Localization — Spanish first (huge wellness market), then others.
+Tier 6: Marketing & Growth
+Referral / share Solence — "Invite someone who needs this." One free week for both.
+Apple Sign-In — Faster onboarding, required by Apple if you have other auth.
+App Store ratings prompt — Trigger after a meaningful conversation, not on day one.
