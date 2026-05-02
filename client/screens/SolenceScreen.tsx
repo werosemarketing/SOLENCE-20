@@ -1026,6 +1026,10 @@ export default function SolenceScreen({
       const apiUrl = getApiUrl();
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
+      // Mirror sendAudioToAPI: still attach the pre-session mood hint if
+      // the user picked one before this attempt — the original send never
+      // reached the server, so the "first exchange" is happening here.
+      const moodForRequest = pendingPreSessionMood;
       const response = await fetch(`${apiUrl}/api/chat/voice`, {
         method: "POST",
         headers,
@@ -1034,6 +1038,7 @@ export default function SolenceScreen({
           ...(activeConversationId != null
             ? { conversationId: activeConversationId }
             : {}),
+          ...(moodForRequest ? { preSessionMood: moodForRequest } : {}),
         }),
       });
       if (!response.ok) {
@@ -1058,6 +1063,14 @@ export default function SolenceScreen({
       }
       const data = await response.json();
       updateTokensFromResponse(data);
+      // Same conversation-id adoption + session-counter bookkeeping as the
+      // primary send path, so a successful retry still gates the post-mood
+      // sheet correctly when the user later ends the conversation.
+      if (typeof data.conversationId === "number" && activeConversationId == null) {
+        setActiveConversationId(data.conversationId);
+      }
+      if (moodForRequest) setPendingPreSessionMood(null);
+      sessionUserMessageCountRef.current += 1;
       setCurrentMessage(data.text);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       if (data.audioBase64) {

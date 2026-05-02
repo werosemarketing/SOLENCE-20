@@ -246,6 +246,13 @@ export default function ProfileScreen() {
     string | null
   >(null);
 
+  // 7-day mood window powering the "Mood this week" card. Loaded on
+  // focus so post-session entries created during a chat are reflected
+  // when the user swipes back to the Profile tab.
+  const [moodEntries, setMoodEntries] = useState<MoodEntry[] | null>(null);
+  const [moodLoading, setMoodLoading] = useState(true);
+  const [moodError, setMoodError] = useState<string | null>(null);
+
   const [preferences, setPreferences] =
     useState<ClientPreferences>(EMPTY_PREFERENCES);
   const [preferencesLoading, setPreferencesLoading] = useState(true);
@@ -628,15 +635,44 @@ export default function ProfileScreen() {
     }
   }, []);
 
+  const loadMoodEntries = useCallback(async (signal?: AbortSignal) => {
+    try {
+      setMoodLoading(true);
+      setMoodError(null);
+      const token = await AsyncStorage.getItem(STORAGE_KEY_AUTH_TOKEN);
+      const headers: Record<string, string> = {};
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const apiUrl = getApiUrl();
+      const response = await fetch(`${apiUrl}/api/mood?days=7`, {
+        headers,
+        signal,
+      });
+      if (!response.ok) {
+        throw new Error(`Request failed (${response.status})`);
+      }
+      const data = (await response.json()) as MoodResponse;
+      if (signal?.aborted) return;
+      setMoodEntries(data.entries);
+    } catch (e) {
+      if (signal?.aborted) return;
+      const message =
+        e instanceof Error ? e.message : "Could not load mood history";
+      setMoodError(message);
+    } finally {
+      if (!signal?.aborted) setMoodLoading(false);
+    }
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
       const controller = new AbortController();
       loadConversations(controller.signal);
       loadSavedMoments(controller.signal);
+      loadMoodEntries(controller.signal);
       return () => {
         controller.abort();
       };
-    }, [loadConversations, loadSavedMoments]),
+    }, [loadConversations, loadSavedMoments, loadMoodEntries]),
   );
 
   const handleOpenSavedMoment = (moment: SavedMoment) => {
@@ -1388,6 +1424,171 @@ export default function ProfileScreen() {
         )}
       </Card>
 
+      <Card elevation={1} style={styles.moodCard}>
+        <ThemedText type="h4" style={styles.cardTitle}>
+          Mood this week
+        </ThemedText>
+        <ThemedText
+          type="small"
+          style={[styles.cardDescription, { color: theme.textMuted }]}
+        >
+          A gentle look at how you&apos;ve been showing up.
+        </ThemedText>
+
+        {moodLoading ? (
+          <View style={styles.loadingContainer} testID="profile-mood-loading">
+            <ActivityIndicator color={theme.orbPrimary} />
+          </View>
+        ) : moodError ? (
+          <View style={styles.errorContainer} testID="profile-mood-error">
+            <Text style={[styles.errorText, { color: theme.textMuted }]}>
+              {moodError}
+            </Text>
+          </View>
+        ) : moodEntries && moodEntries.length > 0 ? (
+          (() => {
+            // Build a per-day bucket for the last 7 calendar days. We keep
+            // the LATEST entry per day (entries arrive newest-first, so the
+            // first one we see for a given day wins). Days without a
+            // check-in render as a faint dot — never as 0, which would
+            // misleadingly imply "rough mood".
+            //
+            // Bucket dates are derived via setDate() rather than fixed
+            // millisecond subtraction so DST transitions don't skip or
+            // duplicate a calendar day. Summaries (avg, most recent) are
+            // computed from in-bucket entries only so the chart and the
+            // numbers always agree, even when the API's rolling-hours
+            // window pulls in entries that fall outside our calendar
+            // window.
+            const buckets: { date: Date; entry: MoodEntry | null }[] = [];
+            for (let i = 6; i >= 0; i--) {
+              const d = new Date();
+              d.setHours(0, 0, 0, 0);
+              d.setDate(d.getDate() - i);
+              buckets.push({ date: d, entry: null });
+            }
+            for (const entry of moodEntries) {
+              const created = new Date(entry.createdAt);
+              created.setHours(0, 0, 0, 0);
+              const bucket = buckets.find(
+                (b) => b.date.getTime() === created.getTime(),
+              );
+              if (bucket && bucket.entry == null) bucket.entry = entry;
+            }
+
+            const inBucket = buckets
+              .map((b) => b.entry)
+              .filter((e): e is MoodEntry => e != null);
+            const avg = inBucket.length
+              ? inBucket.reduce((sum, e) => sum + e.score, 0) / inBucket.length
+              : 0;
+            const mostRecent = inBucket[0] ?? null;
+            const dayLabels = ["S", "M", "T", "W", "T", "F", "S"];
+
+            return (
+              <View testID="profile-mood-content">
+                <View style={styles.moodChart}>
+                  {buckets.map((bucket, idx) => {
+                    const score = bucket.entry?.score ?? null;
+                    // Dot size scales smoothly with score 1→5 (12px → 28px).
+                    const size = score ? 12 + (score - 1) * 4 : 6;
+                    const isEmpty = score == null;
+                    return (
+                      <View
+                        key={idx}
+                        style={styles.moodDayCol}
+                        testID={`profile-mood-day-${idx}`}
+                      >
+                        <View style={styles.moodDotSlot}>
+                          <View
+                            style={[
+                              styles.moodDot,
+                              {
+                                width: size,
+                                height: size,
+                                borderRadius: size / 2,
+                                backgroundColor: isEmpty
+                                  ? "transparent"
+                                  : theme.orbPrimary,
+                                borderColor: isEmpty
+                                  ? theme.textMuted
+                                  : "transparent",
+                                borderWidth: isEmpty ? 1 : 0,
+                                opacity: isEmpty ? 0.35 : 0.85,
+                              },
+                            ]}
+                          />
+                        </View>
+                        <Text
+                          style={[
+                            styles.moodDayLabel,
+                            { color: theme.textMuted },
+                          ]}
+                        >
+                          {dayLabels[bucket.date.getDay()]}
+                        </Text>
+                      </View>
+                    );
+                  })}
+                </View>
+
+                {inBucket.length > 0 ? (
+                  <View style={styles.moodSummaryRow}>
+                    <View style={styles.moodSummaryBlock}>
+                      <Text
+                        style={[
+                          styles.moodSummaryLabel,
+                          { color: theme.textMuted },
+                        ]}
+                      >
+                        Average
+                      </Text>
+                      <Text
+                        style={[
+                          styles.moodSummaryValue,
+                          { color: theme.text },
+                        ]}
+                        testID="profile-mood-average"
+                      >
+                        {avg.toFixed(1)} / 5
+                      </Text>
+                    </View>
+                    <View style={styles.moodSummaryDivider} />
+                    <View style={styles.moodSummaryBlock}>
+                      <Text
+                        style={[
+                          styles.moodSummaryLabel,
+                          { color: theme.textMuted },
+                        ]}
+                      >
+                        Most recent
+                      </Text>
+                      <Text
+                        style={[
+                          styles.moodSummaryValue,
+                          { color: theme.text },
+                        ]}
+                        testID="profile-mood-most-recent"
+                      >
+                        {mostRecent
+                          ? MOOD_LABELS[mostRecent.score] ?? mostRecent.score
+                          : "—"}
+                      </Text>
+                    </View>
+                  </View>
+                ) : null}
+              </View>
+            );
+          })()
+        ) : (
+          <View style={styles.emptyContainer} testID="profile-mood-empty">
+            <Text style={[styles.errorText, { color: theme.textMuted }]}>
+              Your mood check-ins will show up here once you start a session.
+            </Text>
+          </View>
+        )}
+      </Card>
+
       <Card elevation={1} style={styles.conversationsCard}>
         <ThemedText type="h4" style={styles.cardTitle}>
           Recent conversations
@@ -1667,6 +1868,63 @@ const styles = StyleSheet.create({
   savedMomentsCard: {
     marginTop: Spacing.lg,
     paddingVertical: Spacing.xl,
+  },
+  moodCard: {
+    marginTop: Spacing.lg,
+    paddingVertical: Spacing.xl,
+  },
+  moodChart: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    justifyContent: "space-between",
+    paddingVertical: Spacing.sm,
+  },
+  moodDayCol: {
+    flex: 1,
+    alignItems: "center",
+    gap: Spacing.xs,
+  },
+  moodDotSlot: {
+    height: 32,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  moodDot: {},
+  moodDayLabel: {
+    ...Typography.small,
+    fontSize: 11,
+    fontFamily: fontForWeight("500"),
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+  },
+  moodSummaryRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: Spacing.lg,
+    paddingTop: Spacing.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "rgba(127,127,127,0.2)",
+  },
+  moodSummaryBlock: {
+    flex: 1,
+    alignItems: "center",
+    gap: 2,
+  },
+  moodSummaryDivider: {
+    width: StyleSheet.hairlineWidth,
+    alignSelf: "stretch",
+    backgroundColor: "rgba(127,127,127,0.2)",
+  },
+  moodSummaryLabel: {
+    ...Typography.small,
+    fontSize: 11,
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+  },
+  moodSummaryValue: {
+    ...Typography.body,
+    fontFamily: fontForWeight("600"),
+    fontSize: 16,
   },
   savedMomentRow: {
     flexDirection: "row",
