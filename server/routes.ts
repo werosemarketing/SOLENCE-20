@@ -36,6 +36,7 @@ import {
   tryReserveTokens,
   recordTokens,
 } from "./tokens";
+import { getDailyPromptForDate } from "./dailyPrompts";
 
 const audioBodyParser = express.json({ limit: "50mb" });
 
@@ -997,6 +998,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     },
   );
+
+  // Today's gentle prompt. Public (no auth) so the home screen can show it
+  // without waiting on the user fetch path. Deterministic per UTC day so a
+  // user who reloads sees the same prompt all day; flips at 00:00 UTC.
+  // The route is intentionally cheap — the work happens in dailyPrompts.ts.
+  // Cache headers let mobile + edge caches keep it for ~5 minutes; we don't
+  // cache for the full day because the boundary is global at midnight UTC
+  // and a long max-age would let stale prompts linger past the rollover.
+  app.get("/api/daily-prompt", async (_req: Request, res: Response) => {
+    try {
+      const { prompt, topic, dateKey } = getDailyPromptForDate();
+      res.set("Cache-Control", "public, max-age=300");
+      res.json({ prompt, topic, dateKey });
+    } catch (error) {
+      console.error("Daily prompt error:", error);
+      res.status(500).json({ error: "Failed to load daily prompt" });
+    }
+  });
 
   app.get("/api/tokens", requireAuth, async (req: Request, res: Response) => {
     try {

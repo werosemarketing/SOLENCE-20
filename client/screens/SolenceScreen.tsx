@@ -474,6 +474,14 @@ export default function SolenceScreen({
     kind: "audio" | "text";
     payload: string;
   } | null>(null);
+  // Today's gentle prompt fetched from /api/daily-prompt. Stays null while
+  // loading or on a fetch failure so we silently fall back to the static
+  // starter chips below — never block the screen on it.
+  const [dailyPrompt, setDailyPrompt] = useState<{
+    prompt: string;
+    topic: string;
+    dateKey: string;
+  } | null>(null);
 
   // Mood check-in state. The pre-session sheet pops once per app session
   // before the user starts a chat — `preMoodPromptedRef` gates that. The
@@ -523,9 +531,13 @@ export default function SolenceScreen({
 
   useEffect(() => {
     fetchTokenUsage();
+    fetchDailyPrompt();
+    // Re-fetch on foreground so a session that spans midnight UTC quietly
+    // picks up the new daily prompt without a manual reload.
     const sub = AppState.addEventListener("change", (state: AppStateStatus) => {
       if (state === "active") {
         fetchTokenUsage();
+        fetchDailyPrompt();
       }
     });
     return () => sub.remove();
@@ -671,6 +683,35 @@ export default function SolenceScreen({
       }
     } catch (e) {
       console.log("Error fetching token usage:", e);
+    }
+  };
+
+  // Pull today's gentle prompt. Public endpoint, no auth needed. Failures
+  // are silent — the static starter chips are sufficient on their own, so
+  // a flaky network shouldn't degrade the home screen.
+  const fetchDailyPrompt = async () => {
+    try {
+      const apiUrl = getApiUrl();
+      const response = await fetch(`${apiUrl}/api/daily-prompt`);
+      if (!response.ok) return;
+      const data = (await response.json()) as {
+        prompt?: string;
+        topic?: string;
+        dateKey?: string;
+      };
+      if (
+        typeof data.prompt === "string" &&
+        typeof data.topic === "string" &&
+        typeof data.dateKey === "string"
+      ) {
+        setDailyPrompt({
+          prompt: data.prompt,
+          topic: data.topic,
+          dateKey: data.dateKey,
+        });
+      }
+    } catch (e) {
+      console.log("Error fetching daily prompt:", e);
     }
   };
 
@@ -1628,38 +1669,87 @@ export default function SolenceScreen({
             </Animated.View>
 
             {showStarters && voiceState === "idle" && !currentMessage ? (
-              <Animated.View
-                entering={FadeIn.duration(800).delay(800)}
-                style={styles.startersContainer}
-              >
-                {STARTER_PROMPTS.map((prompt, index) => (
-                  <Pressable
-                    key={index}
-                    onPress={() => {
-                      setTextInputValue(prompt);
-                    }}
-                    style={({ pressed }) => [
-                      styles.starterChip,
-                      {
-                        backgroundColor: isDark
-                          ? "rgba(255,255,255,0.06)"
-                          : "rgba(0,0,0,0.04)",
-                        borderColor: isDark
-                          ? "rgba(255,255,255,0.08)"
-                          : "rgba(0,0,0,0.06)",
-                        opacity: pressed ? 0.7 : 1,
-                      },
-                    ]}
-                    testID={`starter-prompt-${index}`}
+              <>
+                {dailyPrompt ? (
+                  <Animated.View
+                    entering={FadeIn.duration(800).delay(600)}
+                    style={styles.dailyPromptWrap}
                   >
-                    <Text
-                      style={[styles.starterText, { color: theme.textMuted }]}
+                    <Pressable
+                      onPress={() => {
+                        Haptics.selectionAsync().catch(() => {});
+                        setTextInputValue(dailyPrompt.prompt);
+                      }}
+                      style={({ pressed }) => [
+                        styles.dailyPromptCard,
+                        {
+                          backgroundColor: isDark
+                            ? "rgba(214, 107, 50, 0.14)"
+                            : "rgba(214, 107, 50, 0.10)",
+                          borderColor: isDark
+                            ? "rgba(214, 107, 50, 0.45)"
+                            : "rgba(214, 107, 50, 0.35)",
+                          opacity: pressed ? 0.75 : 1,
+                        },
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Today's prompt: ${dailyPrompt.prompt}`}
+                      testID="daily-prompt-card"
                     >
-                      {prompt}
-                    </Text>
-                  </Pressable>
-                ))}
-              </Animated.View>
+                      <Text
+                        style={[
+                          styles.dailyPromptLabel,
+                          { color: theme.orbPrimary },
+                        ]}
+                        testID="text-daily-prompt-label"
+                      >
+                        Today
+                      </Text>
+                      <Text
+                        style={[
+                          styles.dailyPromptText,
+                          { color: theme.text },
+                        ]}
+                        testID="text-daily-prompt"
+                      >
+                        {dailyPrompt.prompt}
+                      </Text>
+                    </Pressable>
+                  </Animated.View>
+                ) : null}
+                <Animated.View
+                  entering={FadeIn.duration(800).delay(800)}
+                  style={styles.startersContainer}
+                >
+                  {STARTER_PROMPTS.map((prompt, index) => (
+                    <Pressable
+                      key={index}
+                      onPress={() => {
+                        setTextInputValue(prompt);
+                      }}
+                      style={({ pressed }) => [
+                        styles.starterChip,
+                        {
+                          backgroundColor: isDark
+                            ? "rgba(255,255,255,0.06)"
+                            : "rgba(0,0,0,0.04)",
+                          borderColor: isDark
+                            ? "rgba(255,255,255,0.08)"
+                            : "rgba(0,0,0,0.06)",
+                          opacity: pressed ? 0.7 : 1,
+                        },
+                      ]}
+                      testID={`starter-prompt-${index}`}
+                    >
+                      <Text
+                        style={[styles.starterText, { color: theme.textMuted }]}
+                      >
+                        {prompt}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </Animated.View>
+              </>
             ) : null}
           </View>
 
@@ -1968,6 +2058,37 @@ const styles = StyleSheet.create({
     fontWeight: "500",
     fontFamily: FontFamily.medium,
     letterSpacing: 0.5,
+  },
+  dailyPromptWrap: {
+    width: "100%",
+    paddingHorizontal: Spacing.md,
+    paddingBottom: Spacing.sm,
+    alignItems: "center",
+  },
+  dailyPromptCard: {
+    width: "100%",
+    maxWidth: 360,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.lg,
+    borderRadius: BorderRadius.xl,
+    borderWidth: 1,
+    alignItems: "center",
+    gap: 4,
+  },
+  dailyPromptLabel: {
+    fontSize: 10,
+    fontWeight: "600",
+    fontFamily: FontFamily.medium,
+    letterSpacing: 2,
+    textTransform: "uppercase",
+  },
+  dailyPromptText: {
+    fontSize: 15,
+    fontWeight: "400",
+    fontFamily: FontFamily.regular,
+    letterSpacing: 0.3,
+    textAlign: "center",
+    lineHeight: 22,
   },
   startersContainer: {
     flexDirection: "row",
