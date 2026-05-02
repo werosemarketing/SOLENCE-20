@@ -44,7 +44,13 @@ export default function OnboardingScreen({ authToken, onComplete }: Props) {
 
   const [step, setStep] = useState<Step>("welcome");
   const [name, setName] = useState("");
-  const [intents, setIntents] = useState<Intent[]>([]);
+  // Preselect a couple of broadly-useful intents so first-time users see the
+  // multi-select pattern immediately and can tap to deselect what doesn't fit.
+  // They can still skip and end up with no intents saved.
+  const [intents, setIntents] = useState<Intent[]>([
+    "process_emotions",
+    "daily_reflection",
+  ]);
   const [tone, setTone] = useState<Tone | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
