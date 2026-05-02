@@ -3,6 +3,7 @@ import { BackHandler, Platform } from "react-native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import type { NavigatorScreenParams } from "@react-navigation/native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as Linking from "expo-linking";
 import DisclaimerScreen from "@/screens/DisclaimerScreen";
 import OnboardingScreen from "@/screens/OnboardingScreen";
 import UserAgreementScreen from "@/screens/UserAgreementScreen";
@@ -31,13 +32,61 @@ export type RootStackParamList = {
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
+// Pull a referral code out of any URL the app is opened with. Tolerant
+// of both deep-link form (`solence://signup?ref=CODE`) and the web
+// fallback URL we generate server-side (`https://host/?ref=CODE`).
+// Returns null when nothing useful is present.
+function extractReferralCode(url: string | null | undefined): string | null {
+  if (!url) return null;
+  try {
+    const parsed = Linking.parse(url);
+    const ref = parsed.queryParams?.ref;
+    if (typeof ref !== "string") return null;
+    const trimmed = ref.trim().toLowerCase().slice(0, 32);
+    return trimmed.length > 0 ? trimmed : null;
+  } catch {
+    return null;
+  }
+}
+
 export default function RootStackNavigator() {
   const screenOptions = useScreenOptions();
   const [stage, setStage] = useState<AppStage>("loading");
   const [authToken, setAuthToken] = useState<string | null>(null);
+  // Most recently observed referral code from a deep link. Passed into
+  // AuthScreen as `initialReferralCode` so the sign-up form prefills.
+  // Kept in state so a deep-link arriving after launch (app already open
+  // on the auth screen) still updates the input.
+  const [pendingReferralCode, setPendingReferralCode] = useState<string | null>(
+    null,
+  );
 
   useEffect(() => {
     checkProgress();
+  }, []);
+
+  // Listen for inbound deep links. Both the cold-start URL and live
+  // events are handled so we capture `?ref=CODE` whether the app was
+  // launched by the link or merely focused while running.
+  useEffect(() => {
+    let cancelled = false;
+    Linking.getInitialURL()
+      .then((initialUrl) => {
+        if (cancelled) return;
+        const code = extractReferralCode(initialUrl);
+        if (code) setPendingReferralCode(code);
+      })
+      .catch(() => {
+        // Non-fatal: a missing initial URL just means no deep-link launch.
+      });
+    const sub = Linking.addEventListener("url", (event) => {
+      const code = extractReferralCode(event?.url);
+      if (code) setPendingReferralCode(code);
+    });
+    return () => {
+      cancelled = true;
+      sub.remove();
+    };
   }, []);
 
   useEffect(() => {
@@ -164,7 +213,12 @@ export default function RootStackNavigator() {
   }
 
   if (stage === "auth") {
-    return <AuthScreen onAuthenticated={handleAuthenticated} />;
+    return (
+      <AuthScreen
+        onAuthenticated={handleAuthenticated}
+        initialReferralCode={pendingReferralCode}
+      />
+    );
   }
 
   if (stage === "disclaimer") {

@@ -43,6 +43,13 @@
       "when": 1777900000000,
       "tag": "0005_add_crisis_support_to_messages",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1777950000000,
+      "tag": "0006_add_referrals",
+      "breakpoints": true
     }
   ]
 }

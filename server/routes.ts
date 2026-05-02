@@ -26,6 +26,15 @@ import {
   type MoodPhase,
   type UserPreferences,
 } from "@shared/schema";
+import {
+  allocateUniqueReferralCode,
+  buildReferralShareUrl,
+  ensureReferralCodeForUser,
+  getActiveReferralCredit,
+  getReferralJoinedCount,
+  grantReferralCredit,
+  normalizeReferralCode,
+} from "./referrals";
 import { eq, desc, inArray, and, lt, gte, isNull } from "drizzle-orm";
 import {
   MIN_TOKENS_FOR_REQUEST,
@@ -630,9 +639,11 @@ async function seedTestAccount(): Promise<void> {
 
     const hashedPassword = await bcrypt.hash("testuser123", 10);
     if (existing.length === 0) {
+      const referralCode = await allocateUniqueReferralCode();
       await db.insert(users).values({
         email: "testuser@solence.ai",
         password: hashedPassword,
+        referralCode,
       });
       console.log("Test account seeded: testuser@solence.ai");
     } else {
@@ -640,6 +651,16 @@ async function seedTestAccount(): Promise<void> {
         .update(users)
         .set({ password: hashedPassword })
         .where(eq(users.email, "testuser@solence.ai"));
+      // Lazily backfill the referral code on the existing test row so
+      // the invite card has something to render on first launch.
+      try {
+        await ensureReferralCodeForUser(existing[0].id);
+      } catch (err) {
+        console.error(
+          "Failed to backfill test account referral code:",
+          err instanceof Error ? err.message : err,
+        );
+      }
       console.log("Test account password updated: testuser@solence.ai");
     }
   } catch (error) {
@@ -833,21 +854,81 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "Password must be at least 6 characters" });
       }
 
+      const normalizedEmail = email.toLowerCase().trim();
       const existing = await db
         .select()
         .from(users)
-        .where(eq(users.email, email.toLowerCase().trim()))
+        .where(eq(users.email, normalizedEmail))
         .limit(1);
 
       if (existing.length > 0) {
         return res.status(409).json({ error: "An account with this email already exists" });
       }
 
+      // Resolve the optional referral code BEFORE insert so we can fail
+      // fast on a self-referral (caller is using their own code, which
+      // can only happen if they actually own the email matching that
+      // code) and so the new user row is born with `referredBy` set.
+      const inboundReferralCode = normalizeReferralCode(req.body?.referralCode);
+      let referrer:
+        | { id: string; email: string }
+        | null = null;
+      let referralCodeError: string | null = null;
+      if (inboundReferralCode.length > 0) {
+        const [match] = await db
+          .select({ id: users.id, email: users.email })
+          .from(users)
+          .where(eq(users.referralCode, inboundReferralCode))
+          .limit(1);
+        if (!match) {
+          referralCodeError = "That referral code isn't valid";
+        } else if (match.email === normalizedEmail) {
+          // Self-referral: someone trying to use their own code on a new
+          // account with the same email. Reject so neither side gets the
+          // free week.
+          referralCodeError = "You can't refer yourself";
+        } else {
+          referrer = match;
+        }
+      }
+      if (referralCodeError) {
+        return res.status(400).json({ error: referralCodeError });
+      }
+
       const hashedPassword = await bcrypt.hash(password, 10);
+      const newUserCode = await allocateUniqueReferralCode();
       const [newUser] = await db
         .insert(users)
-        .values({ email: email.toLowerCase().trim(), password: hashedPassword })
+        .values({
+          email: normalizedEmail,
+          password: hashedPassword,
+          referralCode: newUserCode,
+          referredBy: referrer?.id ?? null,
+        })
         .returning();
+
+      // Grant the matching pair of free-week credits when a referral
+      // actually completed. Failures here never block registration —
+      // the user is created either way, we just log the credit failure.
+      if (referrer) {
+        try {
+          await grantReferralCredit({
+            userId: referrer.id,
+            source: "referrer",
+            referralUserId: newUser.id,
+          });
+          await grantReferralCredit({
+            userId: newUser.id,
+            source: "referee",
+            referralUserId: referrer.id,
+          });
+        } catch (creditError) {
+          console.error(
+            "Failed to grant referral credit:",
+            creditError instanceof Error ? creditError.message : creditError,
+          );
+        }
+      }
 
       const token = jwt.sign(
         { userId: newUser.id, email: newUser.email } satisfies AuthPayload,
@@ -859,6 +940,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         token,
         user: { id: newUser.id, email: newUser.email },
         preferences: serializePreferences(newUser),
+        referralApplied: referrer !== null,
       });
     } catch (error) {
       console.error("Registration error:", error);
@@ -1110,7 +1192,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/tokens", requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.user!.userId;
-      const used = await getTokensUsed(userId);
+      const [used, credit] = await Promise.all([
+        getTokensUsed(userId),
+        getActiveReferralCredit(userId),
+      ]);
       const remaining = Math.max(0, FREE_TOKEN_LIMIT - used);
       res.json({
         tokensUsed: used,
@@ -1118,12 +1203,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
         tokenLimit: FREE_TOKEN_LIMIT,
         nextResetAt: getNextPeriodStart().toISOString(),
         period: "day",
+        // When `referralCredit` is non-null the daily cap is bypassed
+        // for this user until `endsAt`. The client renders a different
+        // balance line ("Unlimited (free week from referral)…") and
+        // hides the upgrade nudge.
+        referralCredit: credit
+          ? { endsAt: credit.endsAt.toISOString(), source: "referral" }
+          : null,
       });
     } catch (error) {
       console.error("Token check error:", error);
       res.status(500).json({ error: "Failed to check token usage" });
     }
   });
+
+  // Returns the data the Profile invite card needs in a single round
+  // trip: the user's personal code, a copyable share URL, how many
+  // friends have already joined via that code, and the current active
+  // free-week credit (if any).
+  app.get(
+    "/api/referrals",
+    requireAuth,
+    async (req: Request, res: Response) => {
+      try {
+        const userId = req.user!.userId;
+        const code = await ensureReferralCodeForUser(userId);
+        const [joinedCount, credit] = await Promise.all([
+          getReferralJoinedCount(userId),
+          getActiveReferralCredit(userId),
+        ]);
+        res.json({
+          code,
+          shareUrl: buildReferralShareUrl(code),
+          joinedCount,
+          activeCredit: credit
+            ? { endsAt: credit.endsAt.toISOString() }
+            : null,
+        });
+      } catch (error) {
+        console.error("Referral fetch error:", error);
+        res.status(500).json({ error: "Failed to load referral details" });
+      }
+    },
+  );
 
   app.get("/api/tokens/history", requireAuth, async (req: Request, res: Response) => {
     try {
@@ -1818,19 +1940,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
         targetConversationTitle = owned.title;
       }
 
-      const reservation = await tryReserveTokens(userId, MIN_TOKENS_FOR_REQUEST);
-      if (!reservation.ok) {
-        return res.status(429).json({
-          error: "Daily token limit reached",
-          tokensUsed: reservation.tokensUsed,
-          tokensRemaining: Math.max(0, FREE_TOKEN_LIMIT - reservation.tokensUsed),
-          tokenLimit: FREE_TOKEN_LIMIT,
-          nextResetAt: getNextPeriodStart().toISOString(),
-          period: "day",
-        });
+      // Active referral credit acts as a subscription override: while
+      // it's in effect, we skip the daily-cap check entirely. We also
+      // skip recording usage during the credit window so the chart
+      // honestly reflects "this was free".
+      const activeCredit = await getActiveReferralCredit(userId);
+      const unlimitedMode = activeCredit !== null;
+
+      if (!unlimitedMode) {
+        const reservation = await tryReserveTokens(
+          userId,
+          MIN_TOKENS_FOR_REQUEST,
+        );
+        if (!reservation.ok) {
+          return res.status(429).json({
+            error: "Daily token limit reached",
+            tokensUsed: reservation.tokensUsed,
+            tokensRemaining: Math.max(
+              0,
+              FREE_TOKEN_LIMIT - reservation.tokensUsed,
+            ),
+            tokenLimit: FREE_TOKEN_LIMIT,
+            nextResetAt: getNextPeriodStart().toISOString(),
+            period: "day",
+          });
+        }
+        reservationActive = true;
+        reservedPeriodStart = reservation.periodStart;
       }
-      reservationActive = true;
-      reservedPeriodStart = reservation.periodStart;
 
       let userTranscript = text || "";
 
@@ -1850,8 +1987,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         if (!userTranscript || userTranscript.trim().length === 0) {
           // Refund the reservation against the same day it was reserved on.
-          await recordTokens(userId, -MIN_TOKENS_FOR_REQUEST, reservedPeriodStart);
-          reservationActive = false;
+          // In unlimited (referral-credit) mode we never reserved, so
+          // there's nothing to refund.
+          if (reservationActive && reservedPeriodStart) {
+            await recordTokens(
+              userId,
+              -MIN_TOKENS_FOR_REQUEST,
+              reservedPeriodStart,
+            );
+            reservationActive = false;
+          }
           const used = await getTokensUsed(userId);
           return res.status(400).json({
             error: "I couldn't quite catch that. Try again?",
@@ -2039,9 +2184,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const audioData = audioResponse?.data ?? "";
 
       const totalTokens = response.usage?.total_tokens || 0;
-      const additionalTokens = Math.max(0, totalTokens - MIN_TOKENS_FOR_REQUEST);
-      if (additionalTokens > 0) {
-        await recordTokens(userId, additionalTokens, reservedPeriodStart!);
+      // Skip usage recording entirely while a referral credit is active —
+      // the daily-cap chart honestly reflects "this was free during the
+      // unlimited window".
+      if (!unlimitedMode) {
+        const additionalTokens = Math.max(
+          0,
+          totalTokens - MIN_TOKENS_FOR_REQUEST,
+        );
+        if (additionalTokens > 0) {
+          await recordTokens(userId, additionalTokens, reservedPeriodStart!);
+        }
       }
       reservationActive = false;
 

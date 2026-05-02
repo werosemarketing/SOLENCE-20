@@ -14,6 +14,15 @@ export const users = pgTable("users", {
   tone: text("tone"),
   voice: text("voice"),
   onboardingCompletedAt: timestamp("onboarding_completed_at"),
+  // Personal share code printed on the Profile invite card. Generated on
+  // first registration (or lazily backfilled for legacy rows). Lower-cased
+  // alphanumerics, 8 chars — short enough to type, big enough to avoid
+  // collisions in any realistic install base.
+  referralCode: text("referral_code").unique(),
+  // The user who referred this account at signup. Set once at register
+  // time and never changed; used to prevent the same account being
+  // counted as a referee twice and to protect against self-referral.
+  referredBy: varchar("referred_by"),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
@@ -199,3 +208,49 @@ export type TokenUsage = typeof tokenUsage.$inferSelect;
 
 export const FREE_TOKEN_LIMIT = 15000;
 export const TOKEN_PERIOD = "day" as const;
+
+// Each successful referral grants this much "free" unlimited time to both
+// the referrer and the referee. Stored as ms so date arithmetic stays
+// boring and timezone-free.
+export const REFERRAL_CREDIT_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
+// Hard cap on how much credit a single user can stack. Multiple successful
+// referrals compound, but never beyond this window from "now" — keeps
+// the unlimited override from drifting indefinitely into the future.
+export const REFERRAL_CREDIT_MAX_STACK_MS = 4 * REFERRAL_CREDIT_DURATION_MS;
+
+// Source of a credit row. 'referrer' is the inviter; 'referee' is the
+// new account that signed up using the code. Stored as plain text so the
+// column can grow new sources later without a schema migration.
+export const REFERRAL_CREDIT_SOURCES = ["referrer", "referee"] as const;
+export type ReferralCreditSource = (typeof REFERRAL_CREDIT_SOURCES)[number];
+
+// Free-week credits granted to a user via the referral system. Each row
+// represents a single grant; the active credit window for a user is the
+// row with the latest `endsAt` that's still in the future. Indexed on
+// (user_id, ends_at) so the active-credit lookup stays cheap.
+export const referralCredits = pgTable(
+  "referral_credits",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    source: text("source").notNull(),
+    // The other user in the pair (referrer's row points at the referee
+    // and vice versa). Nullable so we don't lose the credit row if the
+    // counterparty is later deleted; foreign key omitted for the same
+    // reason — credits should outlive account deletions.
+    referralUserId: text("referral_user_id"),
+    startsAt: timestamp("starts_at").notNull(),
+    endsAt: timestamp("ends_at").notNull(),
+    createdAt: timestamp("created_at")
+      .default(sql`CURRENT_TIMESTAMP`)
+      .notNull(),
+  },
+  (table) => ({
+    userEndsIdx: index("referral_credits_user_ends_idx").on(
+      table.userId,
+      table.endsAt,
+    ),
+  }),
+);
+
+export type ReferralCredit = typeof referralCredits.$inferSelect;

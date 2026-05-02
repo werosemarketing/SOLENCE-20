@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Platform,
   Pressable,
+  Share,
   StyleSheet,
   Text,
   View,
@@ -97,6 +98,15 @@ type MoodEntry = {
 type MoodResponse = {
   days: number;
   entries: MoodEntry[];
+};
+
+// Shape returned by GET /api/referrals — what the invite card needs in
+// a single round trip.
+type ReferralResponse = {
+  code: string;
+  shareUrl: string;
+  joinedCount: number;
+  activeCredit: { endsAt: string } | null;
 };
 
 const MOOD_LABELS: Record<number, string> = {
@@ -261,6 +271,15 @@ export default function ProfileScreen() {
   const [moodEntries, setMoodEntries] = useState<MoodEntry[] | null>(null);
   const [moodLoading, setMoodLoading] = useState(true);
   const [moodError, setMoodError] = useState<string | null>(null);
+
+  // "Invite a friend" card state. Lazily loaded — failures degrade the
+  // card to a quiet error message instead of blocking the rest of
+  // Profile, since referrals are an optional feature.
+  const [referral, setReferral] = useState<ReferralResponse | null>(null);
+  const [referralLoading, setReferralLoading] = useState(true);
+  const [referralError, setReferralError] = useState<string | null>(null);
+  const [shareError, setShareError] = useState<string | null>(null);
+  const [shareInFlight, setShareInFlight] = useState(false);
 
   const [preferences, setPreferences] =
     useState<ClientPreferences>(EMPTY_PREFERENCES);
@@ -644,6 +663,34 @@ export default function ProfileScreen() {
     }
   }, []);
 
+  const loadReferral = useCallback(async (signal?: AbortSignal) => {
+    try {
+      setReferralLoading(true);
+      setReferralError(null);
+      const token = await AsyncStorage.getItem(STORAGE_KEY_AUTH_TOKEN);
+      const headers: Record<string, string> = {};
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const apiUrl = getApiUrl();
+      const response = await fetch(`${apiUrl}/api/referrals`, {
+        headers,
+        signal,
+      });
+      if (!response.ok) {
+        throw new Error(`Request failed (${response.status})`);
+      }
+      const data = (await response.json()) as ReferralResponse;
+      if (signal?.aborted) return;
+      setReferral(data);
+    } catch (e) {
+      if (signal?.aborted) return;
+      const message =
+        e instanceof Error ? e.message : "Could not load invite details";
+      setReferralError(message);
+    } finally {
+      if (!signal?.aborted) setReferralLoading(false);
+    }
+  }, []);
+
   const loadMoodEntries = useCallback(async (signal?: AbortSignal) => {
     try {
       setMoodLoading(true);
@@ -678,11 +725,39 @@ export default function ProfileScreen() {
       loadConversations(controller.signal);
       loadSavedMoments(controller.signal);
       loadMoodEntries(controller.signal);
+      // Refresh referral data on focus too — `joinedCount` and the
+      // active credit window may both change after a friend signs up
+      // (or the credit naturally expires).
+      loadReferral(controller.signal);
       return () => {
         controller.abort();
       };
-    }, [loadConversations, loadSavedMoments, loadMoodEntries]),
+    }, [loadConversations, loadSavedMoments, loadMoodEntries, loadReferral]),
   );
+
+  // Open the system share sheet with the user's invite blurb. We use
+  // React Native's built-in Share API rather than expo-sharing because
+  // we want to share text/URL (not a file) and it's available without
+  // an extra dependency. Falls back to a quiet error message if the
+  // sheet can't open (e.g. web platform without navigator.share).
+  const handleShareInvite = async () => {
+    if (!referral || shareInFlight) return;
+    setShareError(null);
+    setShareInFlight(true);
+    try {
+      const message = `Try Solence with me — your first week of unlimited reflection is on us. Use code ${referral.code.toUpperCase()} or open ${referral.shareUrl}`;
+      await Share.share({
+        message,
+        url: referral.shareUrl,
+      });
+    } catch (e) {
+      setShareError(
+        e instanceof Error ? e.message : "Couldn't open the share sheet",
+      );
+    } finally {
+      setShareInFlight(false);
+    }
+  };
 
   const handleOpenSavedMoment = (moment: SavedMoment) => {
     navigation.navigate("ConversationDetail", {
@@ -1808,6 +1883,166 @@ export default function ProfileScreen() {
         );
       })()}
 
+      <Card elevation={1} style={styles.inviteCard} testID="profile-invite-card">
+        <ThemedText type="h4" style={styles.cardTitle}>
+          Invite a friend, share a free week
+        </ThemedText>
+        <ThemedText
+          type="small"
+          style={[styles.cardDescription, { color: theme.textMuted }]}
+        >
+          When a friend signs up with your code, you both get a week of
+          unlimited reflection on us.
+        </ThemedText>
+
+        {referralLoading ? (
+          <View
+            style={styles.loadingContainer}
+            testID="profile-invite-loading"
+          >
+            <ActivityIndicator color={theme.orbPrimary} />
+          </View>
+        ) : referralError ? (
+          <View
+            style={styles.errorContainer}
+            testID="profile-invite-error"
+          >
+            <Text style={[styles.errorText, { color: theme.textMuted }]}>
+              {referralError}
+            </Text>
+            <Pressable
+              onPress={() => loadReferral()}
+              style={({ pressed }) => [
+                styles.personalizationRetry,
+                { opacity: pressed ? 0.6 : 1 },
+              ]}
+              testID="profile-invite-retry"
+            >
+              <Text
+                style={[
+                  styles.personalizationRetryText,
+                  { color: theme.orbPrimary },
+                ]}
+              >
+                Retry
+              </Text>
+            </Pressable>
+          </View>
+        ) : referral ? (
+          <View>
+            {referral.activeCredit ? (
+              <View
+                style={[
+                  styles.inviteCreditBanner,
+                  {
+                    backgroundColor: theme.backgroundSecondary,
+                    borderColor: theme.orbPrimary,
+                  },
+                ]}
+                testID="profile-invite-credit-banner"
+              >
+                <Feather
+                  name="gift"
+                  size={14}
+                  color={theme.orbPrimary}
+                />
+                <Text
+                  style={[
+                    styles.inviteCreditText,
+                    { color: theme.text },
+                  ]}
+                  testID="text-invite-credit"
+                >
+                  Free week active until{" "}
+                  {new Date(referral.activeCredit.endsAt).toLocaleDateString(
+                    undefined,
+                    { month: "short", day: "numeric" },
+                  )}
+                </Text>
+              </View>
+            ) : null}
+
+            <View
+              style={[
+                styles.inviteCodeBox,
+                {
+                  backgroundColor: theme.backgroundSecondary,
+                  borderColor: theme.backgroundSecondary,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.inviteCodeLabel,
+                  { color: theme.textMuted },
+                ]}
+              >
+                Your code
+              </Text>
+              <Text
+                style={[styles.inviteCode, { color: theme.text }]}
+                testID="text-referral-code"
+                selectable
+              >
+                {referral.code.toUpperCase()}
+              </Text>
+            </View>
+
+            <Pressable
+              onPress={handleShareInvite}
+              disabled={shareInFlight}
+              style={({ pressed }) => [
+                styles.inviteShareButton,
+                {
+                  backgroundColor: theme.orbPrimary,
+                  opacity: pressed ? 0.85 : shareInFlight ? 0.7 : 1,
+                },
+              ]}
+              testID="button-invite-share"
+              accessibilityRole="button"
+              accessibilityLabel="Share invite link"
+            >
+              {shareInFlight ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <>
+                  <Feather name="share-2" size={16} color="#fff" />
+                  <Text style={styles.inviteShareButtonText}>
+                    Share invite
+                  </Text>
+                </>
+              )}
+            </Pressable>
+
+            {shareError ? (
+              <Text
+                style={[
+                  styles.errorText,
+                  { color: theme.textMuted, marginTop: Spacing.sm },
+                ]}
+                testID="text-invite-share-error"
+              >
+                {shareError}
+              </Text>
+            ) : null}
+
+            <Text
+              style={[
+                styles.inviteCounter,
+                { color: theme.textMuted },
+              ]}
+              testID="text-referrals-count"
+            >
+              {referral.joinedCount === 0
+                ? "No friends have joined yet."
+                : referral.joinedCount === 1
+                  ? "1 friend has joined."
+                  : `${referral.joinedCount} friends have joined.`}
+            </Text>
+          </View>
+        ) : null}
+      </Card>
+
       <Card elevation={1} style={styles.conversationsCard}>
         <ThemedText type="h4" style={styles.cardTitle}>
           Recent conversations
@@ -2129,6 +2364,67 @@ const styles = StyleSheet.create({
     fontFamily: fontForWeight("400"),
     marginBottom: Spacing.sm,
     textAlign: "center",
+  },
+  inviteCard: {
+    marginTop: Spacing.lg,
+    paddingVertical: Spacing.xl,
+  },
+  inviteCreditBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.xs,
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    marginBottom: Spacing.md,
+  },
+  inviteCreditText: {
+    ...Typography.small,
+    fontFamily: fontForWeight("500"),
+    flex: 1,
+  },
+  inviteCodeBox: {
+    paddingVertical: Spacing.lg,
+    paddingHorizontal: Spacing.lg,
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    alignItems: "center",
+    gap: Spacing.xs,
+  },
+  inviteCodeLabel: {
+    ...Typography.small,
+    fontSize: 11,
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+    fontFamily: fontForWeight("500"),
+  },
+  inviteCode: {
+    ...Typography.h4,
+    fontFamily: fontForWeight("700"),
+    fontSize: 28,
+    letterSpacing: 4,
+  },
+  inviteShareButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: Spacing.sm,
+    paddingVertical: Spacing.md,
+    borderRadius: BorderRadius.full,
+    marginTop: Spacing.lg,
+  },
+  inviteShareButtonText: {
+    color: "#fff",
+    ...Typography.body,
+    fontFamily: fontForWeight("600"),
+    letterSpacing: 0.3,
+  },
+  inviteCounter: {
+    ...Typography.small,
+    fontFamily: fontForWeight("400"),
+    textAlign: "center",
+    marginTop: Spacing.md,
   },
   conversationsCard: {
     marginTop: Spacing.lg,

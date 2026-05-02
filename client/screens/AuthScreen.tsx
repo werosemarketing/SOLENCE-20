@@ -19,16 +19,30 @@ import { getApiUrl } from "@/lib/query-client";
 
 type Props = {
   onAuthenticated: (token: string) => void;
+  // Optional referral code captured from a deep link
+  // (`solence://signup?ref=CODE`). When present, we drop the user into
+  // sign-up mode with the code prefilled so they don't have to retype
+  // it.
+  initialReferralCode?: string | null;
 };
 
-export default function AuthScreen({ onAuthenticated }: Props) {
+export default function AuthScreen({
+  onAuthenticated,
+  initialReferralCode,
+}: Props) {
   const insets = useSafeAreaInsets();
   const { theme, isDark } = useTheme();
 
-  const [isSignUp, setIsSignUp] = useState(false);
+  // If a deep-link delivered a referral code, default to sign-up so the
+  // user actually sees / can edit the prefilled code.
+  const hasInitialCode = Boolean(initialReferralCode && initialReferralCode.trim().length > 0);
+  const [isSignUp, setIsSignUp] = useState(hasInitialCode);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [referralCode, setReferralCode] = useState(
+    initialReferralCode ? initialReferralCode.trim().toLowerCase() : "",
+  );
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
@@ -58,10 +72,20 @@ export default function AuthScreen({ onAuthenticated }: Props) {
     try {
       const apiUrl = getApiUrl();
       const endpoint = isSignUp ? "/api/auth/register" : "/api/auth/login";
+      // Trim/normalize the referral code on the way out so a stray
+      // copy-paste with surrounding whitespace doesn't break matching.
+      const trimmedReferral = referralCode.trim();
+      const body: Record<string, unknown> = {
+        email: email.trim(),
+        password,
+      };
+      if (isSignUp && trimmedReferral.length > 0) {
+        body.referralCode = trimmedReferral;
+      }
       const response = await fetch(`${apiUrl}${endpoint}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim(), password }),
+        body: JSON.stringify(body),
       });
 
       const data = await response.json();
@@ -192,6 +216,35 @@ export default function AuthScreen({ onAuthenticated }: Props) {
                   onChangeText={setConfirmPassword}
                   secureTextEntry
                   testID="input-confirm-password"
+                />
+              </View>
+            ) : null}
+
+            {isSignUp ? (
+              <View
+                style={[
+                  styles.inputContainer,
+                  {
+                    backgroundColor: isDark
+                      ? "rgba(255,255,255,0.06)"
+                      : "rgba(0,0,0,0.04)",
+                    borderColor: isDark
+                      ? "rgba(255,255,255,0.1)"
+                      : "rgba(0,0,0,0.08)",
+                  },
+                ]}
+              >
+                <TextInput
+                  style={[styles.input, { color: theme.text }]}
+                  placeholder="Referral code (optional)"
+                  placeholderTextColor={theme.textMuted}
+                  value={referralCode}
+                  onChangeText={(value) =>
+                    setReferralCode(value.toLowerCase())
+                  }
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  testID="input-referral-code"
                 />
               </View>
             ) : null}
