@@ -78,6 +78,7 @@ ensurePreviewReachable = "/status"
 
 [userenv.shared]
 SOLENCE_API_URL = "https://solence-joelgarciamendez.replit.app"
+EXPO_UNSTABLE_HEADLESS = "1"
 
 [postMerge]
 path = "scripts/post-merge.sh"
