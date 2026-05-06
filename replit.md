@@ -158,6 +158,16 @@ Response:
 - Backend: `npm run server:dev` (port 5000)
 - Test on device: Scan QR code with Expo Go
 
+## Publishing (deployment build)
+- Build cmd: `node tools/build-with-prewarm.js && npm run server:build`
+- `tools/build-with-prewarm.js` patches `@react-native/debugger-shell` to a no-op
+  (avoids Chromium SUID-sandbox failure in the build container) AND pre-starts
+  Metro with a 5-minute readiness window before invoking `scripts/build.js`
+  (which only allows 60s). When `scripts/build.js` runs, it sees Metro already
+  on `:8081/status` and skips its own short-timeout startup, going straight to
+  bundle download.
+- Run cmd: `npm run server:prod`. Target: autoscale.
+
 ## User Preferences
 - Minimal, organic design aesthetic
 - Burnt orange / warm cream color palette (from solence.ai brand)
