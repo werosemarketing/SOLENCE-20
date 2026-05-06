@@ -5,8 +5,8 @@ modules = ["nodejs-22", "python-3.11", "postgresql-16"]
 channel = "stable-24_05"
 
 [deployment]
-deploymentTarget = "cloudrun"
-build = ["sh", "-c", "npm run expo:static:build && npm run server:build"]
+deploymentTarget = "autoscale"
+build = ["sh", "-c", "node tools/patch-expo-debugger.js && npm run expo:static:build && npm run server:build"]
 run = ["npm", "run", "server:prod"]
 
 [[ports]]
@@ -78,7 +78,6 @@ ensurePreviewReachable = "/status"
 
 [userenv.shared]
 SOLENCE_API_URL = "https://solence-joelgarciamendez.replit.app"
-EXPO_UNSTABLE_HEADLESS = "1"
 
 [postMerge]
 path = "scripts/post-merge.sh"
