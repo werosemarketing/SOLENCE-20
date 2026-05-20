@@ -1,0 +1,45 @@
+⌛️ Submitting iOS build...
+- Dashboard:    https://appstoreconnect.apple.com/apps/6760660535/distribution
+- App:          Solence (app.replit.solence)
+- Build number: 9
+- Binary path:  ./ios/build/Solence.ipa
+-------------------
+--- Step: pilot ---
+-------------------
+Creating authorization token for App Store Connect API
+Ready to upload new build to TestFlight (App: 6760660535)...
+Going to upload updated app to App Store Connect
+This might take a few minutes. Please don't interrupt the script.
+[altool] Running altool at path '/Applications/Xcode.app/Contents/SharedFrameworks/ContentDelivery.framework/Resources/altool'...
+[altool] 
+[altool] 2026-05-19 18:33:40.694 ERROR: [ContentDelivery.Uploader.6000019C4440] 
+[altool] =======================================
+[altool] UPLOAD FAILED with 2 errors
+[altool] =======================================
+[altool] Failed to upload package.
+[altool] 2026-05-19 18:33:40.698 ERROR: [altool.6000019C4440] Validation failed (409) Invalid Pre-Release Train. The train version '1.0.0' is closed for new build submissions (ID: 96e2536f-8d9b-41ad-ab7b-7d6e1100c863)
+[altool]    NSUnderlyingError : Validation failed (-19241) Invalid Pre-Release Train. The train version '1.0.0' is closed for new build submissions
+[altool]       status : 409
+[altool]       detail : Invalid Pre-Release Train. The train version '1.0.0' is closed for new build submissions
+[altool]       id : 96e2536f-8d9b-41ad-ab7b-7d6e1100c863
+[altool]       code : STATE_ERROR.VALIDATION_ERROR
+[altool]       title : Validation failed
+[altool]    iris-code : STATE_ERROR.VALIDATION_ERROR
+[altool] Validation failed (409) This bundle is invalid. The value for key CFBundleShortVersionString [1.0.0] in the Info.plist file must contain a higher version than that of the previously approved version [1.0.0]. Please find more information about CFBundleShortVersionString at https://developer.apple.com/documentation/bundleresources/information_property_list/cfbundleshortversionstring (ID: 9b7e59e9-ff7c-4900-82bc-e7c71b8593fb)
+[altool]    NSUnderlyingError : Validation failed (-19241) This bundle is invalid. The value for key CFBundleShortVersionString [1.0.0] in the Info.plist file must contain a higher version than that of the previously approved version [1.0.0]. Please find more information about CFBundleShortVersionString at https://developer.apple.com/documentation/bundleresources/information_property_list/cfbundleshortversionstring
+[altool]       status : 409
+[altool]       detail : This bundle is invalid. The value for key CFBundleShortVersionString [1.0.0] in the Info.plist file must contain a higher version than that of the previously approved version [1.0.0]. Please find more information about CFBundleShortVersionString at https://developer.apple.com/documentation/bundleresources/information_property_list/cfbundleshortversionstring
+[altool]       id : 9b7e59e9-ff7c-4900-82bc-e7c71b8593fb
+[altool]       code : STATE_ERROR.VALIDATION_ERROR
+[altool]       title : Validation failed
+[altool]    iris-code : STATE_ERROR.VALIDATION_ERROR
+[altool] 
+Application Loader output above ^
+m[ContentDelivery.Uploader.6000019C4440] 
+m[altool.6000019C4440] Validation failed (409) Invalid Pre-Release Train. The train version '1.0.0' is closed for new build submissions (ID: 96e2536f-8d9b-41ad-ab7b-7d6e1100c863)
+Could not download/upload from App Store Connect!
+[!] Error uploading ipa file: 
+ [Application Loader Error Output]: [ContentDelivery.Uploader.6000019C4440] 
+lication Loader Error Output]: [altool.6000019C4440] Validation failed (409) Invalid Pre-Release Train. The train version '1.0.0' is closed for new build submissions (ID: 96e2536f-8d9b-41ad-ab7b-7d6e1100c863)
+Error: fastlane run pilot ipa:app-34ca23c9-a7ba-412e-9bc2-132084702650.ipa apple_id:6760660535 skip_waiting_for_build_processing:true api_key_path:asc_api_key-7a4ab11f-733a-40df-9ba1-fee3143b9173.json exited with non-zero code: 1
+/bin/bash -eo pipefail /var/folders/51/y6phq4kx54bdjkgn5fc44z3m0000gn/T/eas-build/d68111a4-43da-40af-af5b-0a2892f6a4c2/steps/step-017/scripts/beeb46fb-3d63-4ebb-9e70-6c2d2e931cea.sh exited with non-zero code: 1

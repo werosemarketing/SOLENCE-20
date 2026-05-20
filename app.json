@@ -2,7 +2,7 @@
   "expo": {
     "name": "Solence",
     "slug": "solence",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "solence",
@@ -11,6 +11,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.solence.app",
+      "buildNumber": "10",
       "usesAppleSignIn": true,
       "infoPlist": {
         "NSMicrophoneUsageDescription": "Solence needs microphone access to hear your voice and provide thoughtful responses."
