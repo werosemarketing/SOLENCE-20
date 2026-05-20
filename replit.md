@@ -19,6 +19,18 @@ Solence is a voice-first AI companion app for meditation, reflection, and emotio
 - Brand aligned with solence.ai (official icon, colors, font)
 - Test account for Apple review: testuser@solence.ai / TestPass123
 
+### Sign in with Apple — accepted audiences
+The `/api/auth/apple` endpoint verifies the Apple identity token against a list
+of allowed `aud` (audience) values. The list defaults to the production iOS
+bundle ID `com.solence.app` and can be extended via the `APPLE_BUNDLE_IDS`
+env var (comma-separated, e.g. `com.solence.app.dev,com.solence.app.staging`).
+If "Sign in with Apple" starts returning "Could not verify Apple identity
+token" with `unexpected "aud" claim value`, check the server logs — the
+verifier now logs the offending `tokenAud`/`tokenIss` alongside the
+`acceptedAudiences` list — and add the actual `aud` value to
+`APPLE_BUNDLE_IDS` (this usually happens when the App Store / provisioning
+profile bundle differs from `com.solence.app`).
+
 ## Project Architecture
 
 ### Frontend (React Native/Expo)

@@ -3,7 +3,7 @@ import { createServer, type Server } from "node:http";
 import express from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import { createRemoteJWKSet, jwtVerify } from "jose";
+import { createRemoteJWKSet, decodeJwt, jwtVerify } from "jose";
 import { openai, detectAudioFormat, speechToText, textToSpeech } from "./replit_integrations/audio";
 import { db } from "./db";
 import {
@@ -1410,9 +1410,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
         payload = verified.payload;
       } catch (err) {
+        // Decode (without re-verifying the signature) so we can log the
+        // offending `aud`/`iss` values. Apple tokens are signed JWTs and
+        // we already failed verification above, so we only use this for
+        // diagnostics — never for trusting claims.
+        let tokenAud: unknown;
+        let tokenIss: unknown;
+        try {
+          const unverified = decodeJwt(identityToken);
+          tokenAud = unverified.aud;
+          tokenIss = unverified.iss;
+        } catch {
+          // Token was not a decodable JWT — fall through with undefined.
+        }
         console.error(
           "Apple identity token verification failed:",
           err instanceof Error ? err.message : err,
+          {
+            tokenAud,
+            tokenIss,
+            acceptedAudiences: APPLE_AUDIENCES,
+            acceptedIssuer: APPLE_ISSUER,
+          },
         );
         return res
           .status(401)
