@@ -1,0 +1,40 @@
+Migrate this React Native / Expo project from the deprecated expo-av library to the modern replacements expo-audio and expo-video. Do not change any app functionality — this is a like-for-like API migration only.
+
+Steps to follow:
+
+1. Audit current usage — Search all files for imports from expo-av (e.g. Audio, Video, AVPlaybackStatus, Sound, ResizeMode, etc.) and list every file and usage pattern before making changes.
+
+2. Install new packages — Run:
+npx expo install expo-audio expo-video
+
+3. Migrate Audio — Replace all expo-av Audio usage with expo-audio equivalents:
+import { Audio } from 'expo-av' → import { useAudioPlayer, useAudioPlayerStatus, AudioModule } from 'expo-audio'
+Audio.Sound.createAsync(source, initialStatus) → useAudioPlayer(source) hook; call player.play() to start
+sound.playAsync() → player.play()
+sound.pauseAsync() → player.pause()
+sound.stopAsync() → player.remove() or player.seekTo(0) then player.pause()
+sound.unloadAsync() → player.remove()
+sound.setPositionAsync(ms) → player.seekTo(ms / 1000) (expo-audio uses seconds)
+sound.setVolumeAsync(vol) → player.volume = vol
+sound.setIsLoopingAsync(bool) → player.loop = bool
+Audio.setAudioModeAsync(config) → AudioModule.setAudioModeAsync(config) (check expo-audio docs for exact option names — some keys differ)
+AVPlaybackStatus fields → use useAudioPlayerStatus(player) hook which returns { playing, currentTime, duration, ... }
+Replace any onPlaybackStatusUpdate callbacks with the useAudioPlayerStatus hook pattern
+
+4. Migrate Video — Replace all expo-av Video usage with expo-video equivalents:
+import { Video, ResizeMode } from 'expo-av' → import { VideoView, useVideoPlayer } from 'expo-video'
+Create a player: const player = useVideoPlayer(source, p => { p.loop = true; p.play(); })
+Replace <Video source={...} resizeMode={ResizeMode.CONTAIN} ... /> → <VideoView player={player} contentFit="contain" ... />
+ResizeMode.CONTAIN → contentFit="contain", ResizeMode.COVER → contentFit="cover", ResizeMode.STRETCH → contentFit="fill"
+ref.current.playAsync() → player.play()
+ref.current.pauseAsync() → player.pause()
+onPlaybackStatusUpdate → use useEvent(player, 'playingChange', ...) or useEvent(player, 'statusChange', ...)
+AVPlaybackStatus fields on video → player.currentTime, player.duration, player.playing, player.muted, etc.
+
+5. Remove expo-av — After all usages are migrated:
+npm uninstall expo-av
+Also remove it from app.json / app.config.js plugins array if present.
+
+6. Verify — Confirm there are zero remaining imports from expo-av in the codebase using a search. Check that package.json no longer lists expo-av.
+
+7. Do not add new features, change UI, alter navigation, rename files, or refactor anything unrelated to this migration.
