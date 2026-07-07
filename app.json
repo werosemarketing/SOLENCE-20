@@ -28,7 +28,10 @@
       "predictiveBackGestureEnabled": false,
       "package": "com.solence.app",
       "permissions": [
-        "android.permission.RECORD_AUDIO"
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
       ]
     },
     "web": {
@@ -65,6 +68,12 @@
     ],
     "experiments": {
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "3e250854-b7e0-4842-8b0b-b25122a8a41c"
+      }
+    },
+    "owner": "werose-solence"
   }
 }
