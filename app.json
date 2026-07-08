@@ -11,10 +11,11 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.solence.app",
-      "buildNumber": "10",
+      "buildNumber": "12",
       "usesAppleSignIn": true,
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "Solence needs microphone access to hear your voice and provide thoughtful responses."
+        "NSMicrophoneUsageDescription": "Solence needs microphone access to hear your voice and provide thoughtful responses.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
