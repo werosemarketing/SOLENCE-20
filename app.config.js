@@ -1,0 +1,84 @@
+const IS_DEV = process.env.APP_VARIANT === "development";
+
+module.exports = {
+  expo: {
+    name: IS_DEV ? "Solence (Dev)" : "Solence",
+    slug: "solence",
+    version: "1.0.1",
+    orientation: "portrait",
+    icon: "./assets/images/icon.png",
+    scheme: IS_DEV ? "solence-dev" : "solence",
+    userInterfaceStyle: "automatic",
+    newArchEnabled: true,
+    ios: {
+      supportsTablet: true,
+      bundleIdentifier: IS_DEV ? "com.solence.app.dev" : "com.solence.app",
+      buildNumber: "12",
+      usesAppleSignIn: true,
+      infoPlist: {
+        NSMicrophoneUsageDescription:
+          "Solence needs microphone access to hear your voice and provide thoughtful responses.",
+        ITSAppUsesNonExemptEncryption: false,
+      },
+    },
+    android: {
+      adaptiveIcon: {
+        backgroundColor: "#FAF1E7",
+        foregroundImage: "./assets/images/android-icon-foreground.png",
+        backgroundImage: "./assets/images/android-icon-background.png",
+        monochromeImage: "./assets/images/android-icon-monochrome.png",
+      },
+      edgeToEdgeEnabled: true,
+      predictiveBackGestureEnabled: false,
+      package: IS_DEV ? "com.solence.app.dev" : "com.solence.app",
+      permissions: [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+      ],
+    },
+    web: {
+      output: "single",
+      favicon: "./assets/images/favicon.png",
+    },
+    plugins: [
+      [
+        "expo-splash-screen",
+        {
+          image: "./assets/images/splash-icon.png",
+          imageWidth: 200,
+          resizeMode: "contain",
+          backgroundColor: "#FAF1E7",
+          dark: {
+            backgroundColor: "#1a1625",
+          },
+        },
+      ],
+      "expo-web-browser",
+      "expo-apple-authentication",
+      [
+        "expo-audio",
+        {
+          microphonePermission:
+            "Solence needs microphone access to hear your voice and provide thoughtful responses.",
+        },
+      ],
+      "expo-localization",
+      "@react-native-community/datetimepicker",
+      "expo-font",
+      "expo-image",
+      "expo-secure-store",
+      "expo-sharing",
+    ],
+    experiments: {
+      reactCompiler: true,
+    },
+    extra: {
+      eas: {
+        projectId: "3e250854-b7e0-4842-8b0b-b25122a8a41c",
+      },
+    },
+    owner: "werose-solence",
+  },
+};
