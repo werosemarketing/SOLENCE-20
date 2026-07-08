@@ -21,7 +21,6 @@
       "distribution": "internal"
     },
     "production": {
-      "autoIncrement": true,
       "env": {
         "EXPO_PUBLIC_DOMAIN": "solence-20--sdanvudi.replit.app"
       }
