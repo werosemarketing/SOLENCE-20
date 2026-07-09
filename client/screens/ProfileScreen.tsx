@@ -2080,6 +2080,22 @@ export default function ProfileScreen() {
       scrollIndicatorInsets={{ bottom: insets.bottom }}
       testID="screen-profile"
     >
+      {__DEV__ ? (
+        <Card
+          elevation={1}
+          style={styles.headerCard}
+          title="DEV: Preview Upgrade Screen"
+          description="Dev-only shortcut, bypasses the token-limit check. Stripped from release builds."
+          onPress={() =>
+            navigation.navigate("Upgrade", {
+              tokenLimit,
+              resetLabel: "tomorrow",
+            })
+          }
+          testID="dev-preview-upgrade-screen"
+        />
+      ) : null}
+
       <Card elevation={1} style={styles.headerCard}>
         <View style={styles.personalizationHeader}>
           <View style={styles.personalizationHeaderText}>

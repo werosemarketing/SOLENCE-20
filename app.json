@@ -14,7 +14,8 @@
       "buildNumber": "10",
       "usesAppleSignIn": true,
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "Solence needs microphone access to hear your voice and provide thoughtful responses."
+        "NSMicrophoneUsageDescription": "Solence needs microphone access to hear your voice and provide thoughtful responses.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -28,7 +29,10 @@
       "predictiveBackGestureEnabled": false,
       "package": "com.solence.app",
       "permissions": [
-        "android.permission.RECORD_AUDIO"
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
       ]
     },
     "web": {
@@ -65,6 +69,11 @@
     ],
     "experiments": {
       "reactCompiler": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "89a5dfcc-9f1f-4dc9-98c2-535f1539bb35"
+      }
     }
   }
 }
