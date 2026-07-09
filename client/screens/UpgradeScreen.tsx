@@ -107,7 +107,7 @@ export default function UpgradeScreen({ navigation, route }: Props) {
           styles.scrollContent,
           {
             paddingTop: insets.top + Spacing["3xl"] + Spacing.xl,
-            paddingBottom: insets.bottom + Spacing.xl,
+            paddingBottom: insets.bottom + Spacing["3xl"] + Spacing.xl,
           },
         ]}
         showsVerticalScrollIndicator={false}
