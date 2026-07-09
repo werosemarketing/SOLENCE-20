@@ -1,10 +1,13 @@
-import React from "react";
+import React, { useState } from "react";
 import {
   View,
   Text,
   StyleSheet,
   Pressable,
   ScrollView,
+  Modal,
+  ActivityIndicator,
+  Alert,
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -17,6 +20,7 @@ import { useTranslation } from "react-i18next";
 import { useTheme } from "@/hooks/useTheme";
 import { Spacing, BorderRadius, FontFamily } from "@/constants/theme";
 import type { RootStackParamList } from "@/navigation/RootStackNavigator";
+import { useSubscription } from "@/lib/revenuecat";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Upgrade">;
 
@@ -33,9 +37,20 @@ export default function UpgradeScreen({ navigation, route }: Props) {
   const insets = useSafeAreaInsets();
   const { theme, isDark } = useTheme();
   const { t } = useTranslation();
+  const { offerings, purchase, restore, isPurchasing, isRestoring } = useSubscription();
+
+  const [confirmVisible, setConfirmVisible] = useState(false);
 
   const tokenLimit = route.params?.tokenLimit ?? 15000;
   const resetLabel = route.params?.resetLabel ?? t("upgrade.freePlan.tomorrow");
+
+  // Derive price from RevenueCat — fall back to hardcoded strings if not loaded
+  const currentOffering = offerings?.current;
+  const packageToPurchase = currentOffering?.availablePackages[0] ?? null;
+  const priceString = packageToPurchase?.product.priceString ?? t("upgrade.priceAmount");
+  const priceLabel = packageToPurchase
+    ? `${priceString} / ${t("upgrade.pricePer").trim()}`
+    : t("upgrade.price");
 
   const formatTokens = (tokens: number) => {
     if (tokens >= 1000) {
@@ -49,12 +64,42 @@ export default function UpgradeScreen({ navigation, route }: Props) {
     ? (["#0f0c14", "#1a1625", "#1f1a2e", "#1a1625", "#0f0c14"] as const)
     : (["#F5EBDD", "#FAF1E7", "#FDF6F0", "#FAF1E7", "#F5EBDD"] as const);
 
+  const doPurchase = async () => {
+    if (!packageToPurchase) return;
+    try {
+      await purchase(packageToPurchase);
+      navigation.goBack();
+    } catch (e: any) {
+      if (!e?.userCancelled) {
+        Alert.alert(t("upgrade.errors.purchaseFailed"));
+      }
+    }
+  };
+
   const handleSubscribe = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    // Subscription purchase flow is not wired up yet — close the screen so
-    // the user returns to the conversation. When billing is added the call
-    // here will trigger the in-app purchase instead.
-    navigation.goBack();
+    if (!packageToPurchase) return;
+    if (__DEV__) {
+      // In dev/test mode show a confirmation modal before triggering purchase
+      setConfirmVisible(true);
+    } else {
+      doPurchase();
+    }
+  };
+
+  const handleRestore = async () => {
+    Haptics.selectionAsync();
+    try {
+      const info = await restore();
+      const hasActive = Object.keys(info.entitlements.active).length > 0;
+      if (hasActive) {
+        navigation.goBack();
+      } else {
+        Alert.alert(t("upgrade.errors.noPurchases"));
+      }
+    } catch {
+      Alert.alert(t("upgrade.errors.restoreFailed"));
+    }
   };
 
   const handleClose = () => {
@@ -67,7 +112,7 @@ export default function UpgradeScreen({ navigation, route }: Props) {
   const featuredBorder = theme.orbPrimary;
   const featuredBg = isDark ? "rgba(214, 107, 50, 0.12)" : "rgba(214, 107, 50, 0.08)";
 
-  const priceLabel = t("upgrade.price");
+  const isBusy = isPurchasing || isRestoring;
 
   return (
     <View style={styles.container}>
@@ -78,6 +123,7 @@ export default function UpgradeScreen({ navigation, route }: Props) {
         end={{ x: 0.5, y: 1 }}
       />
 
+      {/* Close button */}
       <View
         style={[
           styles.closeButtonContainer,
@@ -124,6 +170,7 @@ export default function UpgradeScreen({ navigation, route }: Props) {
           </Text>
         </Animated.View>
 
+        {/* Free plan card */}
         <Animated.View
           entering={FadeIn.duration(600).delay(150)}
           style={[
@@ -173,6 +220,7 @@ export default function UpgradeScreen({ navigation, route }: Props) {
           </View>
         </Animated.View>
 
+        {/* Unlimited plan card */}
         <Animated.View
           entering={FadeIn.duration(600).delay(300)}
           style={[
@@ -199,7 +247,7 @@ export default function UpgradeScreen({ navigation, route }: Props) {
             </View>
             <View style={styles.planPriceBlock}>
               <Text style={[styles.planPrice, { color: theme.text }]} testID="unlimited-price">
-                {t("upgrade.priceAmount")}
+                {priceString}
               </Text>
               <Text style={[styles.planPricePer, { color: theme.textMuted }]}>
                 {t("upgrade.pricePer")}
@@ -234,6 +282,7 @@ export default function UpgradeScreen({ navigation, route }: Props) {
         </Text>
       </ScrollView>
 
+      {/* Sticky CTA */}
       <View
         style={[
           styles.ctaContainer,
@@ -250,23 +299,33 @@ export default function UpgradeScreen({ navigation, route }: Props) {
       >
         <Pressable
           onPress={handleSubscribe}
+          disabled={isBusy || !packageToPurchase}
           style={({ pressed }) => [
             styles.ctaButton,
-            { backgroundColor: theme.orbPrimary, opacity: pressed ? 0.9 : 1 },
+            {
+              backgroundColor: theme.orbPrimary,
+              opacity: pressed || isBusy || !packageToPurchase ? 0.7 : 1,
+            },
           ]}
           accessibilityLabel={t("upgrade.subscribeA11y", { price: priceLabel })}
           accessibilityRole="button"
           testID="upgrade-subscribe-button"
         >
-          <Text style={styles.ctaButtonText}>
-            {t("upgrade.ctaUpgrade", { price: priceLabel })}
-          </Text>
+          {isPurchasing ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.ctaButtonText}>
+              {t("upgrade.ctaUpgrade", { price: priceString })}
+            </Text>
+          )}
         </Pressable>
+
         <Pressable
           onPress={handleClose}
+          disabled={isBusy}
           style={({ pressed }) => [
             styles.maybeLaterButton,
-            { opacity: pressed ? 0.6 : 1 },
+            { opacity: pressed || isBusy ? 0.6 : 1 },
           ]}
           testID="upgrade-maybe-later-button"
         >
@@ -274,7 +333,84 @@ export default function UpgradeScreen({ navigation, route }: Props) {
             {t("upgrade.maybeLater")}
           </Text>
         </Pressable>
+
+        <Pressable
+          onPress={handleRestore}
+          disabled={isBusy}
+          style={({ pressed }) => [
+            styles.restoreButton,
+            { opacity: pressed || isBusy ? 0.6 : 1 },
+          ]}
+          testID="upgrade-restore-button"
+        >
+          {isRestoring ? (
+            <ActivityIndicator size="small" color={theme.textMuted} />
+          ) : (
+            <Text style={[styles.restoreText, { color: theme.textMuted }]}>
+              {t("upgrade.restore")}
+            </Text>
+          )}
+        </Pressable>
       </View>
+
+      {/* Dev-mode purchase confirmation modal */}
+      <Modal
+        visible={confirmVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setConfirmVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View
+            style={[
+              styles.modalCard,
+              {
+                backgroundColor: isDark ? "#1a1625" : "#fff",
+                borderColor: isDark ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.1)",
+              },
+            ]}
+          >
+            <Text style={[styles.modalTitle, { color: theme.text }]}>
+              DEV: Confirm Test Purchase
+            </Text>
+            <Text style={[styles.modalBody, { color: theme.textMuted }]}>
+              This will trigger a RevenueCat test-store purchase for{"\n"}
+              <Text style={{ color: theme.orbPrimary, fontFamily: FontFamily.bold }}>
+                Solence Unlimited — {priceString}/mo
+              </Text>
+              {"\n\n"}No real payment will be charged.
+            </Text>
+            <View style={styles.modalActions}>
+              <Pressable
+                onPress={() => setConfirmVisible(false)}
+                style={({ pressed }) => [
+                  styles.modalBtn,
+                  styles.modalBtnCancel,
+                  {
+                    backgroundColor: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)",
+                    opacity: pressed ? 0.7 : 1,
+                  },
+                ]}
+              >
+                <Text style={[styles.modalBtnText, { color: theme.textMuted }]}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => {
+                  setConfirmVisible(false);
+                  doPurchase();
+                }}
+                style={({ pressed }) => [
+                  styles.modalBtn,
+                  styles.modalBtnConfirm,
+                  { backgroundColor: theme.orbPrimary, opacity: pressed ? 0.85 : 1 },
+                ]}
+              >
+                <Text style={[styles.modalBtnText, { color: "#fff" }]}>Purchase</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -468,5 +604,58 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: FontFamily.regular,
     letterSpacing: 0.3,
+  },
+  restoreButton: {
+    alignItems: "center",
+    paddingVertical: Spacing.xs,
+    paddingBottom: Spacing.sm,
+  },
+  restoreText: {
+    fontSize: 12,
+    fontFamily: FontFamily.regular,
+    letterSpacing: 0.2,
+  },
+  // Modal
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.6)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: Spacing.xl,
+  },
+  modalCard: {
+    width: "100%",
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    padding: Spacing.xl,
+    gap: Spacing.lg,
+  },
+  modalTitle: {
+    fontSize: 17,
+    fontFamily: FontFamily.bold,
+    fontWeight: "600",
+    letterSpacing: 0.2,
+  },
+  modalBody: {
+    fontSize: 14,
+    lineHeight: 21,
+    fontFamily: FontFamily.regular,
+  },
+  modalActions: {
+    flexDirection: "row",
+    gap: Spacing.md,
+  },
+  modalBtn: {
+    flex: 1,
+    paddingVertical: Spacing.md,
+    borderRadius: BorderRadius.full,
+    alignItems: "center",
+  },
+  modalBtnCancel: {},
+  modalBtnConfirm: {},
+  modalBtnText: {
+    fontSize: 15,
+    fontFamily: FontFamily.medium,
+    fontWeight: "500",
   },
 });

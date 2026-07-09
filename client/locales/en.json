@@ -603,6 +603,7 @@
     "fineprint": "Cancel anytime. Your subscription supports the work behind Solence.",
     "ctaUpgrade": "Upgrade — {{price}}",
     "maybeLater": "Maybe later",
+    "restore": "Restore purchases",
     "closeA11y": "Close upgrade screen",
     "subscribeA11y": "Upgrade to Solence Unlimited for {{price}}",
     "errors": {
