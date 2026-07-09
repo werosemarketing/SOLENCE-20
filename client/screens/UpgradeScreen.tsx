@@ -73,9 +73,29 @@ export default function UpgradeScreen({ navigation, route }: Props) {
       await purchase(packageToPurchase);
       navigation.goBack();
     } catch (e: any) {
-      if (!e?.userCancelled) {
-        Alert.alert(t("upgrade.errors.purchaseFailed"));
+      // User deliberately cancelled — no alert needed
+      if (e?.userCancelled) return;
+
+      // StoreKit still has a pending transaction from a previous attempt
+      // (e.g. user backgrounded the app mid-purchase)
+      if (e?.code === "15") {
+        Alert.alert(
+          "Purchase In Progress",
+          "A previous purchase is still being processed by the App Store. Please wait a moment and try again."
+        );
+        return;
       }
+
+      // Timed out waiting for StoreKit
+      if (e?.timedOut) {
+        Alert.alert(
+          "Taking Too Long",
+          "The purchase is taking longer than expected. Check your App Store account — if no charge appeared, try again."
+        );
+        return;
+      }
+
+      Alert.alert(t("upgrade.errors.purchaseFailed"));
     }
   };
 

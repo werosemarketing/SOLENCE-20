@@ -77,7 +77,15 @@ function useSubscriptionContext() {
 
   const purchaseMutation = useMutation({
     mutationFn: async (pkg: PurchasesPackage) => {
-      const { customerInfo } = await Purchases.purchasePackage(pkg);
+      // Race against a 30-second timeout so the spinner never hangs forever
+      // if the StoreKit sheet is dismissed while the app is backgrounded.
+      const timeout = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(Object.assign(new Error("Purchase timed out"), { timedOut: true })), 30000)
+      );
+      const { customerInfo } = await Promise.race([
+        Purchases.purchasePackage(pkg),
+        timeout,
+      ]);
       return customerInfo;
     },
     onSuccess: () => customerInfoQuery.refetch(),
