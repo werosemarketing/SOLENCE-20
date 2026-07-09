@@ -11,18 +11,32 @@ const REVENUECAT_ANDROID_API_KEY = process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_AP
 export const REVENUECAT_ENTITLEMENT_IDENTIFIER = "unlimited";
 
 function getRevenueCatApiKey(): string {
-  if (!REVENUECAT_TEST_API_KEY || !REVENUECAT_IOS_API_KEY || !REVENUECAT_ANDROID_API_KEY) {
-    throw new Error("RevenueCat Public API Keys not found — run the seed script and set the secrets");
-  }
-
   // Dev builds, Expo Go, and web always use the test store key
   if (__DEV__ || Platform.OS === "web" || Constants.executionEnvironment === "storeClient") {
+    if (!REVENUECAT_TEST_API_KEY) {
+      throw new Error("EXPO_PUBLIC_REVENUECAT_TEST_API_KEY is not set");
+    }
     return REVENUECAT_TEST_API_KEY;
   }
 
-  if (Platform.OS === "ios") return REVENUECAT_IOS_API_KEY;
-  if (Platform.OS === "android") return REVENUECAT_ANDROID_API_KEY;
+  if (Platform.OS === "ios") {
+    if (!REVENUECAT_IOS_API_KEY) {
+      throw new Error("EXPO_PUBLIC_REVENUECAT_IOS_API_KEY is not set");
+    }
+    return REVENUECAT_IOS_API_KEY;
+  }
 
+  if (Platform.OS === "android") {
+    if (!REVENUECAT_ANDROID_API_KEY) {
+      throw new Error("EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY is not set");
+    }
+    return REVENUECAT_ANDROID_API_KEY;
+  }
+
+  // Fallback for any other platform (test store)
+  if (!REVENUECAT_TEST_API_KEY) {
+    throw new Error("EXPO_PUBLIC_REVENUECAT_TEST_API_KEY is not set");
+  }
   return REVENUECAT_TEST_API_KEY;
 }
 
@@ -30,22 +44,35 @@ export function initializeRevenueCat() {
   const apiKey = getRevenueCatApiKey();
   Purchases.setLogLevel(Purchases.LOG_LEVEL.DEBUG);
   Purchases.configure({ apiKey });
+  markRevenueCatReady();
   console.log("[RevenueCat] Configured with key ending in …" + apiKey.slice(-6));
 }
 
 // ── Context ──────────────────────────────────────────────────────────────────
 
+// Module-level flag set by initializeRevenueCat so queries don't fire
+// if initialization failed (e.g. missing key in dev).
+let _rcReady = false;
+export function markRevenueCatReady() { _rcReady = true; }
+export function isRevenueCatReady() { return _rcReady; }
+
 function useSubscriptionContext() {
+  const ready = _rcReady;
+
   const customerInfoQuery = useQuery({
     queryKey: ["revenuecat", "customer-info"],
     queryFn: () => Purchases.getCustomerInfo(),
     staleTime: 60 * 1000,
+    enabled: ready,
+    retry: 1,
   });
 
   const offeringsQuery = useQuery({
     queryKey: ["revenuecat", "offerings"],
     queryFn: () => Purchases.getOfferings(),
     staleTime: 300 * 1000,
+    enabled: ready,
+    retry: 1,
   });
 
   const purchaseMutation = useMutation({
@@ -64,11 +91,17 @@ function useSubscriptionContext() {
   const isSubscribed =
     customerInfoQuery.data?.entitlements.active?.[REVENUECAT_ENTITLEMENT_IDENTIFIER] !== undefined;
 
+  const offeringsError = offeringsQuery.error;
+  const customerInfoError = customerInfoQuery.error;
+
   return {
     customerInfo: customerInfoQuery.data,
     offerings: offeringsQuery.data,
     isSubscribed,
-    isLoading: customerInfoQuery.isLoading || offeringsQuery.isLoading,
+    isReady: ready,
+    isLoading: ready && (customerInfoQuery.isLoading || offeringsQuery.isLoading),
+    offeringsError,
+    customerInfoError,
     purchase: purchaseMutation.mutateAsync,
     restore: restoreMutation.mutateAsync,
     isPurchasing: purchaseMutation.isPending,

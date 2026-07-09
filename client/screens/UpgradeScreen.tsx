@@ -44,9 +44,12 @@ export default function UpgradeScreen({ navigation, route }: Props) {
   const tokenLimit = route.params?.tokenLimit ?? 15000;
   const resetLabel = route.params?.resetLabel ?? t("upgrade.freePlan.tomorrow");
 
-  // Derive price from RevenueCat — fall back to hardcoded strings if not loaded
+  // Derive price from RevenueCat — select by identifier, fall back to hardcoded
   const currentOffering = offerings?.current;
-  const packageToPurchase = currentOffering?.availablePackages[0] ?? null;
+  const packageToPurchase =
+    currentOffering?.availablePackages.find((p) => p.identifier === "$rc_monthly") ??
+    currentOffering?.availablePackages[0] ??
+    null;
   const priceString = packageToPurchase?.product.priceString ?? t("upgrade.priceAmount");
   const priceLabel = packageToPurchase
     ? `${priceString} / ${t("upgrade.pricePer").trim()}`
