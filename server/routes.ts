@@ -3560,19 +3560,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
         })),
       ];
 
+      // Two-call flow (much cheaper than single gpt-audio call whose audio
+      // output tokens cost ~$64/1M):
+      //   1. Full-quality text model generates the reply at text pricing.
+      //   2. gpt-4o-mini-tts synthesizes the spoken audio from that text.
       const response = await openai.chat.completions.create({
-        model: "gpt-audio",
-        modalities: ["text", "audio"],
-        audio: { voice: selectedVoice, format: "mp3" },
+        model: "gpt-5.1",
         messages: chatHistory as Parameters<typeof openai.chat.completions.create>[0]["messages"],
       });
 
-      const message = response.choices[0]?.message;
-      const audioResponse = message && "audio" in message ? (message as { audio?: { transcript?: string; data?: string }; content?: string | null }).audio : undefined;
-      const assistantTranscript = audioResponse?.transcript || message?.content || "";
-      const audioData = audioResponse?.data ?? "";
+      const assistantTranscript = response.choices[0]?.message?.content || "";
 
-      const totalTokens = response.usage?.total_tokens || 0;
+      let audioData = "";
+      if (assistantTranscript) {
+        const speech = await openai.audio.speech.create({
+          model: "gpt-4o-mini-tts",
+          voice: selectedVoice,
+          input: assistantTranscript,
+          response_format: "mp3",
+        });
+        audioData = Buffer.from(await speech.arrayBuffer()).toString("base64");
+      }
+
+      // The TTS endpoint doesn't report token usage, so estimate its input
+      // tokens from the transcript length (~4 chars/token) and sum with the
+      // chat call's usage so the daily free-tier accounting stays sensible.
+      const ttsTokensEstimate = Math.ceil(assistantTranscript.length / 4);
+      const totalTokens = (response.usage?.total_tokens || 0) + ttsTokensEstimate;
       // Skip usage recording entirely while a referral credit is active —
       // the daily-cap chart honestly reflects "this was free during the
       // unlimited window".

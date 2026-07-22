@@ -53,7 +53,7 @@ profile bundle differs from `com.solence.app`).
 
 ### Voice Chat API
 - POST `/api/chat/voice` with JSON body containing `audio` (base64) and/or `text`, plus `sessionId`
-- When audio is provided: transcribes via STT first (supports all mobile formats: m4a, mp4, webm, wav, mp3), then sends transcribed text to gpt-audio for response
+- When audio is provided: transcribes via STT first (supports all mobile formats: m4a, mp4, webm, wav, mp3), then uses a two-call flow: gpt-5.1 generates the reply text (text-only, normal text pricing), then gpt-4o-mini-tts synthesizes the spoken audio from that text (much cheaper than the previous single gpt-audio call, whose audio output tokens cost ~$64/1M). Token accounting sums the chat call's usage plus an estimate of TTS input tokens (~4 chars/token; the TTS endpoint doesn't report usage)
 - No ffmpeg dependency - uses OpenAI transcription API which natively handles all audio formats
 - Returns JSON with `text`, `userTranscript`, `audioBase64`, `audioFormat`, `tokensUsed`, `tokensRemaining`, `tokenLimit`, `nextResetAt`, `period`
 - GET `/api/tokens` returns current token usage balance, daily limit, and the next reset timestamp

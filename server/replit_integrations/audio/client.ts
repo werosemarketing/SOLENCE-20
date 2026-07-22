@@ -106,8 +106,10 @@ export async function ensureCompatibleFormat(
 }
 
 /**
- * Voice Chat: User speaks, LLM responds with audio (audio-in, audio-out).
- * Uses gpt-audio model via Replit AI Integrations.
+ * Voice Chat: User speaks, LLM responds with audio.
+ * Two-call flow (cheaper than a single gpt-audio call):
+ *   1. Transcribe + reply with a text model at text pricing.
+ *   2. Synthesize the reply audio with gpt-4o-mini-tts.
  * Note: Browser records WebM/opus - convert to WAV using ffmpeg before calling this.
  */
 export async function voiceChat(
@@ -116,25 +118,26 @@ export async function voiceChat(
   inputFormat: "wav" | "mp3" = "wav",
   outputFormat: "wav" | "mp3" = "mp3"
 ): Promise<{ transcript: string; audioResponse: Buffer }> {
-  const audioBase64 = audioBuffer.toString("base64");
+  // 1. Transcribe the user's audio, then generate the reply as text only.
+  const userText = await speechToText(audioBuffer, inputFormat);
   const response = await openai.chat.completions.create({
-    model: "gpt-audio",
-    modalities: ["text", "audio"],
-    audio: { voice, format: outputFormat },
-    messages: [{
-      role: "user",
-      content: [
-        { type: "input_audio", input_audio: { data: audioBase64, format: inputFormat } },
-      ],
-    }],
+    model: "gpt-5.1",
+    messages: [{ role: "user", content: userText }],
   });
-  const message = response.choices[0]?.message as any;
-  const transcript = message?.audio?.transcript || message?.content || "";
-  const audioData = message?.audio?.data ?? "";
-  return {
-    transcript,
-    audioResponse: Buffer.from(audioData, "base64"),
-  };
+  const transcript = response.choices[0]?.message?.content || "";
+
+  // 2. Synthesize speech from the reply text.
+  let audioResponse = Buffer.alloc(0);
+  if (transcript) {
+    const speech = await openai.audio.speech.create({
+      model: "gpt-4o-mini-tts",
+      voice,
+      input: transcript,
+      response_format: outputFormat,
+    });
+    audioResponse = Buffer.from(await speech.arrayBuffer());
+  }
+  return { transcript, audioResponse };
 }
 
 /**
