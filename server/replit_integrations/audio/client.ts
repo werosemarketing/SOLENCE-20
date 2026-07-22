@@ -120,6 +120,10 @@ export async function voiceChat(
 ): Promise<{ transcript: string; audioResponse: Buffer }> {
   // 1. Transcribe the user's audio, then generate the reply as text only.
   const userText = await speechToText(audioBuffer, inputFormat);
+  if (!userText.trim()) {
+    // No speech detected — don't generate a reply to empty input.
+    return { transcript: "", audioResponse: Buffer.alloc(0) };
+  }
   const response = await openai.chat.completions.create({
     model: "gpt-5.1",
     messages: [{ role: "user", content: userText }],

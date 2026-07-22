@@ -3573,13 +3573,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       let audioData = "";
       if (assistantTranscript) {
-        const speech = await openai.audio.speech.create({
-          model: "gpt-4o-mini-tts",
-          voice: selectedVoice,
-          input: assistantTranscript,
-          response_format: "mp3",
-        });
-        audioData = Buffer.from(await speech.arrayBuffer()).toString("base64");
+        // If TTS fails after the chat call already succeeded, fall back to a
+        // text-only response rather than throwing — otherwise the outer catch
+        // would refund the reservation even though chat tokens were consumed.
+        try {
+          const speech = await openai.audio.speech.create({
+            model: "gpt-4o-mini-tts",
+            voice: selectedVoice,
+            input: assistantTranscript,
+            response_format: "mp3",
+          });
+          audioData = Buffer.from(await speech.arrayBuffer()).toString("base64");
+        } catch (ttsError) {
+          console.error("TTS synthesis failed, returning text-only response:", ttsError);
+        }
       }
 
       // The TTS endpoint doesn't report token usage, so estimate its input
