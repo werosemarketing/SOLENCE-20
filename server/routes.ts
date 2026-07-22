@@ -60,6 +60,7 @@ import {
   recordMessage,
 } from "./tokens";
 import { getDailyPromptForDate } from "./dailyPrompts";
+import { embedText, embedTexts, cosineSimilarity } from "./embeddings";
 
 const audioBodyParser = express.json({ limit: "50mb" });
 
@@ -564,7 +565,12 @@ async function persistUserMemories(
     }
     if (fresh.length === 0) return;
 
-    await db.insert(userMemories).values(fresh);
+    // Embed the new memory texts for similarity-based retrieval. Best-effort:
+    // failed embeddings insert as null and can be backfilled later.
+    const embeddings = await embedTexts(fresh.map((f) => f.text));
+    const rows = fresh.map((f, i) => ({ ...f, embedding: embeddings[i] }));
+
+    await db.insert(userMemories).values(rows);
 
     // Prune oldest-first whenever we're over the per-user cap. We pull
     // ids ordered by createdAt DESC, then DELETE everything past the
@@ -3497,12 +3503,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // memories verbatim, mirroring how `pastContext` is framed.
       let memoryBlock = "";
       try {
-        const memoryRows = await db
-          .select({ text: userMemories.text })
+        // Similarity-based retrieval: embed the current user message and
+        // rank this user's memories by cosine similarity in app code (the
+        // per-user set is capped at USER_MEMORY_MAX_PER_USER, so no vector
+        // DB needed). The 2 most recent memories are always blended in so
+        // brand-new context isn't dropped before it accrues relevance.
+        // Falls back to recency ordering when embedding is unavailable.
+        const allMemoryRows = await db
+          .select({
+            id: userMemories.id,
+            text: userMemories.text,
+            embedding: userMemories.embedding,
+          })
           .from(userMemories)
           .where(eq(userMemories.userId, userId))
-          .orderBy(desc(userMemories.createdAt), desc(userMemories.id))
-          .limit(USER_MEMORY_PROMPT_MAX_ITEMS);
+          .orderBy(desc(userMemories.createdAt), desc(userMemories.id));
+
+        let memoryRows: { text: string }[] = allMemoryRows;
+        const queryEmbedding =
+          allMemoryRows.some((r) => r.embedding) && userTranscript
+            ? await embedText(userTranscript)
+            : null;
+
+        if (queryEmbedding) {
+          const RECENT_ALWAYS_INCLUDE = 2;
+          const recentIds = new Set(
+            allMemoryRows.slice(0, RECENT_ALWAYS_INCLUDE).map((r) => r.id),
+          );
+          const ranked = allMemoryRows
+            .filter((r) => !recentIds.has(r.id))
+            .map((r) => ({
+              ...r,
+              score: r.embedding ? cosineSimilarity(queryEmbedding, r.embedding) : -1,
+            }))
+            .sort((a, b) => b.score - a.score);
+          memoryRows = [
+            ...allMemoryRows.slice(0, RECENT_ALWAYS_INCLUDE),
+            ...ranked,
+          ].slice(0, USER_MEMORY_PROMPT_MAX_ITEMS);
+        } else {
+          memoryRows = allMemoryRows.slice(0, USER_MEMORY_PROMPT_MAX_ITEMS);
+        }
+
         const selectedLines: string[] = [];
         let usedChars = 0;
         for (const row of memoryRows) {

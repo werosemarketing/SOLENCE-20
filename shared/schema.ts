@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, serial, integer, timestamp, index, uniqueIndex, boolean } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, serial, integer, timestamp, index, uniqueIndex, boolean, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -355,6 +355,10 @@ export const userMemories = pgTable(
       () => conversations.id,
       { onDelete: "set null" },
     ),
+    // text-embedding-3-small vector (1536 floats) for similarity-based
+    // retrieval. Nullable: rows written before embeddings existed (or when
+    // the embedding call failed) are backfilled lazily.
+    embedding: jsonb("embedding").$type<number[]>(),
     createdAt: timestamp("created_at")
       .default(sql`CURRENT_TIMESTAMP`)
       .notNull(),
