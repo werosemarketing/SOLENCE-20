@@ -1,0 +1,56 @@
+Logs for your project will appear below. Press Ctrl+C to exit.
+iOS Bundled 27305ms client/index.js (1905 modules)
+ LOG  [RevenueCat] Configured with key ending in …tgdZHG
+ WARN  [RevenueCat] ⚠️ Using a Test Store API key.
+The Test Store is for development only. Never use a Test Store API key in production. Test Store purchases are simulated, do not use StoreKit, and generate no revenue. Apps submitted with a Test Store API key will be rejected during App Review.
+ DEBUG  [RevenueCat] ℹ️ Configuring SDK using RevenueCat's UserDefaults suite.
+ DEBUG  [RevenueCat] 👤 Identifying App User ID
+ DEBUG  [RevenueCat] ℹ️ Debug logging enabled
+ DEBUG  [RevenueCat] ℹ️ SDK Version - 5.80.2
+ DEBUG  [RevenueCat] ℹ️ Bundle ID - com.solence.app.dev
+ DEBUG  [RevenueCat] ℹ️ System Version - Version 26.5.2 (Build 23F84)
+ DEBUG  [RevenueCat] ℹ️ Not using a simulator.
+ DEBUG  [RevenueCat] 👤 No initial App User ID
+ DEBUG  [RevenueCat] ℹ️ Purchases is configured with response verification disabled
+ DEBUG  [RevenueCat] ℹ️ Purchases is configured with StoreKit version 2
+ DEBUG  [RevenueCat] ℹ️ Delegate set
+ DEBUG  [RevenueCat] ℹ️ Offerings cache is stale, updating from network in foreground
+ DEBUG  [RevenueCat] ℹ️ GetCustomerInfoOperation: Started
+ DEBUG  [RevenueCat] ℹ️ There are no requests currently running, starting request GET /v1/subscribers/$RCAnonymousID%3Addc1bb095d474eda8a558c0321eecb42
+ DEBUG  [RevenueCat] ℹ️ API request started: GET '/v1/subscribers/$RCAnonymousID%3Addc1bb095d474eda8a558c0321eecb42'
+ DEBUG  [RevenueCat] ℹ️ API request completed: GET '/v1/subscribers/$RCAnonymousID%3Addc1bb095d474eda8a558c0321eecb42' (304)
+ DEBUG  [RevenueCat] 😻 CustomerInfo updated from network.
+ DEBUG  [RevenueCat] ℹ️ GetCustomerInfoOperation: Finished
+ DEBUG  [RevenueCat] ℹ️ Serial request done: GET /v1/subscribers/$RCAnonymousID%3Addc1bb095d474eda8a558c0321eecb42, 0 requests left in the queue
+ DEBUG  [RevenueCat] ℹ️ GetOfferingsOperation: Started
+ DEBUG  [RevenueCat] ℹ️ There are no requests currently running, starting request GET /v1/subscribers/$RCAnonymousID%3Addc1bb095d474eda8a558c0321eecb42/offerings
+ DEBUG  [RevenueCat] ℹ️ API request started: GET '/v1/subscribers/$RCAnonymousID%3Addc1bb095d474eda8a558c0321eecb42/offerings'
+ DEBUG  [RevenueCat] ℹ️ Vending CustomerInfo from cache.
+ DEBUG  [RevenueCat] ℹ️ No cached Offerings, fetching from network
+ DEBUG  [RevenueCat] ℹ️ Network operation 'GetOfferingsOperation' found with the same cache key 'GetOfferingsOpe…'. Skipping request.
+ DEBUG  [RevenueCat] ℹ️ API request completed: GET '/v1/subscribers/$RCAnonymousID%3Addc1bb095d474eda8a558c0321eecb42/offerings' (304)
+ DEBUG  [RevenueCat] ℹ️ No existing products cached, starting store products request for: ["yearly", "monthly"]
+ DEBUG  [RevenueCat] ℹ️ Found an existing request for products: ["yearly", "monthly"], appending to completion
+ DEBUG  [RevenueCat] ℹ️ GetOfferingsOperation: Finished
+ DEBUG  [RevenueCat] ℹ️ HealthReportAvailabilityOperation: Started
+ DEBUG  [RevenueCat] ℹ️ Serial request done: GET /v1/subscribers/$RCAnonymousID%3Addc1bb095d474eda8a558c0321eecb42/offerings, 0 requests left in the queue
+ DEBUG  [RevenueCat] ℹ️ There are no requests currently running, starting request GET /v1/subscribers/$RCAnonymousID%3Addc1bb095d474eda8a558c0321eecb42/health_report_availability
+ DEBUG  [RevenueCat] ℹ️ API request started: GET '/v1/subscribers/$RCAnonymousID%3Addc1bb095d474eda8a558c0321eecb42/health_report_availability'
+ DEBUG  [RevenueCat] ℹ️ API request completed: GET '/v1/subscribers/$RCAnonymousID%3Addc1bb095d474eda8a558c0321eecb42/health_report_availability' (200)
+ DEBUG  [RevenueCat] ℹ️ HealthReportAvailabilityOperation: Finished
+ DEBUG  [RevenueCat] ℹ️ Serial request done: GET /v1/subscribers/$RCAnonymousID%3Addc1bb095d474eda8a558c0321eecb42/health_report_availability, 0 requests left in the queue
+ DEBUG  [RevenueCat] ℹ️ GetWebBillingProductsOperation: Started
+ DEBUG  [RevenueCat] ℹ️ There are no requests currently running, starting request GET /rcbilling/v1/subscribers/$RCAnonymousID%3Addc1bb095d474eda8a558c0321eecb42/products?id=yearly&id=monthly
+ DEBUG  [RevenueCat] ℹ️ API request started: GET '/rcbilling/v1/subscribers/$RCAnonymousID%3Addc1bb095d474eda8a558c0321eecb42/products?id=yearly&id=monthly'
+ DEBUG  [RevenueCat] ℹ️ API request completed: GET '/rcbilling/v1/subscribers/$RCAnonymousID%3Addc1bb095d474eda8a558c0321eecb42/products?id=yearly&id=monthly' (304)
+ DEBUG  [RevenueCat] 😻 Offerings updated from network.
+ DEBUG  [RevenueCat] 😻 Offerings updated from network.
+ DEBUG  [RevenueCat] ℹ️ Warming up intro eligibility cache for 2 products
+ DEBUG  [RevenueCat] ℹ️ Skipping products request for these products because they were already cached: ["yearly", "monthly"]
+ DEBUG  [RevenueCat] ℹ️ Caching trial or intro eligibility for products: ["yearly", "monthly"]
+ DEBUG  [RevenueCat] ℹ️ GetWebBillingProductsOperation: Finished
+ DEBUG  [RevenueCat] ℹ️ Serial request done: GET /rcbilling/v1/subscribers/$RCAnonymousID%3Addc1bb095d474eda8a558c0321eecb42/products?id=yearly&id=monthly, 0 requests left in the queue
+ WARN  [RNScreens] Using both `blurEffect` and `scrollEdgeEffects` simultaneously may cause overlapping effects.
+ DEBUG  [RevenueCat] ℹ️ Finished syncing all cached transaction metadata
+ DEBUG  [RevenueCat] ℹ️ Vending Offerings from memory cache
+ INFO  [RevenueCat] 💰 Purchasing Product 'monthly' from package in Offering 'default

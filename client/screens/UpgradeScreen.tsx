@@ -74,13 +74,26 @@ export default function UpgradeScreen({ navigation, route }: Props) {
       // User deliberately cancelled — no alert needed
       if (e?.userCancelled) return;
 
-      // StoreKit still has a pending transaction from a previous attempt
-      // (e.g. user backgrounded the app mid-purchase)
+      // StoreKit has a dangling transaction from a previous attempt.
+      // Restore purchases to sync it — if it completed, the entitlement activates.
       if (e?.code === "15") {
-        Alert.alert(
-          "Purchase In Progress",
-          "A previous purchase is still being processed by the App Store. Please wait a moment and try again."
-        );
+        try {
+          const info = await restore();
+          const hasActive = Object.keys(info.entitlements.active).length > 0;
+          if (hasActive) {
+            navigation.goBack();
+          } else {
+            Alert.alert(
+              "Purchase Pending",
+              "A previous purchase is still being processed. Please wait a moment and try again."
+            );
+          }
+        } catch {
+          Alert.alert(
+            "Purchase Pending",
+            "A previous purchase is still being processed. Please wait a moment and try again."
+          );
+        }
         return;
       }
 
