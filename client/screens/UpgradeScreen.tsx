@@ -248,7 +248,7 @@ export default function UpgradeScreen({ navigation, route }: Props) {
             styles.planCardFeatured,
             { backgroundColor: featuredBg, borderColor: featuredBorder },
           ]}
-          testID="plan-card-unlimited"
+          testID="plan-card-premium"
         >
           <View style={styles.recommendedPill}>
             <Text style={styles.recommendedPillText}>
@@ -259,14 +259,14 @@ export default function UpgradeScreen({ navigation, route }: Props) {
           <View style={styles.planHeaderRow}>
             <View style={styles.planTitleBlock}>
               <Text style={[styles.planLabel, { color: theme.orbPrimary }]}>
-                {t("upgrade.unlimited.label")}
+                {t("upgrade.premium.label")}
               </Text>
               <Text style={[styles.planName, { color: theme.text }]}>
-                {t("upgrade.unlimited.name")}
+                {t("upgrade.premium.name")}
               </Text>
             </View>
             <View style={styles.planPriceBlock}>
-              <Text style={[styles.planPrice, { color: theme.text }]} testID="unlimited-price">
+              <Text style={[styles.planPrice, { color: theme.text }]} testID="premium-price">
                 {priceString}
               </Text>
               <Text style={[styles.planPricePer, { color: theme.textMuted }]}>
@@ -278,7 +278,7 @@ export default function UpgradeScreen({ navigation, route }: Props) {
           <View style={styles.planDivider} />
 
           {UNLIMITED_BENEFIT_KEYS.map((benefit, index) => (
-            <View key={benefit.key} style={styles.benefitRow} testID={`unlimited-benefit-${index}`}>
+            <View key={benefit.key} style={styles.benefitRow} testID={`premium-benefit-${index}`}>
               <Feather
                 name={benefit.icon}
                 size={18}

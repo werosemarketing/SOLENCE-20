@@ -8,7 +8,7 @@ const REVENUECAT_TEST_API_KEY = process.env.EXPO_PUBLIC_REVENUECAT_TEST_API_KEY;
 const REVENUECAT_IOS_API_KEY = process.env.EXPO_PUBLIC_REVENUECAT_IOS_API_KEY;
 const REVENUECAT_ANDROID_API_KEY = process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY;
 
-export const REVENUECAT_ENTITLEMENT_IDENTIFIER = "unlimited";
+export const REVENUECAT_ENTITLEMENT_IDENTIFIER = "premium";
 
 function getRevenueCatApiKey(): string {
   // Dev builds, Expo Go, and web always use the test store key

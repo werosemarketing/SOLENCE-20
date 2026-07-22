@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { tokenUsage, FREE_TOKEN_LIMIT } from "@shared/schema";
+import { tokenUsage, FREE_TOKEN_LIMIT, PREMIUM_MESSAGE_LIMIT } from "@shared/schema";
 import { eq, and, gte, sql } from "drizzle-orm";
 
 export const MIN_TOKENS_FOR_REQUEST = 500;
@@ -122,6 +122,35 @@ export async function recordTokens(
   await db.insert(tokenUsage).values({
     userId,
     tokensUsed: tokens,
+    periodStart,
+  });
+}
+
+/**
+ * Returns the number of messages used by a premium user today (UTC day).
+ */
+export async function getMessagesUsed(userId: string): Promise<number> {
+  const periodStart = getCurrentPeriodStart();
+  const result = await db
+    .select({ total: sql<number>`COALESCE(SUM(${tokenUsage.messagesUsed}), 0)::int` })
+    .from(tokenUsage)
+    .where(and(eq(tokenUsage.userId, userId), gte(tokenUsage.periodStart, periodStart)));
+  return result[0]?.total ?? 0;
+}
+
+/**
+ * Records one message consumed by a premium user. Called after a successful
+ * voice/chat response — no upfront reservation needed since the daily cap
+ * (250) is low-stakes enough that a slight race is acceptable.
+ */
+export async function recordMessage(
+  userId: string,
+  periodStart: Date = getCurrentPeriodStart(),
+): Promise<void> {
+  await db.insert(tokenUsage).values({
+    userId,
+    tokensUsed: 0,
+    messagesUsed: 1,
     periodStart,
   });
 }

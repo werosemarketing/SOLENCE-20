@@ -40,8 +40,8 @@ const APP_STORE_BUNDLE_ID = "com.solence.app";
 const PLAY_STORE_APP_NAME = "Solence Android";
 const PLAY_STORE_PACKAGE_NAME = "com.solence.app";
 
-const ENTITLEMENT_IDENTIFIER = "unlimited";
-const ENTITLEMENT_DISPLAY_NAME = "Unlimited Access";
+const ENTITLEMENT_IDENTIFIER = "premium";
+const ENTITLEMENT_DISPLAY_NAME = "Premium Access";
 
 const OFFERING_IDENTIFIER = "default";
 const OFFERING_DISPLAY_NAME = "Default Offering";

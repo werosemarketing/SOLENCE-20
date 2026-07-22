@@ -227,7 +227,7 @@
     },
     "subscriptionModal": {
       "title": "Solence needs to rest",
-      "body": "You've reached today's limit. Solence comes back {{when}}, or you can upgrade for unlimited conversations now.",
+      "body": "You've reached today's limit. Solence comes back {{when}}, or you can upgrade to Premium now.",
       "upgrade": "Upgrade",
       "maybeLater": "Maybe Later"
     },
@@ -252,7 +252,7 @@
       "resetIn": "Resets in {{duration}}",
       "resetTomorrow": "Resets tomorrow",
       "resetSoon": "Resets soon",
-      "upgradeCta": "Get unlimited"
+      "upgradeCta": "Get Premium"
     },
     "errors": {
       "permissionDenied": "Microphone access is needed to talk with Solence.",
@@ -523,8 +523,8 @@
     "upgrade": {
       "freePlanTitle": "Free plan",
       "freePlanSubtitle": "Daily reflections that reset each day.",
-      "upgradeTitle": "Solence Unlimited",
-      "upgradeSubtitle": "No daily limit. Take all the space you need.",
+      "upgradeTitle": "Solence Premium",
+      "upgradeSubtitle": "250 conversations per day. More than enough space.",
       "cta": "See plans"
     }
   },
@@ -564,10 +564,10 @@
     "legacyDefault": "Solence Session"
   },
   "upgrade": {
-    "header": "Solence Unlimited",
-    "eyebrow": "Solence Unlimited",
-    "headline": "Stay in conversation,\nas long as you need.",
-    "subhead": "On the free plan, Solence rests once you reach the daily limit. Upgrade and the conversation never has to pause.",
+    "header": "Solence Premium",
+    "eyebrow": "Solence Premium",
+    "headline": "Stay in conversation,\nevery day.",
+    "subhead": "On the free plan, Solence rests once you reach the daily limit. Premium gives you 250 conversations a day — more than enough space to process what matters.",
     "price": "$15.99 / month",
     "priceAmount": "$15.99",
     "pricePer": "per month",
@@ -581,15 +581,15 @@
       "restBody": "Comes back {{when}}.",
       "tomorrow": "tomorrow"
     },
-    "unlimited": {
-      "label": "Unlimited",
-      "name": "Solence, always available"
+    "premium": {
+      "label": "Premium",
+      "name": "Solence Premium"
     },
     "recommended": "Recommended",
     "benefits": {
       "convos": {
-        "title": "Unlimited conversations",
-        "body": "Talk to Solence whenever you need to — no daily ceiling, no waiting for a reset."
+        "title": "250 conversations per day",
+        "body": "Talk to Solence whenever you need to — 250 conversations a day is more than enough space."
       },
       "neverRests": {
         "title": "Solence never has to rest",
@@ -605,7 +605,7 @@
     "maybeLater": "Maybe later",
     "restore": "Restore purchases",
     "closeA11y": "Close upgrade screen",
-    "subscribeA11y": "Upgrade to Solence Unlimited for {{price}}",
+    "subscribeA11y": "Upgrade to Solence Premium for {{price}}",
     "errors": {
       "purchaseFailed": "Couldn't complete the purchase. Please try again.",
       "restoreFailed": "Couldn't restore. Please try again.",

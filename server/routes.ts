@@ -22,6 +22,7 @@ import {
   MOOD_SCORE_MIN,
   MOOD_SCORE_MAX,
   FREE_TOKEN_LIMIT,
+  PREMIUM_MESSAGE_LIMIT,
   TONE_OPTIONS,
   INTENT_OPTIONS,
   VOICE_OPTIONS,
@@ -53,8 +54,10 @@ import {
   getNextPeriodStart,
   getTokensUsed,
   getTokensUsedHistory,
+  getMessagesUsed,
   tryReserveTokens,
   recordTokens,
+  recordMessage,
 } from "./tokens";
 import { getDailyPromptForDate } from "./dailyPrompts";
 
@@ -1781,21 +1784,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/tokens", requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.user!.userId;
-      const [used, credit] = await Promise.all([
-        getTokensUsed(userId),
+      const [userRow, credit] = await Promise.all([
+        db.select({ isPremium: users.isPremium }).from(users).where(eq(users.id, userId)).limit(1),
         getActiveReferralCredit(userId),
       ]);
+      const isPremium = userRow[0]?.isPremium ?? false;
+      const nextResetAt = getNextPeriodStart().toISOString();
+
+      if (isPremium && !credit) {
+        const messagesUsed = await getMessagesUsed(userId);
+        return res.json({
+          isPremium: true,
+          tokensUsed: messagesUsed,
+          tokensRemaining: Math.max(0, PREMIUM_MESSAGE_LIMIT - messagesUsed),
+          tokenLimit: PREMIUM_MESSAGE_LIMIT,
+          nextResetAt,
+          period: "day",
+          referralCredit: null,
+        });
+      }
+
+      const used = await getTokensUsed(userId);
       const remaining = Math.max(0, FREE_TOKEN_LIMIT - used);
       res.json({
+        isPremium: false,
         tokensUsed: used,
         tokensRemaining: remaining,
         tokenLimit: FREE_TOKEN_LIMIT,
-        nextResetAt: getNextPeriodStart().toISOString(),
+        nextResetAt,
         period: "day",
-        // When `referralCredit` is non-null the daily cap is bypassed
-        // for this user until `endsAt`. The client renders a different
-        // balance line ("Unlimited (free week from referral)…") and
-        // hides the upgrade nudge.
         referralCredit: credit
           ? { endsAt: credit.endsAt.toISOString(), source: "referral" }
           : null,
@@ -3177,6 +3194,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/chat/voice", audioBodyParser, requireAuth, async (req: Request, res: Response) => {
     let reservationActive = false;
+    let premiumMode = false;
     let reservedPeriodStart: Date | null = null;
     const userId = req.user!.userId;
     try {
@@ -3244,29 +3262,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // it's in effect, we skip the daily-cap check entirely. We also
       // skip recording usage during the credit window so the chart
       // honestly reflects "this was free".
-      const activeCredit = await getActiveReferralCredit(userId);
+      const [userRow, activeCredit] = await Promise.all([
+        db.select({ isPremium: users.isPremium }).from(users).where(eq(users.id, userId)).limit(1),
+        getActiveReferralCredit(userId),
+      ]);
+      const isPremium = userRow[0]?.isPremium ?? false;
       const unlimitedMode = activeCredit !== null;
 
       if (!unlimitedMode) {
-        const reservation = await tryReserveTokens(
-          userId,
-          MIN_TOKENS_FOR_REQUEST,
-        );
-        if (!reservation.ok) {
-          return res.status(429).json({
-            error: "Daily token limit reached",
-            tokensUsed: reservation.tokensUsed,
-            tokensRemaining: Math.max(
-              0,
-              FREE_TOKEN_LIMIT - reservation.tokensUsed,
-            ),
-            tokenLimit: FREE_TOKEN_LIMIT,
-            nextResetAt: getNextPeriodStart().toISOString(),
-            period: "day",
-          });
+        if (isPremium) {
+          // Premium: enforce daily message cap (250/day)
+          const used = await getMessagesUsed(userId);
+          if (used >= PREMIUM_MESSAGE_LIMIT) {
+            return res.status(429).json({
+              error: "Daily message limit reached",
+              tokensUsed: used,
+              tokensRemaining: 0,
+              tokenLimit: PREMIUM_MESSAGE_LIMIT,
+              nextResetAt: getNextPeriodStart().toISOString(),
+              period: "day",
+            });
+          }
+          premiumMode = true;
+          reservedPeriodStart = getCurrentPeriodStart();
+        } else {
+          // Free: enforce daily token cap
+          const reservation = await tryReserveTokens(userId, MIN_TOKENS_FOR_REQUEST);
+          if (!reservation.ok) {
+            return res.status(429).json({
+              error: "Daily token limit reached",
+              tokensUsed: reservation.tokensUsed,
+              tokensRemaining: Math.max(0, FREE_TOKEN_LIMIT - reservation.tokensUsed),
+              tokenLimit: FREE_TOKEN_LIMIT,
+              nextResetAt: getNextPeriodStart().toISOString(),
+              period: "day",
+            });
+          }
+          reservationActive = true;
+          reservedPeriodStart = reservation.periodStart;
         }
-        reservationActive = true;
-        reservedPeriodStart = reservation.periodStart;
       }
 
       let userTranscript = text || "";
@@ -3543,18 +3577,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // the daily-cap chart honestly reflects "this was free during the
       // unlimited window".
       if (!unlimitedMode) {
-        const additionalTokens = Math.max(
-          0,
-          totalTokens - MIN_TOKENS_FOR_REQUEST,
-        );
-        if (additionalTokens > 0) {
-          await recordTokens(userId, additionalTokens, reservedPeriodStart!);
+        if (premiumMode) {
+          await recordMessage(userId, reservedPeriodStart!);
+        } else {
+          const additionalTokens = Math.max(0, totalTokens - MIN_TOKENS_FOR_REQUEST);
+          if (additionalTokens > 0) {
+            await recordTokens(userId, additionalTokens, reservedPeriodStart!);
+          }
         }
       }
       reservationActive = false;
+      const wasPremium = premiumMode;
+      premiumMode = false;
 
-      const updatedTokensUsed = await getTokensUsed(userId);
-      const tokensRemaining = Math.max(0, FREE_TOKEN_LIMIT - updatedTokensUsed);
+      const updatedTokensUsed = wasPremium
+        ? await getMessagesUsed(userId)
+        : await getTokensUsed(userId);
+      const tokenLimit = isPremium ? PREMIUM_MESSAGE_LIMIT : FREE_TOKEN_LIMIT;
+      const tokensRemaining = Math.max(0, tokenLimit - updatedTokensUsed);
 
       // Resolve the crisis check before persisting the assistant message so
       // the flag is stored on the row that the client will surface a
@@ -3570,7 +3610,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       console.log(
         `Voice req: ${userTranscript.length}c in, ${assistantTranscript.length}c out, ` +
-          `${totalTokens} tokens (daily total ${updatedTokensUsed}/${FREE_TOKEN_LIMIT})`,
+          `${totalTokens} tokens (daily total ${updatedTokensUsed}/${tokenLimit})`,
       );
 
       res.json({
@@ -3589,7 +3629,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         crisisSupport,
         tokensUsed: updatedTokensUsed,
         tokensRemaining,
-        tokenLimit: FREE_TOKEN_LIMIT,
+        tokenLimit,
         nextResetAt: getNextPeriodStart().toISOString(),
         period: "day",
       });
@@ -3644,6 +3684,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
       res.status(500).json({ error: "Failed to process voice message" });
+    }
+  });
+
+  // ── RevenueCat Webhook ──────────────────────────────────────────────────
+  // RC sends POST events when subscriptions change. We flip isPremium on the
+  // user row so the voice route enforces the right daily cap immediately.
+  app.post("/api/webhooks/revenuecat", express.json(), async (req: Request, res: Response) => {
+    try {
+      const event = req.body?.event;
+      if (!event) return res.status(400).json({ error: "Missing event" });
+
+      const appUserId: string | undefined = event.app_user_id;
+      if (!appUserId) return res.status(200).json({ ok: true }); // anonymous, ignore
+
+      // Resolve the RC anonymous/alias ID to our DB user id.
+      // RC sends our internal userId as the app_user_id after we call
+      // Purchases.logIn(userId) — which we should do on the client after auth.
+      const ACTIVE_EVENTS = new Set([
+        "INITIAL_PURCHASE", "RENEWAL", "UNCANCELLATION", "PRODUCT_CHANGE",
+      ]);
+      const LAPSED_EVENTS = new Set([
+        "EXPIRATION", "CANCELLATION", "BILLING_ISSUE", "SUBSCRIBER_ALIAS",
+      ]);
+
+      let isPremium: boolean | null = null;
+      if (ACTIVE_EVENTS.has(event.type)) isPremium = true;
+      else if (LAPSED_EVENTS.has(event.type)) isPremium = false;
+
+      if (isPremium !== null) {
+        await db
+          .update(users)
+          .set({ isPremium })
+          .where(eq(users.id, appUserId));
+        console.log(`[RC webhook] user=${appUserId} isPremium=${isPremium} event=${event.type}`);
+      }
+
+      res.status(200).json({ ok: true });
+    } catch (error) {
+      console.error("[RC webhook] error:", error);
+      res.status(500).json({ error: "Webhook processing failed" });
     }
   });
 

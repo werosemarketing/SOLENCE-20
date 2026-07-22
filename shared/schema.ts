@@ -51,6 +51,8 @@ export const users = pgTable(
     // time and never changed; used to prevent the same account being
     // counted as a referee twice and to protect against self-referral.
     referredBy: varchar("referred_by"),
+    // Set to true by the RevenueCat webhook when a Premium subscription is active.
+    isPremium: boolean("is_premium").notNull().default(false),
     createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
   },
   (table) => ({
@@ -260,6 +262,7 @@ export const tokenUsage = pgTable(
     id: serial("id").primaryKey(),
     userId: text("user_id").notNull(),
     tokensUsed: integer("tokens_used").notNull().default(0),
+    messagesUsed: integer("messages_used").notNull().default(0),
     periodStart: timestamp("period_start").notNull(),
     createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
   },
@@ -271,6 +274,7 @@ export const tokenUsage = pgTable(
 export type TokenUsage = typeof tokenUsage.$inferSelect;
 
 export const FREE_TOKEN_LIMIT = 15000;
+export const PREMIUM_MESSAGE_LIMIT = 250;
 export const TOKEN_PERIOD = "day" as const;
 
 // Each successful referral grants this much "free" unlimited time to both

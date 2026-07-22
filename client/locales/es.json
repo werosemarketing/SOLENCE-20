@@ -252,7 +252,7 @@
       "resetIn": "Se reinicia en {{duration}}",
       "resetTomorrow": "Se reinicia mañana",
       "resetSoon": "Se reinicia pronto",
-      "upgradeCta": "Obtener ilimitado"
+      "upgradeCta": "Obtener Premium"
     },
     "errors": {
       "permissionDenied": "Necesitamos acceso al micrófono para hablar con Solence.",
@@ -523,7 +523,7 @@
     "upgrade": {
       "freePlanTitle": "Plan gratuito",
       "freePlanSubtitle": "Reflexiones diarias que se reinician cada día.",
-      "upgradeTitle": "Solence Ilimitado",
+      "upgradeTitle": "Solence Premium",
       "upgradeSubtitle": "Sin límite diario. Tómate todo el espacio que necesites.",
       "cta": "Ver planes"
     }
@@ -564,8 +564,8 @@
     "legacyDefault": "Sesión de Solence"
   },
   "upgrade": {
-    "header": "Solence Ilimitado",
-    "eyebrow": "Solence Ilimitado",
+    "header": "Solence Premium",
+    "eyebrow": "Solence Premium",
     "headline": "Sigue en conversación,\ntodo el tiempo que necesites.",
     "subhead": "En el plan gratuito, Solence descansa al alcanzar el límite diario. Mejora tu plan y la conversación no tiene que pausarse.",
     "price": "$15,99/mes",
@@ -581,8 +581,8 @@
       "restBody": "Vuelve {{when}}.",
       "tomorrow": "mañana"
     },
-    "unlimited": {
-      "label": "Ilimitado",
+    "premium": {
+      "label": "Premium",
       "name": "Solence, siempre disponible"
     },
     "recommended": "Recomendado",
@@ -604,7 +604,7 @@
     "ctaUpgrade": "Mejorar — {{price}}",
     "maybeLater": "Quizá después",
     "closeA11y": "Cerrar pantalla de mejora",
-    "subscribeA11y": "Mejorar a Solence Ilimitado por {{price}}",
+    "subscribeA11y": "Mejorar a Solence Premium por {{price}}",
     "errors": {
       "purchaseFailed": "No se pudo completar la compra. Inténtalo de nuevo.",
       "restoreFailed": "No se pudo restaurar. Inténtalo de nuevo.",
