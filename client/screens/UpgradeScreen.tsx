@@ -1,11 +1,10 @@
-import React, { useState } from "react";
+import React from "react";
 import {
   View,
   Text,
   StyleSheet,
   Pressable,
   ScrollView,
-  Modal,
   ActivityIndicator,
   Alert,
 } from "react-native";
@@ -39,7 +38,6 @@ export default function UpgradeScreen({ navigation, route }: Props) {
   const { t } = useTranslation();
   const { offerings, purchase, restore, isPurchasing, isRestoring } = useSubscription();
 
-  const [confirmVisible, setConfirmVisible] = useState(false);
 
   const tokenLimit = route.params?.tokenLimit ?? 15000;
   const resetLabel = route.params?.resetLabel ?? t("upgrade.freePlan.tomorrow");
@@ -86,15 +84,6 @@ export default function UpgradeScreen({ navigation, route }: Props) {
         return;
       }
 
-      // Timed out waiting for StoreKit
-      if (e?.timedOut) {
-        Alert.alert(
-          "Taking Too Long",
-          "The purchase is taking longer than expected. Check your App Store account — if no charge appeared, try again."
-        );
-        return;
-      }
-
       Alert.alert(t("upgrade.errors.purchaseFailed"));
     }
   };
@@ -102,12 +91,7 @@ export default function UpgradeScreen({ navigation, route }: Props) {
   const handleSubscribe = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     if (!packageToPurchase) return;
-    if (__DEV__) {
-      // In dev/test mode show a confirmation modal before triggering purchase
-      setConfirmVisible(true);
-    } else {
-      doPurchase();
-    }
+    doPurchase();
   };
 
   const handleRestore = async () => {
@@ -376,64 +360,6 @@ export default function UpgradeScreen({ navigation, route }: Props) {
         </Pressable>
       </View>
 
-      {/* Dev-mode purchase confirmation modal */}
-      <Modal
-        visible={confirmVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setConfirmVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View
-            style={[
-              styles.modalCard,
-              {
-                backgroundColor: isDark ? "#1a1625" : "#fff",
-                borderColor: isDark ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.1)",
-              },
-            ]}
-          >
-            <Text style={[styles.modalTitle, { color: theme.text }]}>
-              DEV: Confirm Test Purchase
-            </Text>
-            <Text style={[styles.modalBody, { color: theme.textMuted }]}>
-              This will trigger a RevenueCat test-store purchase for{"\n"}
-              <Text style={{ color: theme.orbPrimary, fontFamily: FontFamily.bold }}>
-                Solence Unlimited — {priceString}/mo
-              </Text>
-              {"\n\n"}No real payment will be charged.
-            </Text>
-            <View style={styles.modalActions}>
-              <Pressable
-                onPress={() => setConfirmVisible(false)}
-                style={({ pressed }) => [
-                  styles.modalBtn,
-                  styles.modalBtnCancel,
-                  {
-                    backgroundColor: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)",
-                    opacity: pressed ? 0.7 : 1,
-                  },
-                ]}
-              >
-                <Text style={[styles.modalBtnText, { color: theme.textMuted }]}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                onPress={() => {
-                  setConfirmVisible(false);
-                  doPurchase();
-                }}
-                style={({ pressed }) => [
-                  styles.modalBtn,
-                  styles.modalBtnConfirm,
-                  { backgroundColor: theme.orbPrimary, opacity: pressed ? 0.85 : 1 },
-                ]}
-              >
-                <Text style={[styles.modalBtnText, { color: "#fff" }]}>Purchase</Text>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
     </View>
   );
 }
