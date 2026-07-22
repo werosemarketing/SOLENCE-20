@@ -1,0 +1,1 @@
+- [Voice chat two-call flow](voice-ai-cost-flow.md) — don't revert to single gpt-audio call; text model + TTS is ~100x cheaper; TTS failure must fall back text-only or refunds break.
