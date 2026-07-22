@@ -60,7 +60,7 @@ import {
   recordMessage,
 } from "./tokens";
 import { getDailyPromptForDate } from "./dailyPrompts";
-import { embedText, embedTexts, cosineSimilarity } from "./embeddings";
+import { embedTextWithTimeout, embedTexts, cosineSimilarity } from "./embeddings";
 
 const audioBodyParser = express.json({ limit: "50mb" });
 
@@ -3520,9 +3520,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .orderBy(desc(userMemories.createdAt), desc(userMemories.id));
 
         let memoryRows: { text: string }[] = allMemoryRows;
+        // Bounded by a short timeout so a slow embeddings API can never
+        // stall the chat response — we just fall back to recency ordering.
         const queryEmbedding =
-          allMemoryRows.some((r) => r.embedding) && userTranscript
-            ? await embedText(userTranscript)
+          allMemoryRows.some((r) => Array.isArray(r.embedding)) && userTranscript
+            ? await embedTextWithTimeout(userTranscript)
             : null;
 
         if (queryEmbedding) {
@@ -3534,7 +3536,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
             .filter((r) => !recentIds.has(r.id))
             .map((r) => ({
               ...r,
-              score: r.embedding ? cosineSimilarity(queryEmbedding, r.embedding) : -1,
+              score: Array.isArray(r.embedding)
+                ? cosineSimilarity(queryEmbedding, r.embedding)
+                : -1,
             }))
             .sort((a, b) => b.score - a.score);
           memoryRows = [

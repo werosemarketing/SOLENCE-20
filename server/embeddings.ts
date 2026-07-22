@@ -46,9 +46,24 @@ export async function embedTexts(texts: string[]): Promise<(number[] | null)[]> 
   }
 }
 
-/** Cosine similarity between two equal-length vectors. Returns 0 on mismatch. */
+/**
+ * Embed with a hard deadline for latency-sensitive (hot) paths. Resolves to
+ * null when the API doesn't answer within `timeoutMs`, so callers can fall
+ * back to recency ordering instead of stalling the chat response.
+ */
+export async function embedTextWithTimeout(
+  text: string,
+  timeoutMs = 1500,
+): Promise<number[] | null> {
+  return Promise.race([
+    embedText(text),
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
+  ]);
+}
+
+/** Cosine similarity between two equal-length vectors. Returns 0 on mismatch or malformed input. */
 export function cosineSimilarity(a: number[], b: number[]): number {
-  if (!a || !b || a.length !== b.length || a.length === 0) return 0;
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length || a.length === 0) return 0;
   let dot = 0;
   let normA = 0;
   let normB = 0;
