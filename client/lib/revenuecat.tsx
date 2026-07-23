@@ -48,6 +48,29 @@ export function initializeRevenueCat() {
   console.log("[RevenueCat] Configured with key ending in …" + apiKey.slice(-6));
 }
 
+// Identify the RevenueCat customer with our internal user id so webhooks
+// carry it as app_user_id — the backend uses it to flip users.isPremium.
+// Best-effort: an RC hiccup must never block auth flows.
+export async function logInRevenueCat(userId: string) {
+  if (!_rcReady || !userId) return;
+  try {
+    await Purchases.logIn(userId);
+    console.log("[RevenueCat] Logged in as user " + userId.slice(0, 8) + "…");
+  } catch (error) {
+    console.error("[RevenueCat] logIn failed:", error);
+  }
+}
+
+export async function logOutRevenueCat() {
+  if (!_rcReady) return;
+  try {
+    await Purchases.logOut();
+  } catch (error) {
+    // logOut throws if the current user is already anonymous — harmless.
+    console.log("[RevenueCat] logOut skipped:", error instanceof Error ? error.message : error);
+  }
+}
+
 // ── Context ──────────────────────────────────────────────────────────────────
 
 // Module-level flag set by initializeRevenueCat so queries don't fire

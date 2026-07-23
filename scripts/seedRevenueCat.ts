@@ -49,9 +49,9 @@ const OFFERING_DISPLAY_NAME = "Default Offering";
 const PACKAGE_IDENTIFIER = "$rc_monthly";
 const PACKAGE_DISPLAY_NAME = "Monthly Subscription";
 
-// $15.99 / month
+// $9.99 / month
 const PRODUCT_PRICES = [
-  { amount_micros: 15990000, currency: "USD" },
+  { amount_micros: 9990000, currency: "USD" },
   { amount_micros: 14990000, currency: "EUR" },
   { amount_micros: 12990000, currency: "GBP" },
 ];
@@ -216,7 +216,7 @@ async function seedRevenueCat() {
       throw new Error("Failed to add test store prices: " + JSON.stringify(priceError));
     }
   } else {
-    console.log("Successfully added test store prices ($15.99 USD)");
+    console.log("Successfully added test store prices ($9.99 USD)");
   }
 
   // ── Entitlement ──────────────────────────────────────────────────────────

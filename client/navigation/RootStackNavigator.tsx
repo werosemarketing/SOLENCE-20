@@ -18,6 +18,7 @@ import MainTabNavigator, { type MainTabParamList } from "@/navigation/MainTabNav
 import LockScreen from "@/components/LockScreen";
 import { useScreenOptions } from "@/hooks/useScreenOptions";
 import { getApiUrl } from "@/lib/query-client";
+import { logInRevenueCat, logOutRevenueCat } from "@/lib/revenuecat";
 import {
   loadAppLockPreferences,
   thresholdToMs,
@@ -285,6 +286,11 @@ export default function RootStackNavigator() {
       let onboardingComplete = false;
       try {
         const me = await response.json();
+        // Identify the RevenueCat customer with our internal user id so
+        // subscription webhooks can be matched to this account.
+        if (me?.user?.id) {
+          logInRevenueCat(me.user.id);
+        }
         if (me?.preferences?.onboardingCompletedAt) {
           onboardingComplete = true;
           await AsyncStorage.setItem(STORAGE_KEY_ONBOARDING, "true");
@@ -306,9 +312,12 @@ export default function RootStackNavigator() {
     }
   };
 
-  const handleAuthenticated = useCallback(async (token: string) => {
+  const handleAuthenticated = useCallback(async (token: string, userId?: string) => {
     await AsyncStorage.setItem(STORAGE_KEY_AUTH_TOKEN, token);
     setAuthToken(token);
+    if (userId) {
+      logInRevenueCat(userId);
+    }
 
     const disclaimerAccepted = await AsyncStorage.getItem(STORAGE_KEY_DISCLAIMER);
     if (disclaimerAccepted !== "true") {
@@ -328,6 +337,7 @@ export default function RootStackNavigator() {
   const handleSignOut = useCallback(async () => {
     await AsyncStorage.removeItem(STORAGE_KEY_AUTH_TOKEN);
     setAuthToken(null);
+    logOutRevenueCat();
     // Clear the lock so the AuthScreen isn't hidden behind it. The
     // user's lock preference itself is preserved so it re-engages
     // after they sign in again.

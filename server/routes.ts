@@ -1867,10 +1867,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         Number.isFinite(rawDays) && rawDays > 0
           ? Math.min(30, Math.floor(rawDays))
           : 7;
-      const history = await getTokensUsedHistory(userId, days);
+      const [historyUserRow] = await db
+        .select({ isPremium: users.isPremium })
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1);
+      const historyIsPremium = historyUserRow?.isPremium ?? false;
+      const history = await getTokensUsedHistory(
+        userId,
+        days,
+        historyIsPremium ? "messages" : "tokens",
+      );
       res.json({
         days,
-        tokenLimit: FREE_TOKEN_LIMIT,
+        isPremium: historyIsPremium,
+        tokenLimit: historyIsPremium ? PREMIUM_MESSAGE_LIMIT : FREE_TOKEN_LIMIT,
         period: "day",
         history,
       });
@@ -3654,10 +3665,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
       reservationActive = false;
-      const wasPremium = premiumMode;
-      premiumMode = false;
 
-      const updatedTokensUsed = wasPremium
+      const updatedTokensUsed = premiumMode
         ? await getMessagesUsed(userId)
         : await getTokensUsed(userId);
       const tokenLimit = isPremium ? PREMIUM_MESSAGE_LIMIT : FREE_TOKEN_LIMIT;
@@ -3759,6 +3768,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // user row so the voice route enforces the right daily cap immediately.
   app.post("/api/webhooks/revenuecat", express.json(), async (req: Request, res: Response) => {
     try {
+      // Verify the shared Authorization header configured in the RC
+      // dashboard (Webhooks → Authorization header). Without it, anyone
+      // could POST fake events and grant themselves premium.
+      const expectedAuth = process.env.REVENUECAT_WEBHOOK_AUTH;
+      if (expectedAuth) {
+        if (req.headers.authorization !== expectedAuth) {
+          return res.status(401).json({ error: "Unauthorized" });
+        }
+      } else if (process.env.NODE_ENV === "production") {
+        console.error("[RC webhook] REVENUECAT_WEBHOOK_AUTH not set — rejecting webhook in production");
+        return res.status(503).json({ error: "Webhook auth not configured" });
+      } else {
+        console.warn("[RC webhook] REVENUECAT_WEBHOOK_AUTH not set — accepting unauthenticated webhook (dev only)");
+      }
+
       const event = req.body?.event;
       if (!event) return res.status(400).json({ error: "Missing event" });
 

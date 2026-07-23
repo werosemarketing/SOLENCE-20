@@ -78,14 +78,18 @@ export async function tryReserveTokens(
 export async function getTokensUsedHistory(
   userId: string,
   days: number,
+  // Premium usage is counted in messages, not tokens — pass "messages" so
+  // history charts reflect the premium user's actual consumption.
+  unit: "tokens" | "messages" = "tokens",
 ): Promise<{ periodStart: string; tokensUsed: number }[]> {
   const today = getCurrentPeriodStart();
   const oldest = new Date(today.getTime() - (days - 1) * 24 * 60 * 60 * 1000);
 
+  const column = unit === "messages" ? tokenUsage.messagesUsed : tokenUsage.tokensUsed;
   const rows = await db
     .select({
       periodStart: tokenUsage.periodStart,
-      total: sql<number>`COALESCE(SUM(${tokenUsage.tokensUsed}), 0)::int`,
+      total: sql<number>`COALESCE(SUM(${column}), 0)::int`,
     })
     .from(tokenUsage)
     .where(

@@ -23,7 +23,7 @@ import { useSubscription } from "@/lib/revenuecat";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Upgrade">;
 
-const UNLIMITED_BENEFIT_KEYS: Array<{
+const PREMIUM_BENEFIT_KEYS: Array<{
   key: string;
   icon: keyof typeof Feather.glyphMap;
 }> = [
@@ -240,7 +240,7 @@ export default function UpgradeScreen({ navigation, route }: Props) {
           </View>
         </Animated.View>
 
-        {/* Unlimited plan card */}
+        {/* Premium plan card */}
         <Animated.View
           entering={FadeIn.duration(600).delay(300)}
           style={[
@@ -277,7 +277,7 @@ export default function UpgradeScreen({ navigation, route }: Props) {
 
           <View style={styles.planDivider} />
 
-          {UNLIMITED_BENEFIT_KEYS.map((benefit, index) => (
+          {PREMIUM_BENEFIT_KEYS.map((benefit, index) => (
             <View key={benefit.key} style={styles.benefitRow} testID={`premium-benefit-${index}`}>
               <Feather
                 name={benefit.icon}

@@ -20,7 +20,7 @@ import { Spacing, BorderRadius, FontFamily } from "@/constants/theme";
 import { getApiUrl } from "@/lib/query-client";
 
 type Props = {
-  onAuthenticated: (token: string) => void;
+  onAuthenticated: (token: string, userId?: string) => void;
   // Optional referral code captured from a deep link
   // (`solence://signup?ref=CODE`). When present, we drop the user into
   // sign-up mode with the code prefilled so they don't have to retype
@@ -117,7 +117,7 @@ export default function AuthScreen({
         return;
       }
 
-      onAuthenticated(data.token);
+      onAuthenticated(data.token, data.user?.id);
     } catch {
       setError(t("auth.errors.network"));
     } finally {
@@ -160,7 +160,7 @@ export default function AuthScreen({
         setInfo("We linked Sign in with Apple to your existing account.");
       }
 
-      onAuthenticated(data.token);
+      onAuthenticated(data.token, data.user?.id);
     } catch (err: unknown) {
       const code = (err as { code?: string } | null)?.code;
       // ERR_REQUEST_CANCELED is fired when the user dismisses the native
