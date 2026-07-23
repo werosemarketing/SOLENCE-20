@@ -1,0 +1,20 @@
+That local change is a dev-only workaround — pinning to StoreKit 1 because there's no real StoreKit 2 In-App Purchase Key configured yet, which is likely what let your sandbox test purchase actually complete without hanging. Since the incoming commit is titled "Fix audit findings: RC logIn/logOut wiring, webhook auth, premium-aware history, $9.99 price, cleanup" — it almost certainly touches this same file. I'll stash your local change first so the pull doesn't conflict, then check whether the incoming code already addresses this.
+
+
+Ran a command, read 3 files, searched code
+Pulled cleanly (10 commits — the personalization/embeddings work, the two-call voice pipeline, and a big RevenueCat overhaul). I stashed your local StoreKit-1 dev workaround first since the incoming code touches the same file (it's saved as stash@{0}, not lost — decision pending below). Here's what I found digging through the new code, ranked by how much it matters:
+
+🔴 Critical — likely blocks real purchases from working:
+scripts/seedRevenueCat.ts creates the RevenueCat App Store product using PRODUCT_IDENTIFIER = "solence_unlimited_monthly" (scripts/seedRevenueCat.ts:31) — but the real product you created in App Store Connect is com.solence.app.unlimited.monthly. These have to match exactly for RevenueCat to recognize a real Apple purchase and grant the entitlement. If this seed script already ran (it looks like it has, given the "$9.99 price... cleanup" commit), RevenueCat's App Store product entry is probably pointing at the wrong identifier right now. This needs verifying in the RevenueCat dashboard (Project → Apps → App Store app → Products) before you do a real purchase test — sandbox/TestFlight purchases might even appear to "work" without properly validating against the entitlement, so this could pass casual testing and still fail for real users.
+
+🟡 Needs verification before going live:
+
+REVENUECAT_WEBHOOK_AUTH must be set as a Replit secret, matching the Authorization header configured in RevenueCat's dashboard (Webhooks section) pointing at https://solence-20--sdanvudi.replit.app/api/webhooks/revenuecat. Without this, a real purchase never flips users.isPremium server-side (server/routes.ts:3769-3783) — someone could pay and still get treated as a free user.
+EXPO_PUBLIC_REVENUECAT_IOS_API_KEY (the real production key, separate from the test-store key) needs to be set before the production EAS build, or it'll throw at runtime (client/lib/revenuecat.tsx:23).
+The entitlement got renamed "unlimited" → "premium" and the free/paid model changed from unbounded to a 250-message premium cap (PREMIUM_MESSAGE_LIMIT) instead of true unlimited — this is exactly the cost-safety net I recommended earlier, good to see it landed. Just confirm the RevenueCat dashboard's entitlement lookup key is actually "premium" to match.
+Your StoreKit-1 dev pin got removed in this cleanup — for real App Store purchases (not test-store), you may need the StoreKit 2 In-App Purchase Key configured in Xcode/App Store Connect per RevenueCat's docs, or the same hang issue could resurface in production. Worth testing on a real device before shipping.
+🟢 Minor:
+
+Two stray debug log .txt files got committed into attached_assets/ — harmless, can delete later.
+Still need to confirm the App Store Connect subscription price/screenshot actually got finalized (we got disconnected mid-way earlier) — the "$9.99" in the recent commit may just be a UI display string, not confirmation the real ASC listing is done.
+On the stash: since the StoreKit-1 pin no longer exists in the new code and its underlying problem may or may not still apply, I'd rather not silently reapply or drop it. Want me to check if the test-purchase hang still happens without it, or just drop the stash as superseded?
