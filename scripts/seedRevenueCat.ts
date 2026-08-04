@@ -28,7 +28,7 @@ import {
 
 const PROJECT_NAME = "Solence";
 
-const PRODUCT_IDENTIFIER = "solence_unlimited_monthly";
+const PRODUCT_IDENTIFIER = "com.solence.app.unlimited.monthly";
 const PLAY_STORE_PRODUCT_IDENTIFIER = "solence_unlimited_monthly:monthly";
 
 const PRODUCT_DISPLAY_NAME = "Solence Unlimited";
