@@ -12,7 +12,7 @@ module.exports = {
     newArchEnabled: true,
     ios: {
       supportsTablet: true,
-      bundleIdentifier: IS_DEV ? "com.solence.app.dev" : "com.solence.app",
+      bundleIdentifier: IS_DEV ? "com.solenceai.app.dev" : "com.solenceai.app",
       buildNumber: "12",
       usesAppleSignIn: true,
       infoPlist: {
@@ -30,7 +30,7 @@ module.exports = {
       },
       edgeToEdgeEnabled: true,
       predictiveBackGestureEnabled: false,
-      package: IS_DEV ? "com.solence.app.dev" : "com.solence.app",
+      package: IS_DEV ? "com.solenceai.app.dev" : "com.solenceai.app",
       permissions: [
         "android.permission.RECORD_AUDIO",
         "android.permission.MODIFY_AUDIO_SETTINGS",

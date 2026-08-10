@@ -925,7 +925,7 @@ const APPLE_JWKS = createRemoteJWKSet(
 // default and allow extra audiences (e.g. a dev/staging bundle) via an
 // optional comma-separated env var.
 const APPLE_AUDIENCES = [
-  "com.solence.app",
+  "com.solenceai.app",
   ...(process.env.APPLE_BUNDLE_IDS ?? "")
     .split(",")
     .map((s) => s.trim())

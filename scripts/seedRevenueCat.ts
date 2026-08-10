@@ -28,17 +28,17 @@ import {
 
 const PROJECT_NAME = "Solence";
 
-const PRODUCT_IDENTIFIER = "com.solence.app.unlimited.monthly";
-const PLAY_STORE_PRODUCT_IDENTIFIER = "solence_unlimited_monthly:monthly";
+const PRODUCT_IDENTIFIER = "com.solenceai.app.unlimited.monthly";
+const PLAY_STORE_PRODUCT_IDENTIFIER = "com.solenceai.app.unlimited.monthly:monthly";
 
 const PRODUCT_DISPLAY_NAME = "Solence Unlimited";
 const PRODUCT_USER_FACING_TITLE = "Solence Unlimited";
 const PRODUCT_DURATION = "P1M"; // 1 month
 
 const APP_STORE_APP_NAME = "Solence";
-const APP_STORE_BUNDLE_ID = "com.solence.app";
+const APP_STORE_BUNDLE_ID = "com.solenceai.app";
 const PLAY_STORE_APP_NAME = "Solence Android";
-const PLAY_STORE_PACKAGE_NAME = "com.solence.app";
+const PLAY_STORE_PACKAGE_NAME = "com.solenceai.app";
 
 const ENTITLEMENT_IDENTIFIER = "premium";
 const ENTITLEMENT_DISPLAY_NAME = "Premium Access";
