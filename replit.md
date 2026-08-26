@@ -143,6 +143,13 @@ App icon: Official Solence sunrise/heart mark from solence.ai website
 
 ## Backend API Configuration
 
+### Referral links
+- `EXPO_PUBLIC_DOMAIN` must be set in production to the public app host
+  (for example, `app.solence.ai`, without `https://`). The server logs a
+  startup warning when this variable is missing because referral shares may
+  otherwise fall back to a development host or a native-only link.
+- Development may use `REPLIT_DEV_DOMAIN` as a fallback.
+
 The voice chat endpoint expects:
 
 ```

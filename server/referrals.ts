@@ -108,10 +108,7 @@ export async function getActiveReferralCredit(
     .select({ endsAt: referralCredits.endsAt })
     .from(referralCredits)
     .where(
-      and(
-        eq(referralCredits.userId, userId),
-        gt(referralCredits.endsAt, now),
-      ),
+      and(eq(referralCredits.userId, userId), gt(referralCredits.endsAt, now)),
     )
     .orderBy(desc(referralCredits.endsAt))
     .limit(1);
@@ -184,4 +181,18 @@ export function buildReferralShareUrl(code: string): string {
     return `https://${host}/?ref=${safe}`;
   }
   return `solence://signup?ref=${safe}`;
+}
+
+// Production referral links must use the public app domain. Without it,
+// buildReferralShareUrl falls back to a development host or a native-only
+// scheme, neither of which is a reliable share link for production users.
+export function warnIfReferralDomainMissing(): void {
+  if (process.env.NODE_ENV !== "production") return;
+  if (process.env.EXPO_PUBLIC_DOMAIN?.trim()) return;
+
+  console.warn(
+    "Referral links may be broken: EXPO_PUBLIC_DOMAIN is not set in production. " +
+      "Set it to the public app host (for example, app.solence.ai) so shared " +
+      "referral links open correctly.",
+  );
 }

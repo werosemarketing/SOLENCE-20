@@ -1,6 +1,7 @@
 import express from "express";
 import type { Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
+import { warnIfReferralDomainMissing } from "./referrals";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -90,10 +91,13 @@ function setupRequestLogging(app: express.Application) {
         path.startsWith("/api/auth") || path.startsWith("/api/chat");
 
       if (capturedJsonResponse && !isSensitivePath) {
-        const safeResponse: Record<string, unknown> = { ...capturedJsonResponse };
+        const safeResponse: Record<string, unknown> = {
+          ...capturedJsonResponse,
+        };
         if ("token" in safeResponse) safeResponse.token = "[REDACTED]";
         if ("password" in safeResponse) safeResponse.password = "[REDACTED]";
-        if ("audioBase64" in safeResponse) safeResponse.audioBase64 = "[REDACTED]";
+        if ("audioBase64" in safeResponse)
+          safeResponse.audioBase64 = "[REDACTED]";
         if ("text" in safeResponse) safeResponse.text = "[REDACTED]";
         if ("userTranscript" in safeResponse)
           safeResponse.userTranscript = "[REDACTED]";
@@ -240,6 +244,8 @@ function setupErrorHandler(app: express.Application) {
 }
 
 (async () => {
+  warnIfReferralDomainMissing();
+
   setupCors(app);
   setupBodyParsing(app);
   setupRequestLogging(app);
