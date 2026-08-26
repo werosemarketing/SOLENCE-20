@@ -178,7 +178,7 @@ Response:
 - Test on device: Scan QR code with Expo Go
 
 ## Publishing (deployment build)
-- Build cmd: `node tools/build-with-prewarm.js && npm run server:build`
+- Build cmd: `NODE_ENV=production npm run validate:referrals && node tools/build-with-prewarm.js && npm run server:build`
 - `tools/build-with-prewarm.js` patches `@react-native/debugger-shell` to a no-op
   (avoids Chromium SUID-sandbox failure in the build container) AND pre-starts
   Metro with a 5-minute readiness window before invoking `scripts/build.js`

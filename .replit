@@ -6,7 +6,7 @@ channel = "stable-24_05"
 
 [deployment]
 deploymentTarget = "autoscale"
-build = ["sh", "-c", "node tools/build-with-prewarm.js && npm run server:build"]
+build = ["sh", "-c", "NODE_ENV=production npm run validate:referrals && node tools/build-with-prewarm.js && npm run server:build"]
 run = ["npm", "run", "server:prod"]
 
 [[ports]]
@@ -84,6 +84,9 @@ REVENUECAT_APPLE_APP_STORE_APP_ID = "appadd1011800"
 REVENUECAT_GOOGLE_PLAY_STORE_APP_ID = "app3b19a86c32"
 REVENUECAT_PROJECT_ID = "proj466507a8"
 REVENUECAT_TEST_STORE_APP_ID = "appe9958d6278"
+
+[userenv.production]
+EXPO_PUBLIC_DOMAIN = "app.solence.ai"
 
 [postMerge]
 path = "scripts/post-merge.sh"
