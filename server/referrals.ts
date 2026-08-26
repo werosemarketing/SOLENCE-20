@@ -170,15 +170,16 @@ export async function grantReferralCredit(params: {
   return row;
 }
 
-// Build the share URL embedded in the invite blurb. Prefers the deployed
-// REPLIT_DOMAINS host, falls back to the dev domain, and finally to a
-// pure-scheme link if neither is configured. The web URL deep-links into
-// the app via the `solence://` custom scheme installed in app.json.
+// Build the share URL embedded in the invite blurb. Prefers the explicit
+// EXPO_PUBLIC_DOMAIN env var (set to "app.solence.ai" in production), then
+// falls back to the Replit dev domain, and finally to a pure-scheme link
+// if neither is configured. The web URL deep-links into the app via the
+// `solence://` custom scheme installed in app.json.
 export function buildReferralShareUrl(code: string): string {
   const safe = encodeURIComponent(code);
-  const deployed = process.env.REPLIT_DOMAINS?.split(",")[0]?.trim();
+  const customDomain = process.env.EXPO_PUBLIC_DOMAIN?.trim();
   const dev = process.env.REPLIT_DEV_DOMAIN?.trim();
-  const host = deployed || dev;
+  const host = customDomain || dev;
   if (host) {
     return `https://${host}/?ref=${safe}`;
   }
