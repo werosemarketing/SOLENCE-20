@@ -59,6 +59,7 @@ import {
   fontForWeight,
 } from "@/constants/theme";
 import { getApiUrl } from "@/lib/query-client";
+import { useSubscription } from "@/lib/revenuecat";
 import { displayConversationTitle } from "@/lib/conversation-title";
 import {
   DEFAULT_LANGUAGE,
@@ -364,6 +365,7 @@ export default function ProfileScreen() {
   const { scaleId: textScaleId, setScaleId: setTextScaleId } = useTextScale();
   const navigation =
     useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const { isSubscribed } = useSubscription();
 
   const [history, setHistory] = useState<HistoryEntry[] | null>(null);
   const [tokenLimit, setTokenLimit] = useState<number>(DEFAULT_TOKEN_LIMIT);
@@ -2089,6 +2091,34 @@ export default function ProfileScreen() {
           style={{ marginBottom: Spacing.md }}
           testID="profile-dev-upgrade-shortcut"
         />
+      )}
+      {!isSubscribed && (
+        <Card
+          elevation={2}
+          title={t("profile.upgrade.upgradeTitle")}
+          description={t("profile.upgrade.upgradeSubtitle")}
+          onPress={() =>
+            navigation.navigate("Upgrade", {
+              tokenLimit,
+            })
+          }
+          style={styles.upgradeCard}
+          testID="profile-upgrade-card"
+        >
+          <View style={styles.upgradeCtaRow}>
+            <ThemedText
+              type="small"
+              style={[styles.upgradeCtaText, { color: theme.orbPrimary }]}
+            >
+              {t("profile.upgrade.cta")}
+            </ThemedText>
+            <Feather
+              name="arrow-right"
+              size={18}
+              color={theme.orbPrimary}
+            />
+          </View>
+        </Card>
       )}
       <Card elevation={1} style={styles.headerCard}>
         <View style={styles.personalizationHeader}>
@@ -4649,6 +4679,18 @@ const styles = StyleSheet.create({
   inviteCard: {
     marginTop: Spacing.lg,
     paddingVertical: Spacing.xl,
+  },
+  upgradeCard: {
+    marginBottom: Spacing.lg,
+  },
+  upgradeCtaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: Spacing.lg,
+  },
+  upgradeCtaText: {
+    fontFamily: fontForWeight("600"),
   },
   inviteCreditBanner: {
     flexDirection: "row",
