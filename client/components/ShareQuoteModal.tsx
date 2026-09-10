@@ -10,7 +10,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
-import ViewShot, { type ViewShotRef } from "react-native-view-shot";
+import ViewShot from "react-native-view-shot";
 import * as Sharing from "expo-sharing";
 
 import { QuoteCard, QUOTE_CARD_MAX_LENGTH } from "@/components/QuoteCard";
@@ -40,7 +40,7 @@ export function ShareQuoteModal({
   // The view-shot ref attaches a `capture()` method to the underlying View
   // host node so we can rasterise the QuoteCard imperatively when the user
   // taps Share.
-  const viewShotRef = useRef<ViewShotRef | null>(null);
+  const viewShotRef = useRef<ViewShot | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);

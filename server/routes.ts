@@ -929,8 +929,8 @@ const APPLE_AUDIENCES = [
   "com.solence.app", // accepted for builds predating the bundle ID rename
   ...(process.env.APPLE_BUNDLE_IDS ?? "")
     .split(",")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0),
+    .map((s: string) => s.trim())
+    .filter((s: string) => s.length > 0),
 ];
 
 interface AuthPayload {
