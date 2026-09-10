@@ -300,6 +300,30 @@ export default function UpgradeScreen({ navigation, route }: Props) {
         <Text style={[styles.fineprint, { color: theme.textMuted }]}>
           {t("upgrade.fineprint")}
         </Text>
+
+        <View style={styles.legalLinksRow}>
+          <Pressable
+            onPress={() => navigation.navigate("Legal")}
+            hitSlop={8}
+            testID="upgrade-terms-link"
+          >
+            <Text style={[styles.legalLinkText, { color: theme.textMuted }]}>
+              {t("upgrade.termsOfUse")}
+            </Text>
+          </Pressable>
+          <Text style={[styles.legalLinkSeparator, { color: theme.textMuted }]}>
+            {" · "}
+          </Text>
+          <Pressable
+            onPress={() => navigation.navigate("Legal")}
+            hitSlop={8}
+            testID="upgrade-privacy-link"
+          >
+            <Text style={[styles.legalLinkText, { color: theme.textMuted }]}>
+              {t("upgrade.privacyPolicy")}
+            </Text>
+          </Pressable>
+        </View>
       </ScrollView>
 
       {/* Sticky CTA */}
@@ -534,6 +558,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg,
     lineHeight: 18,
     marginTop: Spacing.xs,
+  },
+  legalLinksRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: -Spacing.xs,
+  },
+  legalLinkText: {
+    fontSize: 12,
+    fontFamily: FontFamily.regular,
+    textDecorationLine: "underline",
+  },
+  legalLinkSeparator: {
+    fontSize: 12,
+    fontFamily: FontFamily.regular,
   },
   ctaContainer: {
     position: "absolute",

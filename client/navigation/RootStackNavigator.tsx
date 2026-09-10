@@ -48,6 +48,7 @@ export type RootStackParamList = {
   };
   Breathing: undefined;
   WeeklySummary: { weekOffset?: number } | undefined;
+  Legal: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -440,6 +441,19 @@ export default function RootStackNavigator() {
           title: t("weeklySummary.header"),
         }}
       />
+      <Stack.Screen
+        name="Legal"
+        options={{
+          headerShown: false,
+          presentation: "modal",
+          animation: "slide_from_bottom",
+          gestureEnabled: true,
+        }}
+      >
+        {({ navigation }) => (
+          <UserAgreementScreen onBack={() => navigation.goBack()} />
+        )}
+      </Stack.Screen>
     </Stack.Navigator>
   );
 }

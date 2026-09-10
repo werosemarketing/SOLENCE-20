@@ -13,7 +13,7 @@ module.exports = {
     ios: {
       supportsTablet: true,
       bundleIdentifier: IS_DEV ? "com.solenceai.app.dev" : "com.solenceai.app",
-      buildNumber: "12",
+      buildNumber: "14",
       usesAppleSignIn: true,
       infoPlist: {
         NSMicrophoneUsageDescription:
@@ -62,6 +62,7 @@ module.exports = {
         {
           microphonePermission:
             "Solence needs microphone access to hear your voice and provide thoughtful responses.",
+          enableBackgroundPlayback: false,
         },
       ],
       "expo-localization",

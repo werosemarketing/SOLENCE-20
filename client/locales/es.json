@@ -601,6 +601,8 @@
       }
     },
     "fineprint": "Cancela cuando quieras. Tu suscripción apoya el trabajo detrás de Solence.",
+    "termsOfUse": "Términos de uso",
+    "privacyPolicy": "Política de privacidad",
     "ctaUpgrade": "Mejorar — {{price}}",
     "maybeLater": "Quizá después",
     "closeA11y": "Cerrar pantalla de mejora",
