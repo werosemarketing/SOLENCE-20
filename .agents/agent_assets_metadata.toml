@@ -6,3 +6,18 @@ id = "MmW2_Md_EIb5w2Wlv4Jcu"
 uri = "file://dev-build-qr.png"
 type = "image"
 title = "New Dev Build — with RevenueCat"
+logical_id = "11756da0-dfab-4c97-bb37-aba0cb23b1b7"
+
+[[outputs]]
+id = "BqE4u90ZL_S-kWpQREO98"
+uri = "file://dev-server-qr.png"
+type = "image"
+title = "Solence dev server QR code"
+description = "Scan with the installed Solence Expo development client to connect to the running Metro server."
+logical_id = "a7b44fcb-f9c1-42f7-8222-960dc1851346"
+content_hash = "sha256:3193f23eaa5e586932e565060919d267c4a104abcf3a44cbd8a7bc3c2cbaed96"
+size = 1093
+mtime_ms = 1791922413368
+storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:3d6d112c-216b-409e-b869-bab3c9beff13/a7b44fcb-f9c1-42f7-8222-960dc1851346/50196107-3fc2-4289-8e18-e064ca35ae7f"
+storage_version_token = "1791922419010239"
+content_type = "image/png"

@@ -1,5 +1,6 @@
 {pkgs}: {
   deps = [
+    pkgs.qrencode
     pkgs.gtk3
     pkgs.alsa-lib
     pkgs.cairo
