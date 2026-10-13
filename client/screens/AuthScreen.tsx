@@ -163,6 +163,8 @@ export default function AuthScreen({
       onAuthenticated(data.token, data.user?.id);
     } catch (err: unknown) {
       const code = (err as { code?: string } | null)?.code;
+      const message = err instanceof Error ? err.message : String(err);
+      console.error("[Auth] Apple sign-in failed:", { code, message });
       // ERR_REQUEST_CANCELED is fired when the user dismisses the native
       // Apple sheet. Treat that as a no-op rather than an error.
       if (code === "ERR_REQUEST_CANCELED") {

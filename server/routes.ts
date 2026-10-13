@@ -927,6 +927,9 @@ const APPLE_JWKS = createRemoteJWKSet(
 const APPLE_AUDIENCES = [
   "com.solenceai.app",
   "com.solence.app", // accepted for builds predating the bundle ID rename
+  ...(process.env.NODE_ENV === "production"
+    ? []
+    : ["com.solenceai.app.dev", "com.solence.app.dev"]),
   ...(process.env.APPLE_BUNDLE_IDS ?? "")
     .split(",")
     .map((s: string) => s.trim())
