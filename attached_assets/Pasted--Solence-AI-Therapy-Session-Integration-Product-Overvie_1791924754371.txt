@@ -1,0 +1,309 @@
+# Solence AI — Therapy Session Integration
+
+## Product Overview
+
+Solence AI is a wellness companion designed for people who are actively attending therapy.
+
+The application does not replace licensed therapists, provide diagnoses, or independently deliver professional mental health treatment.
+
+Its primary purpose is to help users remember, understand, and apply what they discussed with their therapist between appointments.
+
+The application should support two connected experiences:
+
+1. **Therapy Session Capture:** Users record or upload their therapy sessions with appropriate consent, allowing Solence to understand what was discussed and what their therapist recommended.
+2. **Between-Session Companion:** Solence uses the information from those sessions to provide personalized reminders, reflections, and conversations based on the therapist's actual recommendations.
+
+The core philosophy is:
+
+**Your therapy doesn't have to end when your session does.**
+
+## 1. Therapy Session Recording
+
+Create a dedicated section in the application called **My Therapy**.
+
+Users should be able to:
+
+- Start a new therapy session recording.
+- Upload an existing audio recording.
+- Manually enter notes from a therapy session.
+- Review previous sessions and their summaries.
+
+### Recording Process
+
+1. User selects "Record Therapy Session."
+2. Display a consent screen explaining that the session may contain sensitive health information and that the user must obtain the therapist's explicit permission before recording.
+3. Require affirmative confirmation that everyone being recorded has consented.
+4. User starts the recording.
+5. Display recording duration and controls to pause, resume, or stop.
+6. After recording, the audio is securely uploaded for transcription.
+7. Generate a transcript identifying speakers where possible.
+8. Allow the user to review and correct the transcript before AI analysis.
+
+The recording system should support mobile devices, including iOS and Android.
+
+Do not assume browser recording can continue when the phone is locked or the app is in the background. Clearly communicate device limitations and prevent accidental loss of recordings.
+
+### Storage Strategy
+
+Audio recordings can consume significant storage.
+
+The system should prioritize transcripts rather than permanently storing audio.
+
+Recommended workflow:
+
+Audio Recording → Secure Transcription → User Review → AI Analysis → Session Summary
+
+After successful processing, allow the user to delete the original audio immediately. Offer an optional short retention period for correcting transcription errors.
+
+Never delete audio until transcription is complete and the user has had the opportunity to review it.
+
+## 2. AI Therapy Session Analysis
+
+Once a session is transcribed, Solence should analyze the discussion and generate a structured summary.
+
+The summary should include:
+
+**Topics Discussed**
+- Main subjects covered during therapy.
+- Challenges the user discussed.
+- Important personal events mentioned.
+
+**Therapist Recommendations**
+- Exercises the therapist explicitly recommended.
+- Coping techniques discussed.
+- Behavioral changes suggested.
+- Journaling or reflection assignments.
+
+**Goals**
+- Short-term goals discussed.
+- Longer-term objectives.
+- Specific actions to complete before the next appointment.
+
+**Follow-Up Topics**
+- Questions the user wants to revisit.
+- Topics that were left unresolved.
+- Issues the therapist suggested discussing later.
+
+### Critical AI Behavior
+
+Solence must distinguish between:
+
+- Recommendations explicitly made by the therapist.
+- Ideas discussed but not agreed upon.
+- Suggestions generated independently by AI.
+
+Never attribute an AI-generated recommendation to the therapist.
+
+Where possible, attach a transcript reference to each extracted recommendation.
+
+If the transcript is unclear, mark the information as uncertain rather than inventing details.
+
+## 3. Personalized Between-Session Companion
+
+This is the most important part of the application.
+
+After a therapy session has been processed, Solence should use the session information to personalize its interactions.
+
+Example:
+
+During therapy, the therapist says:
+
+"When you start feeling overwhelmed, try writing down three things that are bothering you and identify which ones you can control."
+
+Solence extracts this as an exercise.
+
+Two days later, the user opens Solence.
+
+Solence might say:
+
+"Last session, your therapist suggested writing down what's overwhelming you and separating what you can control from what you can't. Would you like to practice that?"
+
+The user can then complete the exercise through a guided conversation.
+
+### Companion Capabilities
+
+- Remember previous therapy session discussions.
+- Reference therapist-recommended exercises.
+- Help users practice techniques discussed in therapy.
+- Ask whether assigned activities were completed.
+- Help users reflect on experiences since their last session.
+- Track self-reported progress over time.
+- Avoid repeating questions unnecessarily.
+- Respect when the user does not want to discuss a particular subject.
+
+Solence must not invent therapist instructions, impersonate the therapist, diagnose conditions, or claim to provide treatment.
+
+## 4. Reminders and Assignments
+
+Create a section called **My Goals & Exercises**.
+
+After each session, Solence should extract potential assignments and ask the user to confirm them before creating reminders.
+
+Example:
+
+**Exercise:** Practice breathing exercises
+
+**Recommended by:** Therapist, October 13 session
+
+**Frequency:** Daily, if explicitly specified
+
+**Status:** Active
+
+Users should be able to:
+
+- Accept or reject suggested assignments.
+- Set reminder times.
+- Mark exercises completed.
+- Add personal notes.
+- Change or disable reminders.
+- View completion history.
+
+Reminders should use discreet notification text by default, such as "Time for your Solence check-in," rather than revealing sensitive therapy information on the lock screen.
+
+## 5. Pre-Therapy Session Summary
+
+Before the next therapy appointment, Solence should generate an optional report summarizing the period between sessions.
+
+Include:
+
+**Overall Check-In**
+- User-reported emotional experiences.
+- Important events.
+- Common challenges.
+
+**Therapy Exercises**
+- Exercises assigned.
+- Exercises completed.
+- Exercises the user found helpful or difficult.
+
+**Recurring Themes**
+- Topics repeatedly mentioned.
+- Concerns the user wants to address.
+
+**Questions for the Therapist**
+- Questions saved by the user.
+- Issues they want to discuss during their next session.
+
+The report should be factual and avoid unsupported clinical interpretations or diagnostic labels.
+
+### Sharing
+
+Users can:
+
+- Preview the report.
+- Edit or remove information.
+- Export it as a PDF.
+- Share it with their therapist themselves.
+
+No report should automatically be sent to a therapist.
+
+## 6. Therapy Session History
+
+Create a timeline displaying past sessions.
+
+Each session card should show:
+
+- Session date.
+- Session title.
+- Main topics.
+- Number of identified assignments.
+- Processing status.
+
+Opening a session should display the transcript, summary, therapist recommendations, and related exercises.
+
+Users should be able to search their session history and delete individual sessions.
+
+## 7. Therapist Involvement — MVP
+
+For the initial release, therapists should not need to create accounts.
+
+The patient controls the entire experience.
+
+Therapists can participate by:
+
+1. Giving permission for session recording.
+2. Providing recommendations during normal therapy.
+3. Reviewing summaries the patient voluntarily shares.
+
+Do not build a therapist dashboard, therapist login, or electronic health record integration for the MVP.
+
+These can be considered in later versions.
+
+## 8. Privacy and Security
+
+Therapy recordings and transcripts contain highly sensitive information.
+
+Implement:
+
+- Secure authentication.
+- Encryption in transit and at rest.
+- Private storage with access controls.
+- User-controlled deletion of audio, transcripts, summaries, and associated AI memory.
+- No public access to session content.
+- Explicit consent before recording.
+- Clear retention and deletion policies.
+- No use of therapy recordings for advertising or model training without separate, valid authorization.
+- No third-party analytics containing therapy content.
+
+Assess applicable recording-consent laws, HIPAA obligations, business associate agreements, vendor data-handling terms, and other privacy requirements before production deployment.
+
+A consent checkbox alone is not sufficient to establish legal compliance.
+
+## 9. AI Safety
+
+Solence is a wellness support application, not a licensed mental health provider.
+
+The assistant must:
+
+- Avoid diagnosis.
+- Avoid presenting itself as a therapist.
+- Avoid contradicting therapist instructions with confident medical advice.
+- Avoid generating fictional memories or recommendations.
+- Clearly distinguish user statements from therapist statements.
+- Handle potential crisis situations with a dedicated safety response and appropriate emergency resources.
+- Encourage users to contact qualified professionals when appropriate.
+
+Do not present inferred emotional states as established medical facts.
+
+## 10. Recommended User Flow
+
+1. User creates a Solence account.
+2. User opens My Therapy.
+3. User records, uploads, or manually documents a session.
+4. Solence transcribes and summarizes the session.
+5. User reviews extracted recommendations.
+6. User confirms goals and reminders.
+7. Solence provides personalized between-session support.
+8. User completes exercises and records reflections.
+9. Before the next appointment, Solence prepares a shareable summary.
+10. The next therapy session can build on what happened between appointments.
+
+## Development Priorities
+
+Build the following in order:
+
+**Phase 1 — Core MVP**
+- Session creation and manual notes.
+- Recording and audio upload.
+- Transcription.
+- AI-generated session summaries.
+- Extraction and confirmation of therapist recommendations.
+- Session-aware companion chat.
+
+**Phase 2 — Continued Support**
+- Assignments and reminders.
+- Exercise completion tracking.
+- Therapy session history.
+- Pre-session reports and PDF export.
+
+**Phase 3 — Future Expansion**
+- Therapist accounts with patient-controlled access.
+- Therapist-reviewed assignments.
+- Secure sharing.
+- Integrations with clinical systems where appropriate.
+
+Use the application's existing architecture, authentication, design system, and database conventions wherever possible.
+
+Do not rebuild unrelated application features.
+
+Prioritize a polished, mobile-first experience with clear navigation and minimal friction.

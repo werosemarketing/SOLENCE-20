@@ -4,7 +4,7 @@ module.exports = {
   expo: {
     name: IS_DEV ? "Solence (Dev)" : "Solence",
     slug: "solence",
-    version: "1.0.1",
+    version: "1.1.0",
     orientation: "portrait",
     icon: "./assets/images/icon.png",
     scheme: IS_DEV ? "solence-dev" : "solence",
@@ -13,7 +13,7 @@ module.exports = {
     ios: {
       supportsTablet: true,
       bundleIdentifier: IS_DEV ? "com.solenceai.app.dev" : "com.solenceai.app",
-      buildNumber: "14",
+      buildNumber: "15",
       usesAppleSignIn: true,
       infoPlist: {
         NSMicrophoneUsageDescription:

@@ -38,6 +38,11 @@
     }
   },
   "submit": {
-    "production": {}
+    "production": {
+      "ios": {
+        "appleId": "ahansel@werosemarketing.com",
+        "ascAppId": "6799969283"
+      }
+    }
   }
 }
