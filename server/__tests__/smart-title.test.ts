@@ -1,4 +1,4 @@
-import { test, before, after, afterEach, describe } from "node:test";
+import { test, before, after, afterEach, describe, mock } from "node:test";
 import assert from "node:assert/strict";
 import express from "express";
 import jwt from "jsonwebtoken";
@@ -84,14 +84,13 @@ async function waitFor<T>(
   );
 }
 
-// Build a fake gpt-audio response shaped like what the route expects.
-function fakeAudioResponse(assistantTranscript: string) {
+// Chat returns text; the route synthesizes audio in a separate call.
+function fakeChatResponse(assistantTranscript: string) {
   return {
     choices: [
       {
         message: {
-          audio: { transcript: assistantTranscript, data: "" },
-          content: null,
+          content: assistantTranscript,
         },
       },
     ],
@@ -101,12 +100,12 @@ function fakeAudioResponse(assistantTranscript: string) {
 
 // Replace `openai.chat.completions.create` with a stub that dispatches by
 // model. Returns a restore function. The route makes two distinct calls:
-//   1. model "gpt-audio"   — the actual chat completion
+//   1. model "gpt-5.1"    — the actual chat completion
 //   2. model "gpt-4o-mini" — the smart title summarizer
 // The handlers below let each test control both independently.
 type CreateArgs = { model?: string; [k: string]: unknown };
 function installOpenAiMock(handlers: {
-  audio: (args: CreateArgs) => unknown;
+  chat: (args: CreateArgs) => unknown;
   smartTitle: (args: CreateArgs) => unknown;
 }) {
   const original = openai.chat.completions.create.bind(openai.chat.completions);
@@ -116,8 +115,8 @@ function installOpenAiMock(handlers: {
   (openai.chat.completions as unknown as { create: (args: CreateArgs) => unknown }).create = (
     args: CreateArgs,
   ) => {
-    if (args.model === "gpt-audio") {
-      return Promise.resolve(handlers.audio(args));
+    if (args.model === "gpt-5.1") {
+      return Promise.resolve(handlers.chat(args));
     }
     if (args.model === "gpt-4o-mini") {
       // Smart title handler is allowed to throw or reject — the route
@@ -148,6 +147,18 @@ before(async () => {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
   baseUrl = `http://127.0.0.1:${port}`;
+  mock.method(openai.audio.speech, "create", async (params: { model: string }) => {
+    assert.equal(params.model, "gpt-4o-mini-tts");
+    return new Response(Buffer.from("test-mp3"));
+  });
+  mock.method(openai.embeddings, "create", async (params: { input: string | string[] }) => ({
+    data: (Array.isArray(params.input) ? params.input : [params.input]).map(
+      (_, index) => ({
+        index,
+        embedding: Array.from({ length: 1536 }, (_, i) => (i === 0 ? 1 : 0)),
+      }),
+    ),
+  }));
 });
 
 afterEach(() => {
@@ -158,6 +169,7 @@ afterEach(() => {
 });
 
 after(async () => {
+  mock.restoreAll();
   await new Promise<void>((resolve, reject) =>
     server.close((err) => (err ? reject(err) : resolve())),
   );
@@ -177,7 +189,7 @@ describe("smart conversation titles via POST /api/chat/voice", () => {
 
     const SMART_TITLE = "Worried About Tomorrow's Interview";
     restoreOpenAi = installOpenAiMock({
-      audio: () => fakeAudioResponse("That sounds stressful — tell me more."),
+      chat: () => fakeChatResponse("That sounds stressful — tell me more."),
       smartTitle: () => ({
         choices: [{ message: { content: SMART_TITLE } }],
       }),
@@ -194,8 +206,14 @@ describe("smart conversation titles via POST /api/chat/voice", () => {
       body: JSON.stringify({ text: userMessage }),
     });
     assert.equal(res.status, 200, "first chat request should succeed");
-    const body = (await res.json()) as { text: string };
+    const body = (await res.json()) as {
+      text: string;
+      audioBase64: string;
+      audioFormat: string;
+    };
     assert.equal(body.text, "That sounds stressful — tell me more.");
+    assert.equal(body.audioBase64, Buffer.from("test-mp3").toString("base64"));
+    assert.equal(body.audioFormat, "mp3");
 
     // Find the conversation that the route created for this user.
     const [conv] = await db
@@ -227,7 +245,7 @@ describe("smart conversation titles via POST /api/chat/voice", () => {
 
     let smartTitleCalled = false;
     restoreOpenAi = installOpenAiMock({
-      audio: () => fakeAudioResponse("Continuing the conversation."),
+      chat: () => fakeChatResponse("Continuing the conversation."),
       smartTitle: () => {
         smartTitleCalled = true;
         return {
@@ -269,7 +287,7 @@ describe("smart conversation titles via POST /api/chat/voice", () => {
     const userId = await makeUser("throws");
 
     restoreOpenAi = installOpenAiMock({
-      audio: () => fakeAudioResponse("I'm here to listen."),
+      chat: () => fakeChatResponse("I'm here to listen."),
       smartTitle: () => {
         throw new Error("simulated upstream model failure");
       },
@@ -312,7 +330,7 @@ describe("smart conversation titles via POST /api/chat/voice", () => {
     const userId = await makeUser("empty");
 
     restoreOpenAi = installOpenAiMock({
-      audio: () => fakeAudioResponse("Tell me more about that."),
+      chat: () => fakeChatResponse("Tell me more about that."),
       smartTitle: () => ({
         choices: [{ message: { content: "   " } }],
       }),

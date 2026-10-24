@@ -1,4 +1,4 @@
-import { test, before, after, describe } from "node:test";
+import { test, before, after, describe, mock } from "node:test";
 import assert from "node:assert/strict";
 import express from "express";
 import jwt from "jsonwebtoken";
@@ -77,6 +77,19 @@ before(async () => {
   const { port } = server.address() as AddressInfo;
   baseUrl = `http://127.0.0.1:${port}`;
 
+  // Exercise the text + TTS flow without sending speech or embedding requests.
+  mock.method(openai.audio.speech, "create", async () =>
+    new Response(Buffer.from("test-mp3")),
+  );
+  mock.method(openai.embeddings, "create", async (params: { input: string | string[] }) => ({
+    data: (Array.isArray(params.input) ? params.input : [params.input]).map(
+      (_, index) => ({
+        index,
+        embedding: Array.from({ length: 1536 }, (_, i) => (i === 0 ? 1 : 0)),
+      }),
+    ),
+  }));
+
   // Stub openai. The reflection generator asks for response_format.json_object
   // — that's our discriminator. Anything else (smart-title backfill, voice
   // chat) returns a benign generic response and records the system prompt
@@ -86,9 +99,9 @@ before(async () => {
   );
   (openai.chat.completions as unknown as { create: unknown }).create = async (
     params: {
+      model?: string;
       messages?: Array<{ role: string; content: string }>;
       response_format?: { type?: string };
-      modalities?: string[];
     },
   ) => {
     if (params?.response_format?.type === "json_object") {
@@ -102,29 +115,30 @@ before(async () => {
         choices: [{ message: { content: JSON.stringify(payload) } }],
       };
     }
-    // Voice chat path — record the system message so we can verify
-    // memory injection, and return a minimal audio-message shape.
-    if (Array.isArray(params?.modalities) && params.modalities.includes("audio")) {
+    // Voice chat now generates text first, then synthesizes it separately.
+    if (params.model === "gpt-5.1") {
       const sys = params.messages?.find((m) => m.role === "system");
       lastChatSystemPrompt = sys?.content ?? "";
       return {
         choices: [
           {
             message: {
-              audio: { transcript: "ok", data: "" },
-              content: null,
+              content: "ok",
             },
           },
         ],
         usage: { total_tokens: 0 },
       };
     }
-    // Smart-title backfill etc.
-    return { choices: [{ message: { content: "Auto Test Title" } }] };
+    if (params.model === "gpt-4o-mini") {
+      return { choices: [{ message: { content: "Auto Test Title" } }] };
+    }
+    throw new Error(`Unexpected OpenAI model in memory test: ${params.model}`);
   };
 });
 
 after(async () => {
+  mock.restoreAll();
   if (originalCreate) {
     (openai.chat.completions as unknown as { create: unknown }).create =
       originalCreate;

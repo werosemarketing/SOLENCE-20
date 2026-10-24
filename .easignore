@@ -1,0 +1,33 @@
+# Keep these standard exclusions aligned with .gitignore.
+node_modules/
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+.metro-health-check*
+.cache/
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+.DS_Store
+*.pem
+.env*
+*.tsbuildinfo
+app-example
+/ios
+/android
+
+# Local tools and database backups do not belong in native build uploads.
+.git/
+.agents/
+.local/
+.config/
+*.dump
+generated-artifacts/

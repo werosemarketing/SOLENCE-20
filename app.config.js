@@ -13,7 +13,7 @@ module.exports = {
     ios: {
       supportsTablet: true,
       bundleIdentifier: IS_DEV ? "com.solenceai.app.dev" : "com.solenceai.app",
-      buildNumber: "15",
+      buildNumber: "16",
       usesAppleSignIn: true,
       infoPlist: {
         NSMicrophoneUsageDescription:
@@ -31,6 +31,7 @@ module.exports = {
       edgeToEdgeEnabled: true,
       predictiveBackGestureEnabled: false,
       package: IS_DEV ? "com.solenceai.app.dev" : "com.solenceai.app",
+      versionCode: 2,
       permissions: [
         "android.permission.RECORD_AUDIO",
         "android.permission.MODIFY_AUDIO_SETTINGS",
