@@ -3,6 +3,7 @@ import {
   View,
   Text,
   TextInput,
+  Keyboard,
   StyleSheet,
   Pressable,
   KeyboardAvoidingView,
@@ -11,6 +12,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
+import { Feather } from "@expo/vector-icons";
 import * as AppleAuthentication from "expo-apple-authentication";
 import Animated, { FadeIn, FadeInDown } from "react-native-reanimated";
 import { useTranslation } from "react-i18next";
@@ -38,7 +40,9 @@ export default function AuthScreen({
 
   // If a deep-link delivered a referral code, default to sign-up so the
   // user actually sees / can edit the prefilled code.
-  const hasInitialCode = Boolean(initialReferralCode && initialReferralCode.trim().length > 0);
+  const hasInitialCode = Boolean(
+    initialReferralCode && initialReferralCode.trim().length > 0,
+  );
   const [isSignUp, setIsSignUp] = useState(hasInitialCode);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -51,6 +55,11 @@ export default function AuthScreen({
   const [isLoading, setIsLoading] = useState(false);
   const [appleAvailable, setAppleAvailable] = useState(false);
   const [appleLoading, setAppleLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const passwordInputRef = React.useRef<TextInput>(null);
+  const confirmPasswordInputRef = React.useRef<TextInput>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -64,6 +73,19 @@ export default function AuthScreen({
       });
     return () => {
       cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const showSubscription = Keyboard.addListener("keyboardDidShow", () =>
+      setKeyboardVisible(true),
+    );
+    const hideSubscription = Keyboard.addListener("keyboardDidHide", () =>
+      setKeyboardVisible(false),
+    );
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
     };
   }, []);
 
@@ -196,6 +218,22 @@ export default function AuthScreen({
         style={styles.keyboardView}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
       >
+        {keyboardVisible ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t("auth.dismissKeyboard")}
+            onPress={() => Keyboard.dismiss()}
+            style={[
+              styles.keyboardDoneButton,
+              { top: insets.top + Spacing.sm },
+            ]}
+            testID="button-dismiss-keyboard"
+          >
+            <Text style={[styles.keyboardDoneText, { color: theme.link }]}>
+              {t("auth.dismissKeyboard")}
+            </Text>
+          </Pressable>
+        ) : null}
         <View
           style={[
             styles.content,
@@ -223,8 +261,10 @@ export default function AuthScreen({
                 <AppleAuthentication.AppleAuthenticationButton
                   buttonType={
                     isSignUp
-                      ? AppleAuthentication.AppleAuthenticationButtonType.SIGN_UP
-                      : AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN
+                      ? AppleAuthentication.AppleAuthenticationButtonType
+                          .SIGN_UP
+                      : AppleAuthentication.AppleAuthenticationButtonType
+                          .SIGN_IN
                   }
                   buttonStyle={
                     isDark
@@ -299,6 +339,8 @@ export default function AuthScreen({
                 keyboardType="email-address"
                 autoCapitalize="none"
                 autoCorrect={false}
+                returnKeyType="next"
+                onSubmitEditing={() => passwordInputRef.current?.focus()}
                 testID="input-email"
               />
             </View>
@@ -317,14 +359,38 @@ export default function AuthScreen({
               ]}
             >
               <TextInput
+                ref={passwordInputRef}
                 style={[styles.input, { color: theme.text }]}
                 placeholder={t("auth.passwordPlaceholder")}
                 placeholderTextColor={theme.textMuted}
                 value={password}
                 onChangeText={setPassword}
-                secureTextEntry
+                secureTextEntry={!showPassword}
+                returnKeyType={isSignUp ? "next" : "done"}
+                onSubmitEditing={() =>
+                  isSignUp
+                    ? confirmPasswordInputRef.current?.focus()
+                    : Keyboard.dismiss()
+                }
+                blurOnSubmit={!isSignUp}
                 testID="input-password"
               />
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t(
+                  showPassword ? "auth.hidePassword" : "auth.showPassword",
+                )}
+                onPress={() => setShowPassword((visible) => !visible)}
+                hitSlop={8}
+                style={styles.passwordToggle}
+                testID="button-toggle-password-visibility"
+              >
+                <Feather
+                  name={showPassword ? "eye-off" : "eye"}
+                  size={19}
+                  color={theme.textMuted}
+                />
+              </Pressable>
             </View>
 
             {isSignUp ? (
@@ -342,14 +408,35 @@ export default function AuthScreen({
                 ]}
               >
                 <TextInput
+                  ref={confirmPasswordInputRef}
                   style={[styles.input, { color: theme.text }]}
                   placeholder={t("auth.confirmPasswordPlaceholder")}
                   placeholderTextColor={theme.textMuted}
                   value={confirmPassword}
                   onChangeText={setConfirmPassword}
-                  secureTextEntry
+                  secureTextEntry={!showConfirmPassword}
+                  returnKeyType="done"
+                  onSubmitEditing={() => Keyboard.dismiss()}
                   testID="input-confirm-password"
                 />
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={t(
+                    showConfirmPassword
+                      ? "auth.hidePassword"
+                      : "auth.showPassword",
+                  )}
+                  onPress={() => setShowConfirmPassword((visible) => !visible)}
+                  hitSlop={8}
+                  style={styles.passwordToggle}
+                  testID="button-toggle-confirm-password-visibility"
+                >
+                  <Feather
+                    name={showConfirmPassword ? "eye-off" : "eye"}
+                    size={19}
+                    color={theme.textMuted}
+                  />
+                </Pressable>
               </View>
             ) : null}
 
@@ -372,11 +459,11 @@ export default function AuthScreen({
                   placeholder="Referral code (optional)"
                   placeholderTextColor={theme.textMuted}
                   value={referralCode}
-                  onChangeText={(value) =>
-                    setReferralCode(value.toLowerCase())
-                  }
+                  onChangeText={(value) => setReferralCode(value.toLowerCase())}
                   autoCapitalize="none"
                   autoCorrect={false}
+                  returnKeyType="done"
+                  onSubmitEditing={() => Keyboard.dismiss()}
                   testID="input-referral-code"
                 />
               </View>
@@ -413,14 +500,16 @@ export default function AuthScreen({
                 <ActivityIndicator color="#fff" />
               ) : (
                 <Text style={styles.submitButtonText}>
-                  {isSignUp
-                    ? t("auth.createAccountButton")
-                    : t("auth.signIn")}
+                  {isSignUp ? t("auth.createAccountButton") : t("auth.signIn")}
                 </Text>
               )}
             </Pressable>
 
-            <Pressable onPress={toggleMode} style={styles.toggleButton} testID="button-toggle-mode">
+            <Pressable
+              onPress={toggleMode}
+              style={styles.toggleButton}
+              testID="button-toggle-mode"
+            >
               <Text style={[styles.toggleText, { color: theme.textMuted }]}>
                 {isSignUp ? t("auth.haveAccount") : t("auth.noAccount")}
                 <Text style={{ color: theme.link }}>
@@ -441,6 +530,17 @@ const styles = StyleSheet.create({
   },
   keyboardView: {
     flex: 1,
+  },
+  keyboardDoneButton: {
+    position: "absolute",
+    right: Spacing["2xl"],
+    zIndex: 2,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.xs,
+  },
+  keyboardDoneText: {
+    fontSize: 15,
+    fontFamily: FontFamily.medium,
   },
   content: {
     flex: 1,
@@ -500,16 +600,25 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
   },
   inputContainer: {
+    flexDirection: "row",
+    alignItems: "center",
     borderRadius: BorderRadius.md,
     borderWidth: 1,
     overflow: "hidden",
   },
   input: {
+    flex: 1,
     paddingHorizontal: Spacing.xl,
     paddingVertical: Spacing.lg,
     fontSize: 16,
     fontFamily: FontFamily.regular,
     fontWeight: "400",
+  },
+  passwordToggle: {
+    minWidth: 48,
+    alignItems: "center",
+    justifyContent: "center",
+    alignSelf: "stretch",
   },
   errorText: {
     color: "#D32F2F",
