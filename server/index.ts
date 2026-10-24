@@ -20,6 +20,15 @@ function setupCors(app: express.Application) {
 
     if (process.env.REPLIT_DEV_DOMAIN) {
       origins.add(`https://${process.env.REPLIT_DEV_DOMAIN}`);
+      // The browser preview uses an Expo-specific sibling of this exact
+      // workspace host. Do not allow arbitrary replit.dev origins.
+      if (process.env.NODE_ENV !== "production") {
+        const expoPreviewHost = process.env.REPLIT_DEV_DOMAIN.replace(
+          ".",
+          ".expo.",
+        );
+        origins.add(`https://${expoPreviewHost}`);
+      }
     }
 
     if (process.env.REPLIT_DOMAINS) {
@@ -36,6 +45,7 @@ function setupCors(app: express.Application) {
       origin?.startsWith("http://127.0.0.1:");
 
     if (origin && (origins.has(origin) || isLocalhost)) {
+      res.vary("Origin");
       res.header("Access-Control-Allow-Origin", origin);
       res.header(
         "Access-Control-Allow-Methods",

@@ -6,13 +6,13 @@ import {
   Keyboard,
   StyleSheet,
   Pressable,
-  KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { Feather } from "@expo/vector-icons";
+import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import * as AppleAuthentication from "expo-apple-authentication";
 import Animated, { FadeIn, FadeInDown } from "react-native-reanimated";
 import { useTranslation } from "react-i18next";
@@ -214,10 +214,7 @@ export default function AuthScreen({
         end={{ x: 0.5, y: 1 }}
       />
 
-      <KeyboardAvoidingView
-        style={styles.keyboardView}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-      >
+      <View style={styles.keyboardView}>
         {keyboardVisible ? (
           <Pressable
             accessibilityRole="button"
@@ -234,8 +231,12 @@ export default function AuthScreen({
             </Text>
           </Pressable>
         ) : null}
-        <View
-          style={[
+        <KeyboardAwareScrollView
+          style={styles.keyboardView}
+          bottomOffset={24}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          contentContainerStyle={[
             styles.content,
             {
               paddingTop: insets.top + Spacing["4xl"],
@@ -518,8 +519,8 @@ export default function AuthScreen({
               </Text>
             </Pressable>
           </Animated.View>
-        </View>
-      </KeyboardAvoidingView>
+        </KeyboardAwareScrollView>
+      </View>
     </View>
   );
 }
@@ -535,6 +536,8 @@ const styles = StyleSheet.create({
     position: "absolute",
     right: Spacing["2xl"],
     zIndex: 2,
+    minHeight: 44,
+    justifyContent: "center",
     paddingHorizontal: Spacing.sm,
     paddingVertical: Spacing.xs,
   },
@@ -543,7 +546,7 @@ const styles = StyleSheet.create({
     fontFamily: FontFamily.medium,
   },
   content: {
-    flex: 1,
+    flexGrow: 1,
     paddingHorizontal: Spacing["2xl"],
     justifyContent: "center",
   },

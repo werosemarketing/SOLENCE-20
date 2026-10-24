@@ -8,11 +8,12 @@ import {
   Dimensions,
   Platform,
   Linking,
-  KeyboardAvoidingView,
+  Keyboard,
   AppState,
   type AppStateStatus,
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
+import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, {
   useSharedValue,
@@ -480,6 +481,13 @@ export default function SolenceScreen({
   const [isConversationActive, setIsConversationActive] = useState(false);
   const [showStarters, setShowStarters] = useState(true);
   const [textInputValue, setTextInputValue] = useState("");
+  const [messageInputFocused, setMessageInputFocused] = useState(false);
+  const messageInputRef = useRef<TextInput>(null);
+
+  const dismissMessageKeyboard = () => {
+    messageInputRef.current?.blur();
+    Keyboard.dismiss();
+  };
   const [lastVoiceError, setLastVoiceError] = useState<{
     kind: "audio" | "text";
     payload: string;
@@ -1201,6 +1209,7 @@ export default function SolenceScreen({
   const handleSendText = () => {
     const trimmed = textInputValue.trim();
     if (!trimmed) return;
+    dismissMessageKeyboard();
     setTextInputValue("");
     // The pre-mood sheet runs at most once per app session and is only
     // relevant to "first turn" of a brand-new conversation. We
@@ -1533,10 +1542,12 @@ export default function SolenceScreen({
         />
       ))}
 
-      <KeyboardAvoidingView
+      <KeyboardAwareScrollView
         style={styles.keyboardAvoid}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        keyboardVerticalOffset={0}
+        contentContainerStyle={styles.scrollContent}
+        bottomOffset={16}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
       >
         <View
           style={[
@@ -1920,6 +1931,7 @@ export default function SolenceScreen({
             },
           ]}>
             <TextInput
+              ref={messageInputRef}
               style={[
                 styles.textInput,
                 { color: theme.text },
@@ -1928,12 +1940,25 @@ export default function SolenceScreen({
               placeholderTextColor={isDark ? "rgba(255,255,255,0.3)" : "rgba(0,0,0,0.3)"}
               value={textInputValue}
               onChangeText={setTextInputValue}
+              onFocus={() => setMessageInputFocused(true)}
+              onBlur={() => setMessageInputFocused(false)}
               editable={!isInputDisabled}
               onSubmitEditing={handleSendText}
               returnKeyType="send"
               multiline={false}
               testID="input-message"
             />
+            {messageInputFocused ? (
+              <Pressable
+                onPress={dismissMessageKeyboard}
+                style={styles.dismissKeyboardButton}
+                accessibilityRole="button"
+                accessibilityLabel={t("auth.dismissKeyboard")}
+                testID="button-dismiss-message-keyboard"
+              >
+                <Feather name="chevron-down" size={22} color={theme.text} />
+              </Pressable>
+            ) : null}
             <Pressable
               onPress={handleSendText}
               disabled={isInputDisabled || !textInputValue.trim()}
@@ -1956,7 +1981,7 @@ export default function SolenceScreen({
             </Pressable>
           </View>
         </View>
-      </KeyboardAvoidingView>
+      </KeyboardAwareScrollView>
 
       {showSubscriptionPrompt ? (
         <Pressable
@@ -2045,8 +2070,11 @@ const styles = StyleSheet.create({
   keyboardAvoid: {
     flex: 1,
   },
+  scrollContent: {
+    flexGrow: 1,
+  },
   content: {
-    flex: 1,
+    flexGrow: 1,
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: Spacing.lg,
@@ -2385,6 +2413,12 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  dismissKeyboardButton: {
+    width: 44,
+    height: 44,
     alignItems: "center",
     justifyContent: "center",
   },

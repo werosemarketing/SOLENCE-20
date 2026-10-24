@@ -23,6 +23,7 @@
     "preview": {
       "distribution": "internal",
       "env": {
+        "EXPO_PUBLIC_DOMAIN": "app.solence.ai",
         "EXPO_PUBLIC_REVENUECAT_IOS_API_KEY": "appl_NwknkveoGYFmYOHipEAnpcRMeHI",
         "EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY": "goog_wFxuBgBTwMxLSynHsnsouWfkxOX",
         "EXPO_PUBLIC_REVENUECAT_TEST_API_KEY": "test_EhQyUWdSfoHcdJbBeUUztsmCBUa"
