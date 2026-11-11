@@ -6,7 +6,7 @@ channel = "stable-24_05"
 
 [deployment]
 deploymentTarget = "autoscale"
-build = ["sh", "-c", "NODE_ENV=production npm run validate:referrals && node tools/build-with-prewarm.js && npm run server:build"]
+build = ["sh", "-c", "NODE_ENV=production npm run validate:referrals && node tools/build-with-prewarm.js && npm run web:build && npm run server:build"]
 run = ["npm", "run", "server:prod"]
 
 [[ports]]

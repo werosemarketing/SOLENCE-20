@@ -1,10 +1,16 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
+import { Platform } from "react-native";
 
 /**
  * Gets the base URL for the Express API server (e.g., "http://localhost:3000")
  * @returns {string} The API base URL
  */
 export function getApiUrl(): string {
+  // Published web exports share the Express origin, including custom domains.
+  // Metro's development preview still uses its separate backend address.
+  if (Platform.OS === "web" && !__DEV__ && typeof window !== "undefined") {
+    return window.location.origin;
+  }
   let host = process.env.EXPO_PUBLIC_DOMAIN;
 
   if (!host) {

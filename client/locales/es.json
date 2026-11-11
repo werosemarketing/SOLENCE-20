@@ -608,6 +608,7 @@
     "privacyPolicy": "Política de privacidad",
     "ctaUpgrade": "Mejorar — {{price}}",
     "maybeLater": "Quizá después",
+    "webPurchaseNotice": "Compra o restaura Premium en la app de Solence para iOS o Android. Después, inicia sesión aquí con la misma cuenta para usar tu acceso.",
     "closeA11y": "Cerrar pantalla de mejora",
     "subscribeA11y": "Mejorar a Solence Premium por {{price}}",
     "errors": {

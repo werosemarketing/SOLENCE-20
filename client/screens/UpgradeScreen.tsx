@@ -36,7 +36,7 @@ export default function UpgradeScreen({ navigation, route }: Props) {
   const insets = useSafeAreaInsets();
   const { theme, isDark } = useTheme();
   const { t } = useTranslation();
-  const { offerings, purchase, restore, isPurchasing, isRestoring } = useSubscription();
+  const { offerings, purchase, restore, isPurchasing, isRestoring, canPurchaseInApp } = useSubscription();
 
 
   const tokenLimit = route.params?.tokenLimit ?? 15000;
@@ -341,7 +341,7 @@ export default function UpgradeScreen({ navigation, route }: Props) {
           },
         ]}
       >
-        <Pressable
+        {canPurchaseInApp ? <Pressable
           onPress={handleSubscribe}
           disabled={isBusy || !packageToPurchase}
           style={({ pressed }) => [
@@ -362,7 +362,14 @@ export default function UpgradeScreen({ navigation, route }: Props) {
               {t("upgrade.ctaUpgrade", { price: priceString })}
             </Text>
           )}
-        </Pressable>
+        </Pressable> : (
+          <Text
+            style={{ color: theme.text, textAlign: "center", paddingVertical: Spacing.md }}
+            testID="web-subscription-notice"
+          >
+            {t("upgrade.webPurchaseNotice")}
+          </Text>
+        )}
 
         <Pressable
           onPress={handleClose}
@@ -378,7 +385,7 @@ export default function UpgradeScreen({ navigation, route }: Props) {
           </Text>
         </Pressable>
 
-        <Pressable
+        {canPurchaseInApp ? <Pressable
           onPress={handleRestore}
           disabled={isBusy}
           style={({ pressed }) => [
@@ -394,7 +401,7 @@ export default function UpgradeScreen({ navigation, route }: Props) {
               {t("upgrade.restore")}
             </Text>
           )}
-        </Pressable>
+        </Pressable> : null}
       </View>
 
     </View>

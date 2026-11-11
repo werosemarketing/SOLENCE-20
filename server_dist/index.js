@@ -5,7 +5,7 @@ var __export = (target, all) => {
 };
 
 // server/index.ts
-import express3 from "express";
+import express4 from "express";
 
 // server/routes.ts
 import { createServer } from "node:http";
@@ -452,11 +452,57 @@ function warnIfReferralDomainMissing() {
 
 // server/routes.ts
 import JSZip from "jszip";
-import { eq as eq3, desc as desc2, inArray, and as and3, lt, gte as gte2, isNull } from "drizzle-orm";
+import { eq as eq3, desc as desc2, inArray, and as and3, lt as lt2, gte as gte2, isNull } from "drizzle-orm";
 
 // server/tokens.ts
-import { eq as eq2, and as and2, gte, sql as sql3 } from "drizzle-orm";
+import { eq as eq2, and as and2, gte, lt, sql as sql3 } from "drizzle-orm";
+
+// shared/calendar.ts
+function calendarDateKey(date, timeZone) {
+  if (!timeZone) {
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  }
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(date);
+  const part = (type) => parts.find((p) => p.type === type).value;
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
+function recentCalendarKeys(days, now, timeZone) {
+  const anchor = /* @__PURE__ */ new Date(`${calendarDateKey(now, timeZone)}T12:00:00Z`);
+  return Array.from({ length: days }, (_, index2) => {
+    const date = new Date(anchor);
+    date.setUTCDate(date.getUTCDate() - (days - 1 - index2));
+    return date.toISOString().slice(0, 10);
+  });
+}
+
+// server/tokens.ts
 var MIN_TOKENS_FOR_REQUEST = 500;
+async function getCalendarUsageHistory(userId, days, unit, timeZone, now = /* @__PURE__ */ new Date()) {
+  const keys = recentCalendarKeys(days, now, timeZone);
+  const date = sql3`to_char((${tokenUsage.createdAt} AT TIME ZONE 'UTC') AT TIME ZONE ${timeZone}, 'YYYY-MM-DD')`;
+  const start = sql3`(${keys[0]}::date::timestamp AT TIME ZONE ${timeZone}) AT TIME ZONE 'UTC'`;
+  const end = sql3`((${keys[keys.length - 1]}::date + 1)::timestamp AT TIME ZONE ${timeZone}) AT TIME ZONE 'UTC'`;
+  const column = unit === "messages" ? tokenUsage.messagesUsed : tokenUsage.tokensUsed;
+  const rows = await db.select({
+    date,
+    total: sql3`COALESCE(SUM(${column}), 0)::int`
+  }).from(tokenUsage).where(and2(
+    eq2(tokenUsage.userId, userId),
+    gte(tokenUsage.createdAt, start),
+    lt(tokenUsage.createdAt, end)
+  )).groupBy(sql3`1`);
+  const totals = new Map(rows.map((row) => [row.date, row.total]));
+  return keys.map((date2) => ({
+    date: date2,
+    periodStart: `${date2}T00:00:00.000Z`,
+    tokensUsed: Math.max(0, totals.get(date2) ?? 0)
+  }));
+}
 function getCurrentPeriodStart() {
   const now = /* @__PURE__ */ new Date();
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
@@ -777,7 +823,7 @@ async function runSmartTitleBackfillScan(userId) {
     let scanRows = await db.select({ id: conversations.id, title: conversations.title }).from(conversations).where(
       cursor !== void 0 ? and3(
         eq3(conversations.userId, userId),
-        lt(conversations.id, cursor)
+        lt2(conversations.id, cursor)
       ) : eq3(conversations.userId, userId)
     ).orderBy(desc2(conversations.id)).limit(SMART_TITLE_BACKFILL_SCAN_BATCH_SIZE);
     if (scanRows.length === 0 && cursor !== void 0) {
@@ -1162,6 +1208,7 @@ var APPLE_AUDIENCES = [
   "com.solenceai.app",
   "com.solence.app",
   // accepted for builds predating the bundle ID rename
+  ...process.env.NODE_ENV === "production" ? [] : ["com.solenceai.app.dev", "com.solence.app.dev"],
   ...(process.env.APPLE_BUNDLE_IDS ?? "").split(",").map((s) => s.trim()).filter((s) => s.length > 0)
 ];
 function requireAuth(req, res, next) {
@@ -1837,18 +1884,25 @@ async function registerRoutes(app2) {
   app2.get("/api/tokens/history", requireAuth, async (req, res) => {
     try {
       const userId = req.user.userId;
+      const timeZone = req.query.timeZone;
+      if (timeZone !== void 0) {
+        try {
+          if (typeof timeZone !== "string" || !timeZone) throw new Error("Invalid timezone");
+          new Intl.DateTimeFormat("en-US", { timeZone }).format();
+        } catch {
+          return res.status(400).json({ error: "Invalid timeZone" });
+        }
+      }
       const rawDays = Number(req.query.days ?? 7);
       const days = Number.isFinite(rawDays) && rawDays > 0 ? Math.min(30, Math.floor(rawDays)) : 7;
       const [historyUserRow] = await db.select({ isPremium: users.isPremium }).from(users).where(eq3(users.id, userId)).limit(1);
       const historyIsPremium = historyUserRow?.isPremium ?? false;
-      const history = await getTokensUsedHistory(
-        userId,
-        days,
-        historyIsPremium ? "messages" : "tokens"
-      );
+      const unit = historyIsPremium ? "messages" : "tokens";
+      const history = typeof timeZone === "string" ? await getCalendarUsageHistory(userId, days, unit, timeZone) : await getTokensUsedHistory(userId, days, unit);
       res.json({
         days,
         isPremium: historyIsPremium,
+        timeZone: timeZone ?? "UTC",
         tokenLimit: historyIsPremium ? PREMIUM_MESSAGE_LIMIT : FREE_TOKEN_LIMIT,
         period: "day",
         history
@@ -2436,7 +2490,7 @@ async function registerRoutes(app2) {
           and3(
             eq3(conversations.userId, userId),
             gte2(conversations.createdAt, weekStart),
-            lt(conversations.createdAt, weekEnd)
+            lt2(conversations.createdAt, weekEnd)
           )
         ).orderBy(desc2(conversations.createdAt));
         const weekMoods = await db.select({
@@ -2445,7 +2499,7 @@ async function registerRoutes(app2) {
           and3(
             eq3(moodEntries.userId, userId),
             gte2(moodEntries.createdAt, weekStart),
-            lt(moodEntries.createdAt, weekEnd)
+            lt2(moodEntries.createdAt, weekEnd)
           )
         );
         const moodCount = weekMoods.length;
@@ -2584,7 +2638,7 @@ async function registerRoutes(app2) {
           and3(
             eq3(userMemories.userId, userId),
             gte2(userMemories.createdAt, weekStart),
-            lt(userMemories.createdAt, weekEnd)
+            lt2(userMemories.createdAt, weekEnd)
           )
         );
         const corpusItems = [];
@@ -3266,16 +3320,41 @@ PRE-SESSION MOOD CHECK-IN: The user just rated their current mood as "${preSessi
   return httpServer;
 }
 
+// server/web.ts
+import express3 from "express";
+import path from "node:path";
+function createWebAppRouter(webRoot) {
+  const router = express3.Router();
+  const indexPath = path.resolve(webRoot, "index.html");
+  router.use(express3.static(webRoot, { index: false, maxAge: "1h" }));
+  router.get(/.*/, (req, res, next) => {
+    const reserved = /^\/(?:api|manifest|assets|_expo|ios|android)(?:\/|$)/;
+    if (reserved.test(req.path) || path.extname(req.path) || !req.accepts("html")) {
+      return next();
+    }
+    res.setHeader("Cache-Control", "no-cache");
+    res.sendFile(indexPath);
+  });
+  return router;
+}
+
 // server/index.ts
 import * as fs from "fs";
-import * as path from "path";
-var app = express3();
+import * as path2 from "path";
+var app = express4();
 var log = console.log;
 function setupCors(app2) {
   app2.use((req, res, next) => {
     const origins = /* @__PURE__ */ new Set();
     if (process.env.REPLIT_DEV_DOMAIN) {
       origins.add(`https://${process.env.REPLIT_DEV_DOMAIN}`);
+      if (process.env.NODE_ENV !== "production") {
+        const expoPreviewHost = process.env.REPLIT_DEV_DOMAIN.replace(
+          ".",
+          ".expo."
+        );
+        origins.add(`https://${expoPreviewHost}`);
+      }
     }
     if (process.env.REPLIT_DOMAINS) {
       process.env.REPLIT_DOMAINS.split(",").forEach((d) => {
@@ -3285,6 +3364,7 @@ function setupCors(app2) {
     const origin = req.header("origin");
     const isLocalhost = origin?.startsWith("http://localhost:") || origin?.startsWith("http://127.0.0.1:");
     if (origin && (origins.has(origin) || isLocalhost)) {
+      res.vary("Origin");
       res.header("Access-Control-Allow-Origin", origin);
       res.header(
         "Access-Control-Allow-Methods",
@@ -3301,19 +3381,19 @@ function setupCors(app2) {
 }
 function setupBodyParsing(app2) {
   app2.use(
-    express3.json({
+    express4.json({
       limit: "50mb",
       verify: (req, _res, buf) => {
         req.rawBody = buf;
       }
     })
   );
-  app2.use(express3.urlencoded({ extended: false, limit: "50mb" }));
+  app2.use(express4.urlencoded({ extended: false, limit: "50mb" }));
 }
 function setupRequestLogging(app2) {
   app2.use((req, res, next) => {
     const start = Date.now();
-    const path2 = req.path;
+    const path3 = req.path;
     let capturedJsonResponse = void 0;
     const originalResJson = res.json;
     res.json = function(bodyJson, ...args) {
@@ -3321,10 +3401,10 @@ function setupRequestLogging(app2) {
       return originalResJson.apply(res, [bodyJson, ...args]);
     };
     res.on("finish", () => {
-      if (!path2.startsWith("/api")) return;
+      if (!path3.startsWith("/api")) return;
       const duration = Date.now() - start;
-      let logLine = `${req.method} ${path2} ${res.statusCode} in ${duration}ms`;
-      const isSensitivePath = path2.startsWith("/api/auth") || path2.startsWith("/api/chat");
+      let logLine = `${req.method} ${path3} ${res.statusCode} in ${duration}ms`;
+      const isSensitivePath = path3.startsWith("/api/auth") || path3.startsWith("/api/chat");
       if (capturedJsonResponse && !isSensitivePath) {
         const safeResponse = {
           ...capturedJsonResponse
@@ -3348,7 +3428,7 @@ function setupRequestLogging(app2) {
 }
 function getAppName() {
   try {
-    const appJsonPath = path.resolve(process.cwd(), "app.json");
+    const appJsonPath = path2.resolve(process.cwd(), "app.json");
     const appJsonContent = fs.readFileSync(appJsonPath, "utf-8");
     const appJson = JSON.parse(appJsonContent);
     return appJson.expo?.name || "App Landing Page";
@@ -3357,7 +3437,7 @@ function getAppName() {
   }
 }
 function serveExpoManifest(platform, res) {
-  const manifestPath = path.resolve(
+  const manifestPath = path2.resolve(
     process.cwd(),
     "static-build",
     platform,
@@ -3391,7 +3471,12 @@ function serveLandingPage({
   res.status(200).send(html);
 }
 function configureExpoAndLanding(app2) {
-  const templatePath = path.resolve(
+  const webRoot = path2.resolve(process.cwd(), "web-build");
+  const hasWebApp = fs.existsSync(path2.join(webRoot, "index.html"));
+  if (process.env.NODE_ENV === "production" && !hasWebApp) {
+    throw new Error("Web export missing. Run npm run web:build before starting production.");
+  }
+  const templatePath = path2.resolve(
     process.cwd(),
     "server",
     "templates",
@@ -3411,7 +3496,7 @@ function configureExpoAndLanding(app2) {
     if (platform && (platform === "ios" || platform === "android")) {
       return serveExpoManifest(platform, res);
     }
-    if (req.path === "/") {
+    if (req.path === "/" && !hasWebApp) {
       return serveLandingPage({
         req,
         res,
@@ -3421,8 +3506,9 @@ function configureExpoAndLanding(app2) {
     }
     next();
   });
-  app2.use("/assets", express3.static(path.resolve(process.cwd(), "assets")));
-  app2.use(express3.static(path.resolve(process.cwd(), "static-build")));
+  if (hasWebApp) app2.use(createWebAppRouter(webRoot));
+  app2.use("/assets", express4.static(path2.resolve(process.cwd(), "assets")));
+  app2.use(express4.static(path2.resolve(process.cwd(), "static-build")));
   log("Expo routing: Checking expo-platform header on / and /manifest");
 }
 function setupErrorHandler(app2) {

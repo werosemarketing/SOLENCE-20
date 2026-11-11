@@ -609,6 +609,7 @@
     "ctaUpgrade": "Upgrade — {{price}}",
     "maybeLater": "Maybe later",
     "restore": "Restore purchases",
+    "webPurchaseNotice": "Purchase or restore Premium in the Solence iOS or Android app, then sign in here with the same account to use your access.",
     "closeA11y": "Close upgrade screen",
     "subscribeA11y": "Upgrade to Solence Premium for {{price}}",
     "errors": {

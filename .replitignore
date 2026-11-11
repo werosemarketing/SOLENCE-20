@@ -1,0 +1,4 @@
+# Generated during publishing; do not upload a stale local export.
+/web-build/
+/server_dist/
+/static-build/

@@ -2,6 +2,7 @@ import express from "express";
 import type { Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { warnIfReferralDomainMissing } from "./referrals";
+import { createWebAppRouter } from "./web";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -189,6 +190,11 @@ function serveLandingPage({
 }
 
 function configureExpoAndLanding(app: express.Application) {
+  const webRoot = path.resolve(process.cwd(), "web-build");
+  const hasWebApp = fs.existsSync(path.join(webRoot, "index.html"));
+  if (process.env.NODE_ENV === "production" && !hasWebApp) {
+    throw new Error("Web export missing. Run npm run web:build before starting production.");
+  }
   const templatePath = path.resolve(
     process.cwd(),
     "server",
@@ -214,7 +220,7 @@ function configureExpoAndLanding(app: express.Application) {
       return serveExpoManifest(platform, res);
     }
 
-    if (req.path === "/") {
+    if (req.path === "/" && !hasWebApp) {
       return serveLandingPage({
         req,
         res,
@@ -226,6 +232,7 @@ function configureExpoAndLanding(app: express.Application) {
     next();
   });
 
+  if (hasWebApp) app.use(createWebAppRouter(webRoot));
   app.use("/assets", express.static(path.resolve(process.cwd(), "assets")));
   app.use(express.static(path.resolve(process.cwd(), "static-build")));
 
