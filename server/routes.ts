@@ -54,6 +54,7 @@ import {
   getNextPeriodStart,
   getTokensUsed,
   getTokensUsedHistory,
+  getCalendarUsageHistory,
   getMessagesUsed,
   tryReserveTokens,
   recordTokens,
@@ -1866,6 +1867,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/tokens/history", requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.user!.userId;
+      const timeZone = req.query.timeZone;
+      if (timeZone !== undefined) {
+        try {
+          if (typeof timeZone !== "string" || !timeZone) throw new Error("Invalid timezone");
+          new Intl.DateTimeFormat("en-US", { timeZone }).format();
+        } catch {
+          return res.status(400).json({ error: "Invalid timeZone" });
+        }
+      }
       const rawDays = Number(req.query.days ?? 7);
       const days =
         Number.isFinite(rawDays) && rawDays > 0
@@ -1877,14 +1887,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .where(eq(users.id, userId))
         .limit(1);
       const historyIsPremium = historyUserRow?.isPremium ?? false;
-      const history = await getTokensUsedHistory(
-        userId,
-        days,
-        historyIsPremium ? "messages" : "tokens",
-      );
+      const unit = historyIsPremium ? "messages" : "tokens";
+      const history = typeof timeZone === "string"
+        ? await getCalendarUsageHistory(userId, days, unit, timeZone)
+        : await getTokensUsedHistory(userId, days, unit);
       res.json({
         days,
         isPremium: historyIsPremium,
+        timeZone: timeZone ?? "UTC",
         tokenLimit: historyIsPremium ? PREMIUM_MESSAGE_LIMIT : FREE_TOKEN_LIMIT,
         period: "day",
         history,

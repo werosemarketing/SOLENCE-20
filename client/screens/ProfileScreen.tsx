@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  AppState,
   Platform,
   Pressable,
   Share,
@@ -75,6 +76,11 @@ import {
   type ClientPreferences,
 } from "@/lib/preferences";
 import { setAppLanguage } from "@/lib/i18n";
+import {
+  calendarDateKey,
+  localDateForKey,
+  moodCalendarBuckets,
+} from "@shared/calendar";
 import {
   cancelDailyReminder,
   cancelWeeklySummary,
@@ -165,6 +171,7 @@ const DEFAULT_TOKEN_LIMIT = 15000;
 const RECENT_CONVERSATIONS_LIMIT = 10;
 
 type HistoryEntry = {
+  date?: string;
   periodStart: string;
   tokensUsed: number;
 };
@@ -324,12 +331,12 @@ function formatDayLabel(
   locale?: string,
 ): string {
   if (isToday) return t("time.today");
-  const d = new Date(iso);
+  const d = localDateForKey(iso.slice(0, 10));
   return d.toLocaleDateString(locale, { weekday: "short" });
 }
 
 function formatFullDate(iso: string, locale?: string): string {
-  const d = new Date(iso);
+  const d = localDateForKey(iso.slice(0, 10));
   return d.toLocaleDateString(locale, {
     weekday: "long",
     month: "short",
@@ -371,6 +378,21 @@ export default function ProfileScreen() {
   const [tokenLimit, setTokenLimit] = useState<number>(DEFAULT_TOKEN_LIMIT);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [calendarNow, setCalendarNow] = useState(() => new Date());
+  const todayKey = calendarDateKey(calendarNow);
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+  useEffect(() => {
+    const refreshDate = () => setCalendarNow(new Date());
+    const timer = setInterval(refreshDate, 60_000);
+    const listener = AppState.addEventListener("change", (state) => {
+      if (state === "active") refreshDate();
+    });
+    return () => {
+      clearInterval(timer);
+      listener.remove();
+    };
+  }, []);
 
   const [conversations, setConversations] = useState<
     ConversationListItem[] | null
@@ -1396,43 +1418,36 @@ export default function ProfileScreen() {
     }
   };
 
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const token = await AsyncStorage.getItem(STORAGE_KEY_AUTH_TOKEN);
-        const headers: Record<string, string> = {};
-        if (token) headers["Authorization"] = `Bearer ${token}`;
-        const apiUrl = getApiUrl();
-        const response = await fetch(
-          `${apiUrl}/api/tokens/history?days=${HISTORY_DAYS}`,
-          { headers },
-        );
-        if (!response.ok) {
-          throw new Error(`Request failed (${response.status})`);
-        }
-        const data = (await response.json()) as HistoryResponse;
-        if (cancelled) return;
-        setHistory(data.history);
-        if (typeof data.tokenLimit === "number" && data.tokenLimit > 0) {
-          setTokenLimit(data.tokenLimit);
-        }
-      } catch (e) {
-        if (cancelled) return;
-        const message =
-          e instanceof Error ? e.message : "Could not load usage history";
-        setError(message);
-      } finally {
-        if (!cancelled) setLoading(false);
+  const loadUsageHistory = useCallback(async (signal?: AbortSignal) => {
+    try {
+      setLoading(true);
+      setError(null);
+      const token = await AsyncStorage.getItem(STORAGE_KEY_AUTH_TOKEN);
+      const headers: Record<string, string> = {};
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const apiUrl = getApiUrl();
+      const response = await fetch(
+        `${apiUrl}/api/tokens/history?days=${HISTORY_DAYS}&timeZone=${encodeURIComponent(timeZone)}`,
+        { headers, signal },
+      );
+      if (!response.ok) {
+        throw new Error(`Request failed (${response.status})`);
       }
-    };
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+      const data = (await response.json()) as HistoryResponse;
+      if (signal?.aborted) return;
+      setHistory(data.history);
+      if (typeof data.tokenLimit === "number" && data.tokenLimit > 0) {
+        setTokenLimit(data.tokenLimit);
+      }
+    } catch (e) {
+      if (signal?.aborted) return;
+      const message =
+        e instanceof Error ? e.message : "Could not load usage history";
+      setError(message);
+    } finally {
+      if (!signal?.aborted) setLoading(false);
+    }
+  }, [timeZone]);
 
   const loadConversations = useCallback(async (signal?: AbortSignal) => {
     try {
@@ -1702,7 +1717,9 @@ export default function ProfileScreen() {
       const headers: Record<string, string> = {};
       if (token) headers["Authorization"] = `Bearer ${token}`;
       const apiUrl = getApiUrl();
-      const response = await fetch(`${apiUrl}/api/mood?days=7`, {
+      // Fetch an extra day so a DST-lengthened calendar window is complete;
+      // only the last seven device-local dates are displayed below.
+      const response = await fetch(`${apiUrl}/api/mood?days=8`, {
         headers,
         signal,
       });
@@ -1725,6 +1742,8 @@ export default function ProfileScreen() {
   useFocusEffect(
     useCallback(() => {
       const controller = new AbortController();
+      setCalendarNow(new Date());
+      loadUsageHistory(controller.signal);
       loadConversations(controller.signal);
       loadSavedMoments(controller.signal);
       loadMoodEntries(controller.signal);
@@ -1736,7 +1755,7 @@ export default function ProfileScreen() {
       return () => {
         controller.abort();
       };
-    }, [loadConversations, loadSavedMoments, loadMoodEntries, loadMemories, loadReferral]),
+    }, [todayKey, loadUsageHistory, loadConversations, loadSavedMoments, loadMoodEntries, loadMemories, loadReferral]),
   );
 
   // Open the system share sheet with the user's invite blurb. We use
@@ -3227,7 +3246,8 @@ export default function ProfileScreen() {
           <View style={styles.chartContainer} testID="profile-history-chart">
             <View style={styles.chart}>
               {history.map((day, index) => {
-                const isToday = index === history.length - 1;
+                const dateKey = day.date ?? day.periodStart.slice(0, 10);
+                const isToday = dateKey === todayKey;
                 const ratio = tokenLimit > 0
                   ? Math.min(1, day.tokensUsed / tokenLimit)
                   : 0;
@@ -3235,8 +3255,8 @@ export default function ProfileScreen() {
                 const labelColor = isToday ? theme.orbPrimary : theme.textMuted;
                 const barColor = isToday ? theme.orbPrimary : theme.orbSecondary;
                 const trackColor = theme.backgroundSecondary;
-                const dateLabel = formatDayLabel(day.periodStart, isToday, t, locale);
-                const accessibilityLabel = `${formatFullDate(day.periodStart, locale)}: ${formatTokens(day.tokensUsed)} of ${formatTokens(tokenLimit)} tokens used`;
+                const dateLabel = formatDayLabel(dateKey, isToday, t, locale);
+                const accessibilityLabel = `${formatFullDate(dateKey, locale)}: ${formatTokens(day.tokensUsed)} of ${formatTokens(tokenLimit)} tokens used`;
                 return (
                   <View
                     key={day.periodStart}
@@ -3679,34 +3699,10 @@ export default function ProfileScreen() {
           </View>
         ) : moodEntries && moodEntries.length > 0 ? (
           (() => {
-            // Build a per-day bucket for the last 7 calendar days. We keep
-            // the LATEST entry per day (entries arrive newest-first, so the
-            // first one we see for a given day wins). Days without a
-            // check-in render as a faint dot — never as 0, which would
-            // misleadingly imply "rough mood".
-            //
-            // Bucket dates are derived via setDate() rather than fixed
-            // millisecond subtraction so DST transitions don't skip or
-            // duplicate a calendar day. Summaries (avg, most recent) are
-            // computed from in-bucket entries only so the chart and the
-            // numbers always agree, even when the API's rolling-hours
-            // window pulls in entries that fall outside our calendar
-            // window.
-            const buckets: { date: Date; entry: MoodEntry | null }[] = [];
-            for (let i = 6; i >= 0; i--) {
-              const d = new Date();
-              d.setHours(0, 0, 0, 0);
-              d.setDate(d.getDate() - i);
-              buckets.push({ date: d, entry: null });
-            }
-            for (const entry of moodEntries) {
-              const created = new Date(entry.createdAt);
-              created.setHours(0, 0, 0, 0);
-              const bucket = buckets.find(
-                (b) => b.date.getTime() === created.getTime(),
-              );
-              if (bucket && bucket.entry == null) bucket.entry = entry;
-            }
+            // Use seven device-local calendar dates, even across DST.
+            // Keep the latest check-in for each date, independent of API
+            // ordering. Empty days are dots, never a misleading zero score.
+            const buckets = moodCalendarBuckets(moodEntries, calendarNow);
 
             const inBucket = buckets
               .map((b) => b.entry)
@@ -3714,7 +3710,7 @@ export default function ProfileScreen() {
             const avg = inBucket.length
               ? inBucket.reduce((sum, e) => sum + e.score, 0) / inBucket.length
               : 0;
-            const mostRecent = inBucket[0] ?? null;
+            const mostRecent = inBucket[inBucket.length - 1] ?? null;
 
             return (
               <View testID="profile-mood-content">
@@ -3729,6 +3725,7 @@ export default function ProfileScreen() {
                         key={idx}
                         style={styles.moodDayCol}
                         testID={`profile-mood-day-${idx}`}
+                        accessibilityLabel={`${bucket.isToday ? `${t("time.today")}, ` : ""}${formatFullDate(bucket.key, locale)}${score ? `: ${score}/5` : ""}`}
                       >
                         <View style={styles.moodDotSlot}>
                           <View
@@ -3753,10 +3750,12 @@ export default function ProfileScreen() {
                         <Text
                           style={[
                             styles.moodDayLabel,
-                            { color: theme.textMuted },
+                            { color: bucket.isToday ? theme.orbPrimary : theme.textMuted },
                           ]}
                         >
-                          {t(`profile.mood.dayLabels.${bucket.date.getDay()}`)}
+                          {bucket.isToday
+                            ? t("time.today")
+                            : bucket.date.toLocaleDateString(locale, { weekday: "short" })}
                         </Text>
                       </View>
                     );

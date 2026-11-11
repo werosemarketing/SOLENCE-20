@@ -1,8 +1,38 @@
 import { db } from "./db";
 import { tokenUsage, FREE_TOKEN_LIMIT, PREMIUM_MESSAGE_LIMIT } from "@shared/schema";
-import { eq, and, gte, sql } from "drizzle-orm";
+import { eq, and, gte, lt, sql } from "drizzle-orm";
+import { recentCalendarKeys } from "@shared/calendar";
 
 export const MIN_TOKENS_FOR_REQUEST = 500;
+
+/** Display actual usage on the user's calendar without changing UTC quotas. */
+export async function getCalendarUsageHistory(
+  userId: string,
+  days: number,
+  unit: "tokens" | "messages",
+  timeZone: string,
+  now = new Date(),
+) {
+  const keys = recentCalendarKeys(days, now, timeZone);
+  const date = sql<string>`to_char((${tokenUsage.createdAt} AT TIME ZONE 'UTC') AT TIME ZONE ${timeZone}, 'YYYY-MM-DD')`;
+  const start = sql`(${keys[0]}::date::timestamp AT TIME ZONE ${timeZone}) AT TIME ZONE 'UTC'`;
+  const end = sql`((${keys[keys.length - 1]}::date + 1)::timestamp AT TIME ZONE ${timeZone}) AT TIME ZONE 'UTC'`;
+  const column = unit === "messages" ? tokenUsage.messagesUsed : tokenUsage.tokensUsed;
+  const rows = await db.select({
+    date,
+    total: sql<number>`COALESCE(SUM(${column}), 0)::int`,
+  }).from(tokenUsage).where(and(
+    eq(tokenUsage.userId, userId),
+    gte(tokenUsage.createdAt, start),
+    lt(tokenUsage.createdAt, end),
+  )).groupBy(sql`1`);
+  const totals = new Map(rows.map((row) => [row.date, row.total]));
+  return keys.map((date) => ({
+    date,
+    periodStart: `${date}T00:00:00.000Z`,
+    tokensUsed: Math.max(0, totals.get(date) ?? 0),
+  }));
+}
 
 export function getCurrentPeriodStart(): Date {
   const now = new Date();
