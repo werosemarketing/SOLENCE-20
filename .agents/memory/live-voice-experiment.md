@@ -23,6 +23,6 @@ Use the documented short-lived-token flow for this experiment, keeping the token
 
 Live voice must stay in the app-selected language throughout a call, rather than switching automatically when speech is ambiguous.
 
-**Why:** The user reported a call that started normally in English and then unexpectedly spoke French, and asked for reliable understanding without language switching. A transcription language hint alone does not constrain the realtime model's spoken replies.
+**Why:** The user reported a call that started normally in English and then unexpectedly spoke French, and asked for reliable understanding without language switching. A transcription language hint alone does not constrain the realtime model's spoken replies. The user confirmed that the explicit session-language policy fixed the switching.
 
 **How to apply:** Apply a session-wide spoken-language policy as well as recognition hints. It must take precedence over language mirroring and old conversation examples. Unclear speech should elicit a clarification in the selected language, not guesses or an automatic language change; preserve the user's Spanish preference when selected.

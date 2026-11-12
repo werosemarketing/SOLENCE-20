@@ -90,6 +90,10 @@ export function useLiveVoice() {
             setError("Live voice encountered a connection error. Please try again.");
             void stopRef.current();
           }
+          if (event.type === "solence.audio_error") {
+            setError("Could not enable speaker playback. Please restart the call.");
+            void stopRef.current();
+          }
         },
         disconnected: () => {
           if (!valid()) return;
