@@ -5,6 +5,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { createRemoteJWKSet, decodeJwt, jwtVerify } from "jose";
 import { openai, detectAudioFormat, speechToText, textToSpeech } from "./replit_integrations/audio";
+import { liveUsageStore } from "./realtime-usage-store";
 import { db } from "./db";
 import {
   users,
@@ -380,7 +381,7 @@ async function runSmartTitleBackfillScan(userId: string): Promise<void> {
 // reflections in a dedicated card; ConversationDetail renders the full
 // reflection block above the messages.
 
-const REFLECTION_MODEL = "gpt-4o-mini";
+const REFLECTION_MODEL = "gpt-5.1";
 // Cap input to the most recent ~30 messages to keep token cost predictable.
 const REFLECTION_MAX_MESSAGES = 30;
 // Hard length caps so a misbehaving model can't blow up the DB row.
@@ -460,7 +461,8 @@ async function generateReflection(
     const response = await openai.chat.completions.create({
       model: REFLECTION_MODEL,
       temperature: 0.5,
-      max_tokens: 320,
+      reasoning_effort: "none",
+      max_completion_tokens: 650,
       response_format: { type: "json_object" },
       messages: [
         {
@@ -1255,6 +1257,10 @@ export async function detectCrisisSignal(text: string): Promise<boolean> {
 
 export async function registerRoutes(app: Express): Promise<Server> {
   registerRealtimeRoutes(app, {
+    usageStore: liveUsageStore,
+    finalizeConversation: async (conversationId, language) => {
+      await generateAndPersistReflection(conversationId, language === "es" ? "es" : "en");
+    },
     requireAuth,
     loadContext: async (userId, requestedConversationId) => {
       const [userRow] = await db.select().from(users).where(eq(users.id, userId)).limit(1);

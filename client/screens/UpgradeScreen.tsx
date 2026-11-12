@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import {
   View,
   Text,
@@ -34,6 +34,7 @@ const PREMIUM_BENEFIT_KEYS: Array<{
 
 export default function UpgradeScreen({ navigation, route }: Props) {
   const insets = useSafeAreaInsets();
+  const [footerHeight, setFooterHeight] = useState(240);
   const { theme, isDark } = useTheme();
   const { t } = useTranslation();
   const { offerings, purchase, restore, isPurchasing, isRestoring, canPurchaseInApp } = useSubscription();
@@ -173,7 +174,7 @@ export default function UpgradeScreen({ navigation, route }: Props) {
           styles.scrollContent,
           {
             paddingTop: insets.top + Spacing["3xl"] + Spacing.xl,
-            paddingBottom: insets.bottom + Spacing["3xl"] + Spacing.xl,
+            paddingBottom: footerHeight + Spacing.xl,
           },
         ]}
         showsVerticalScrollIndicator={false}
@@ -328,6 +329,7 @@ export default function UpgradeScreen({ navigation, route }: Props) {
 
       {/* Sticky CTA */}
       <View
+        onLayout={(event) => setFooterHeight(event.nativeEvent.layout.height)}
         style={[
           styles.ctaContainer,
           {

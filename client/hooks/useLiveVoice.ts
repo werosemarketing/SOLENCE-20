@@ -50,6 +50,9 @@ export function useLiveVoice() {
         if (!response.ok) throw new Error("The microphone is off, but saving could not be confirmed. Your transcript is still shown below.");
         const result = await response.json();
         if (result.saveError) throw new Error("Some turns could not be saved. Your transcript is still shown below.");
+        if (result.usageError && mounted.current) {
+          setError("Your chat was saved, but usage tracking may be incomplete. Check the usage panel before relying on its estimate.");
+        }
         await queryClient.invalidateQueries({ queryKey: ["/api/conversations"] });
       }
     } catch (e) {

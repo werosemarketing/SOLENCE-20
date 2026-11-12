@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, serial, integer, timestamp, index, uniqueIndex, boolean, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, serial, integer, timestamp, index, uniqueIndex, boolean, jsonb, doublePrecision } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -163,6 +163,19 @@ export const conversations = pgTable(
     userIdIdx: index("conversations_user_id_idx").on(table.userId),
   }),
 );
+
+export const liveVoiceSessions = pgTable("live_voice_sessions", {
+  id: text("id").primaryKey(),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  conversationId: integer("conversation_id").references(() => conversations.id, { onDelete: "set null" }),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+  connectedAt: timestamp("connected_at", { withTimezone: true }),
+  endedAt: timestamp("ended_at", { withTimezone: true }),
+  status: text("status").notNull(),
+  usage: jsonb("usage").$type<import("./live-usage").LiveUsageTotals>().notNull(),
+  estimatedUsd: doublePrecision("estimated_usd").notNull().default(0),
+  pricingVersion: text("pricing_version").notNull(),
+}, (table) => ({ userStartedIdx: index("live_voice_sessions_user_started_idx").on(table.userId, table.startedAt) }));
 
 export const messages = pgTable(
   "messages",

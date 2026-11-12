@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { LIVE_VOICE_MAX_SECONDS, liveVoiceConfig, realtimeTranscript, type LiveVoiceTurn } from "../shared/realtime";
 import { startLiveProviderCall, type LiveProviderStart, type LiveProviderCall } from "./realtime-provider";
+import { createLiveUsageTracker, type LiveUsageStore, type LiveUsageRecord } from "./realtime-usage";
 
 type Context = { conversationId: number; instructions: string; language: string; voice: string };
 type Options = {
@@ -11,6 +12,8 @@ type Options = {
   persistTurn: (conversationId: number, turn: LiveVoiceTurn, createdAt: Date, messageId?: number) => Promise<number>;
   startCall?: LiveProviderStart;
   enabled?: boolean;
+  usageStore?: LiveUsageStore;
+  finalizeConversation?: (conversationId: number, language: string) => Promise<void>;
 };
 const input = z.object({
   sdp: z.string().min(20).max(64000).refine((s) => s.startsWith("v=0"), "Invalid SDP offer"),
@@ -23,6 +26,8 @@ export function registerRealtimeRoutes(app: Express, options: Options) {
     callPromise?: Promise<LiveProviderCall>; ending?: Promise<void>;
     queue: Promise<void>; seen: Set<string>; saved: number; saveError: boolean;
     ended: boolean; timer?: ReturnType<typeof setTimeout>;
+    record: LiveUsageRecord; usageTracker: ReturnType<typeof createLiveUsageTracker>; usageError: boolean;
+    language: string;
   }>();
   const pending = new Set<string>();
   const starts = new Map<string, number[]>();
@@ -34,15 +39,33 @@ export function registerRealtimeRoutes(app: Express, options: Options) {
     res.setHeader("Cache-Control", "no-store");
     next();
   };
+  async function saveUsage(session: NonNullable<ReturnType<typeof active.get>>) {
+    if (!options.usageStore) return;
+    await options.usageStore.save({ ...session.record, usage: session.usageTracker.snapshot() });
+  }
+  app.get("/api/chat/realtime/usage", gate, options.requireAuth, async (req, res) => {
+    if (!options.usageStore) { res.status(503).json({ error: "Usage tracking is unavailable." }); return; }
+    try { res.json(await options.usageStore.summary(req.user!.userId)); }
+    catch { res.status(503).json({ error: "Could not load live voice usage. Please retry." }); }
+  });
   async function end(id: string) {
     const session = active.get(id);
     if (!session) return;
     session.ended = true;
     if (!session.ending) session.ending = (async () => {
+      session.record.endedAt = new Date();
+      session.record.status = session.record.connectedAt ? "ended" : "failed";
       clearTimeout(session.timer);
       const call = session.call ?? await session.callPromise?.catch(() => undefined);
       await call?.close().catch(() => { session.saveError = true; });
       await session.queue;
+      if (session.usageError) session.record.status = "tracking_error";
+      await saveUsage(session).catch(() => { session.usageError = true; });
+      if (session.saved >= 2 && !session.saveError && options.finalizeConversation) {
+        void options.finalizeConversation(session.conversationId, session.language).catch(() => {
+          console.error("Live voice reflection generation failed; history backfill can retry.");
+        });
+      }
       // Retain the result briefly so retries can confirm saving completed.
       session.timer = setTimeout(() => active.delete(id), 60000);
       session.timer.unref();
@@ -80,12 +103,25 @@ export function registerRealtimeRoutes(app: Express, options: Options) {
         userId, conversationId: ctx.conversationId,
         queue: Promise.resolve(), seen: new Set<string>(), saved: 0,
         saveError: false, ended: false,
+        usageTracker: createLiveUsageTracker(), usageError: false, language: ctx.language,
+        record: {
+          id, userId, conversationId: ctx.conversationId, startedAt: new Date(),
+          connectedAt: null, endedAt: null, status: "starting", usage: createLiveUsageTracker().snapshot(),
+        },
       } as NonNullable<ReturnType<typeof active.get>>;
       active.set(id, session);
+      try { await saveUsage(session); }
+      catch { throw new Error("Could not start live voice usage tracking. Please retry."); }
       const createdTimes = new Map<string, Date>();
       const messageIds = new Map<string, number>();
       const truncated = new Set<string>();
       session.callPromise = startCall(parsed.data.sdp, liveVoiceConfig(ctx.instructions, ctx.language, ctx.voice), userId, (event) => {
+        if (session.usageTracker.observe(event)) {
+          session.queue = session.queue.then(() => saveUsage(session)).catch(() => {
+            session.usageError = true;
+            console.error("Live voice usage could not be saved.");
+          });
+        }
         const itemId = event.item?.id ?? event.item_id;
         if (typeof itemId === "string" && !createdTimes.has(itemId)) createdTimes.set(itemId, new Date());
         const wasTruncated = event.type === "conversation.item.truncated" && typeof event.item_id === "string";
@@ -111,6 +147,11 @@ export function registerRealtimeRoutes(app: Express, options: Options) {
       }, () => { if (id) void end(id); });
       session.call = await session.callPromise;
       if (session.ended || disconnected) { await end(id); return; }
+      session.record.connectedAt = new Date();
+      session.record.status = "active";
+      try { await saveUsage(session); }
+      catch { throw new Error("Could not save live voice usage tracking. Please retry."); }
+      if (session.ended || disconnected) { await end(id); return; }
       session.timer = setTimeout(() => { if (id) void end(id); }, LIVE_VOICE_MAX_SECONDS * 1000);
       session.timer.unref();
       res.json({
@@ -131,6 +172,7 @@ export function registerRealtimeRoutes(app: Express, options: Options) {
       res.status(404).json({ error: "Live call not found." }); return;
     }
     await end(id);
-    res.json({ saved: session.saved, saveError: session.saveError, conversationId: session.conversationId });
+    res.json({ saved: session.saved, saveError: session.saveError, conversationId: session.conversationId,
+      usageError: session.usageError });
   });
 }

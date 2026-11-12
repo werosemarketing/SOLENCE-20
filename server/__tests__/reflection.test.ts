@@ -76,11 +76,15 @@ before(async () => {
     openai.chat.completions,
   );
   (openai.chat.completions as unknown as { create: unknown }).create = async (
-    params: { messages?: Array<{ role: string; content: string }>; response_format?: { type?: string } },
+    params: { model?: string; reasoning_effort?: string; max_completion_tokens?: number;
+      messages?: Array<{ role: string; content: string }>; response_format?: { type?: string } },
   ) => {
     mockCallCount += 1;
     // The reflection prompt asks for json_object — that's our discriminator.
     if (params?.response_format?.type === "json_object") {
+      assert.equal(params.model, "gpt-5.1");
+      assert.equal(params.reasoning_effort, "none");
+      assert.equal(params.max_completion_tokens, 650);
       const queued = mockResponseQueue.shift();
       const payload =
         queued ?? {

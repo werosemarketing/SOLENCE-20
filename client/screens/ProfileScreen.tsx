@@ -3856,11 +3856,7 @@ export default function ProfileScreen() {
         // Hide the whole card while we're loading or errored — the recent
         // conversations card already surfaces those states for the same
         // data source, so duplicating them here would feel noisy.
-        if (
-          conversationsLoading ||
-          conversationsError ||
-          reflectionItems.length === 0
-        ) {
+        if (conversationsLoading || conversationsError) {
           return null;
         }
 
@@ -3879,6 +3875,13 @@ export default function ProfileScreen() {
             >
               {t("profile.reflections.subtitle")}
             </ThemedText>
+            {reflectionItems.length === 0 ? (
+              <Text style={{ color: theme.textMuted, lineHeight: 22, marginBottom: Spacing.md }}>
+                {preferences.language === "es"
+                  ? "Después de una conversación, Solence puede guardar aquí una breve reflexión. Los recuerdos duraderos aparecen en la sección de recuerdos. Las pruebas breves pueden no generar notas."
+                  : "After a conversation, Solence can save a short reflection here. Lasting details appear in the memories section. Brief voice tests may not generate notes."}
+              </Text>
+            ) : null}
             <View testID="profile-reflections-list">
               {reflectionItems.map((c, index) => {
                 const isLast = index === reflectionItems.length - 1;

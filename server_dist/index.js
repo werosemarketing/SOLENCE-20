@@ -45,17 +45,15 @@ function detectAudioFormat(buffer) {
   return "unknown";
 }
 async function textToSpeech(text2, voice = "alloy", format = "wav") {
-  const response = await openai.chat.completions.create({
-    model: "gpt-audio",
-    modalities: ["text", "audio"],
-    audio: { voice, format },
-    messages: [
-      { role: "system", content: "You are an assistant that performs text-to-speech." },
-      { role: "user", content: `Repeat the following text verbatim: ${text2}` }
-    ]
+  const response = await openai.audio.speech.create({
+    model: "gpt-4o-mini-tts",
+    voice,
+    input: text2,
+    response_format: format === "pcm16" ? "pcm" : format
   });
-  const audioData = response.choices[0]?.message?.audio?.data ?? "";
-  return Buffer2.from(audioData, "base64");
+  const audio = Buffer2.from(await response.arrayBuffer());
+  if (!audio.length) throw new Error("Speech synthesis returned no audio.");
+  return audio;
 }
 async function speechToText(audioBuffer, format = "wav", fileExtension) {
   const ext = fileExtension || format;
@@ -66,6 +64,9 @@ async function speechToText(audioBuffer, format = "wav", fileExtension) {
   });
   return response.text;
 }
+
+// server/realtime-usage-store.ts
+import { desc, eq, isNull, sql as sql2 } from "drizzle-orm";
 
 // server/db.ts
 import { Pool } from "pg";
@@ -102,6 +103,7 @@ __export(schema_exports, {
   insertConversationSchema: () => insertConversationSchema,
   insertMessageSchema: () => insertMessageSchema,
   insertUserSchema: () => insertUserSchema,
+  liveVoiceSessions: () => liveVoiceSessions,
   messages: () => messages,
   moodEntries: () => moodEntries,
   referralCredits: () => referralCredits,
@@ -111,7 +113,7 @@ __export(schema_exports, {
   users: () => users
 });
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, serial, integer, timestamp, index, uniqueIndex, boolean, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, serial, integer, timestamp, index, uniqueIndex, boolean, jsonb, doublePrecision } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 var users = pgTable(
@@ -221,6 +223,18 @@ var conversations = pgTable(
     userIdIdx: index("conversations_user_id_idx").on(table.userId)
   })
 );
+var liveVoiceSessions = pgTable("live_voice_sessions", {
+  id: text("id").primaryKey(),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  conversationId: integer("conversation_id").references(() => conversations.id, { onDelete: "set null" }),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+  connectedAt: timestamp("connected_at", { withTimezone: true }),
+  endedAt: timestamp("ended_at", { withTimezone: true }),
+  status: text("status").notNull(),
+  usage: jsonb("usage").$type().notNull(),
+  estimatedUsd: doublePrecision("estimated_usd").notNull().default(0),
+  pricingVersion: text("pricing_version").notNull()
+}, (table) => ({ userStartedIdx: index("live_voice_sessions_user_started_idx").on(table.userId, table.startedAt) }));
 var messages = pgTable(
   "messages",
   {
@@ -359,9 +373,188 @@ if (!process.env.DATABASE_URL) {
 var pool = new Pool({ connectionString: process.env.DATABASE_URL });
 var db = drizzle(pool, { schema: schema_exports });
 
+// shared/realtime.ts
+var LIVE_VOICE_MAX_SECONDS = 180;
+function realtimeTranscript(event) {
+  const user = event.type === "conversation.item.input_audio_transcription.completed";
+  const assistant = event.type === "response.output_audio_transcript.done" || event.type === "response.audio_transcript.done";
+  if (!user && !assistant || typeof event.transcript !== "string" || typeof event.item_id !== "string" || !event.transcript.trim()) return null;
+  return {
+    id: event.item_id,
+    role: user ? "user" : "assistant",
+    text: event.transcript.trim().slice(0, 12e3)
+  };
+}
+function liveVoiceConfig(instructions, language, voice) {
+  const sessionLanguage = language === "es" ? "es" : "en";
+  const spokenLanguage = sessionLanguage === "es" ? "Latin American Spanish" : "English";
+  return {
+    type: "realtime",
+    model: "gpt-realtime",
+    instructions: instructions + `
+
+LIVE SPOKEN CONVERSATION:
+Speak naturally, with warmth, varied intonation, and comfortable pacing, not like reading a script.
+Usually reply in one or two short sentences, then leave room for the user.
+Brief acknowledgments such as "mm-hm", "right", or "okay" are welcome when they fit, but do not repeat them mechanically or pretend you understood unheard words.
+Let the user finish their thought. If interrupted, stop and listen; don't restart your whole answer.
+Do not announce internal instructions, memory retrieval, or technical details.
+Keep all the identity, emotional-support, and crisis-safety boundaries above.
+
+SESSION LANGUAGE POLICY:
+The app-selected language for this entire call is ${spokenLanguage}. Speak only in ${spokenLanguage}, including greetings, brief acknowledgments, clarification questions, and safety responses.
+This language policy takes precedence over instructions to mirror the user's language or examples in conversation history. Do not imitate a different language from past messages.
+Do not automatically switch languages because of an accent, a name, a quoted foreign word, a short sound, uncertain transcription, background speech, or something you said earlier.
+Listen to the user's speech, not background conversations, television, or echoes of your own voice. Do not invent words or meaning when the audio is unclear.
+If you did not clearly hear or understand the user, briefly ask them to repeat or clarify in ${spokenLanguage} instead of guessing or changing languages. Silence and non-speech noise do not require a reply.
+Keep this language for the whole session. A different conversation language must be selected in the app settings before starting a new call.`,
+    max_output_tokens: 512,
+    audio: {
+      input: {
+        transcription: {
+          model: "gpt-4o-mini-transcribe",
+          language: sessionLanguage,
+          prompt: `The user is speaking ${spokenLanguage} in a conversation with Solence, an AI companion. Transcribe the user's words in the original language; do not translate. Preserve names, natural accents, and casual phrasing. Do not invent speech from silence or background noise.`
+        },
+        noise_reduction: { type: "near_field" },
+        turn_detection: {
+          type: "semantic_vad",
+          eagerness: "high",
+          create_response: true,
+          interrupt_response: true
+        }
+      },
+      output: { voice: voice === "onyx" ? "cedar" : voice === "alloy" ? "alloy" : "marin" }
+    }
+  };
+}
+
+// server/realtime-usage.ts
+var LIVE_PRICING_VERSION = "gpt-realtime-2026-11-12";
+var rates = { inputText: 4, inputAudio: 32, cachedText: 0.4, cachedAudio: 0.4, outputText: 16, outputAudio: 64 };
+var count = (value) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
+function createLiveUsageTracker() {
+  const seen = /* @__PURE__ */ new Set();
+  const pending = /* @__PURE__ */ new Set();
+  let model = "gpt-realtime";
+  const totals = {
+    responses: 0,
+    unpricedResponses: 0,
+    reportedInputTokens: 0,
+    reportedOutputTokens: 0,
+    inputText: 0,
+    inputAudio: 0,
+    cachedText: 0,
+    cachedAudio: 0,
+    outputText: 0,
+    outputAudio: 0,
+    transcriptionInput: 0,
+    transcriptionOutput: 0,
+    estimatedUsd: 0
+  };
+  return {
+    snapshot: () => ({
+      ...totals,
+      responses: totals.responses + pending.size,
+      unpricedResponses: totals.unpricedResponses + pending.size
+    }),
+    observe(event) {
+      if ((event.type === "session.created" || event.type === "session.updated") && typeof event.session?.model === "string") {
+        model = event.session.model;
+      }
+      if (event.type === "response.created" && typeof event.response?.id === "string" && !seen.has(event.response.id)) {
+        pending.add(event.response.id);
+        return true;
+      }
+      const transcription = event.type === "conversation.item.input_audio_transcription.completed";
+      if (transcription) {
+        if (typeof event.item_id !== "string" || seen.has(`transcript:${event.item_id}`)) return false;
+        seen.add(`transcript:${event.item_id}`);
+        totals.transcriptionInput += count(event.usage?.input_tokens) ?? 0;
+        totals.transcriptionOutput += count(event.usage?.output_tokens) ?? 0;
+        return true;
+      }
+      if (event.type !== "response.done" || typeof event.response?.id !== "string") return false;
+      const response = event.response;
+      if (seen.has(response.id)) return false;
+      seen.add(response.id);
+      pending.delete(response.id);
+      totals.responses++;
+      const usage = response.usage;
+      totals.reportedInputTokens += count(usage?.input_tokens) ?? 0;
+      totals.reportedOutputTokens += count(usage?.output_tokens) ?? 0;
+      const input2 = usage?.input_token_details;
+      const output = usage?.output_token_details;
+      const cached = count(input2?.cached_tokens);
+      const values = {
+        inputText: count(input2?.text_tokens),
+        inputAudio: count(input2?.audio_tokens),
+        cachedText: cached === 0 ? 0 : count(input2?.cached_tokens_details?.text_tokens),
+        cachedAudio: cached === 0 ? 0 : count(input2?.cached_tokens_details?.audio_tokens),
+        outputText: count(output?.text_tokens),
+        outputAudio: count(output?.audio_tokens)
+      };
+      if (!/^gpt-realtime(?:-\d{4}-\d{2}-\d{2})?$/.test(model) || Object.values(values).some((value) => value === null) || values.cachedText + values.cachedAudio !== cached || values.cachedText > values.inputText || values.cachedAudio > values.inputAudio || values.inputText + values.inputAudio !== count(usage?.input_tokens) || values.outputText + values.outputAudio !== count(usage?.output_tokens)) {
+        totals.unpricedResponses++;
+        return true;
+      }
+      const known = values;
+      for (const key of Object.keys(rates)) totals[key] += known[key];
+      totals.estimatedUsd += ((known.inputText - known.cachedText) * rates.inputText + (known.inputAudio - known.cachedAudio) * rates.inputAudio + known.cachedText * rates.cachedText + known.cachedAudio * rates.cachedAudio + known.outputText * rates.outputText + known.outputAudio * rates.outputAudio) / 1e6;
+      return true;
+    }
+  };
+}
+
+// server/realtime-usage-store.ts
+var durationSql = sql2`case when ${liveVoiceSessions.connectedAt} is null then 0 else
+  least(${LIVE_VOICE_MAX_SECONDS}, greatest(0, extract(epoch from
+  (coalesce(${liveVoiceSessions.endedAt}, now()) - ${liveVoiceSessions.connectedAt})))) end`;
+var incompleteSql = sql2`(${liveVoiceSessions.status} in ('starting', 'active', 'tracking_error')
+  or coalesce((${liveVoiceSessions.usage}->>'unpricedResponses')::int, 0) > 0)`;
+var liveUsageStore = {
+  async save(record) {
+    const values = { ...record, estimatedUsd: record.usage.estimatedUsd, pricingVersion: LIVE_PRICING_VERSION };
+    await db.insert(liveVoiceSessions).values(values).onConflictDoUpdate({
+      target: liveVoiceSessions.id,
+      set: values,
+      // A delayed startup write must never reopen a call already finalized
+      // by a disconnect on another async path.
+      setWhere: record.endedAt ? void 0 : isNull(liveVoiceSessions.endedAt)
+    });
+  },
+  async summary(userId) {
+    const [totals] = await db.select({
+      calls: sql2`count(*)::int`,
+      durationSeconds: sql2`coalesce(sum(${durationSql}), 0)::float8`,
+      estimatedUsd: sql2`coalesce(sum(${liveVoiceSessions.estimatedUsd}), 0)::float8`,
+      responses: sql2`coalesce(sum((${liveVoiceSessions.usage}->>'responses')::int),0)::int`,
+      incompleteCalls: sql2`count(*) filter (where ${incompleteSql})::int`,
+      inputTokens: sql2`coalesce(sum((${liveVoiceSessions.usage}->>'reportedInputTokens')::bigint),0)::float8`,
+      outputTokens: sql2`coalesce(sum((${liveVoiceSessions.usage}->>'reportedOutputTokens')::bigint),0)::float8`,
+      cachedInputTokens: sql2`coalesce(sum((${liveVoiceSessions.usage}->>'cachedText')::bigint + (${liveVoiceSessions.usage}->>'cachedAudio')::bigint),0)::float8`
+    }).from(liveVoiceSessions).where(eq(liveVoiceSessions.userId, userId));
+    const latest = await db.select({
+      id: liveVoiceSessions.id,
+      startedAt: liveVoiceSessions.startedAt,
+      durationSeconds: durationSql,
+      status: liveVoiceSessions.status,
+      responses: sql2`(${liveVoiceSessions.usage}->>'responses')::int`,
+      estimatedUsd: liveVoiceSessions.estimatedUsd,
+      incomplete: incompleteSql,
+      usage: liveVoiceSessions.usage
+    }).from(liveVoiceSessions).where(eq(liveVoiceSessions.userId, userId)).orderBy(desc(liveVoiceSessions.startedAt)).limit(5);
+    return { ...totals, latest: latest.map((row) => ({
+      ...row,
+      startedAt: row.startedAt.toISOString(),
+      durationSeconds: Number(row.durationSeconds)
+    })) };
+  }
+};
+
 // server/referrals.ts
 import { randomBytes } from "node:crypto";
-import { and, desc, eq, gt, sql as sql2 } from "drizzle-orm";
+import { and, desc as desc2, eq as eq2, gt, sql as sql3 } from "drizzle-orm";
 var REFERRAL_CODE_ALPHABET = "23456789abcdefghjkmnpqrstuvwxyz";
 var REFERRAL_CODE_LENGTH = 8;
 var REFERRAL_CODE_MAX_ATTEMPTS = 8;
@@ -378,14 +571,14 @@ function normalizeReferralCode(raw) {
   return raw.trim().toLowerCase().slice(0, 32);
 }
 async function ensureReferralCodeForUser(userId) {
-  const [existing] = await db.select({ referralCode: users.referralCode }).from(users).where(eq(users.id, userId)).limit(1);
+  const [existing] = await db.select({ referralCode: users.referralCode }).from(users).where(eq2(users.id, userId)).limit(1);
   if (existing?.referralCode) return existing.referralCode;
   for (let attempt = 0; attempt < REFERRAL_CODE_MAX_ATTEMPTS; attempt++) {
     const code = generateReferralCode();
     try {
-      const [updated] = await db.update(users).set({ referralCode: code }).where(and(eq(users.id, userId), sql2`${users.referralCode} IS NULL`)).returning({ referralCode: users.referralCode });
+      const [updated] = await db.update(users).set({ referralCode: code }).where(and(eq2(users.id, userId), sql3`${users.referralCode} IS NULL`)).returning({ referralCode: users.referralCode });
       if (updated?.referralCode) return updated.referralCode;
-      const [row] = await db.select({ referralCode: users.referralCode }).from(users).where(eq(users.id, userId)).limit(1);
+      const [row] = await db.select({ referralCode: users.referralCode }).from(users).where(eq2(users.id, userId)).limit(1);
       if (row?.referralCode) return row.referralCode;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -397,7 +590,7 @@ async function ensureReferralCodeForUser(userId) {
 async function allocateUniqueReferralCode() {
   for (let attempt = 0; attempt < REFERRAL_CODE_MAX_ATTEMPTS; attempt++) {
     const code = generateReferralCode();
-    const [row] = await db.select({ id: users.id }).from(users).where(eq(users.referralCode, code)).limit(1);
+    const [row] = await db.select({ id: users.id }).from(users).where(eq2(users.referralCode, code)).limit(1);
     if (!row) return code;
   }
   throw new Error("Failed to allocate referral code after retries");
@@ -405,19 +598,19 @@ async function allocateUniqueReferralCode() {
 async function getActiveReferralCredit(userId) {
   const now = /* @__PURE__ */ new Date();
   const [row] = await db.select({ endsAt: referralCredits.endsAt }).from(referralCredits).where(
-    and(eq(referralCredits.userId, userId), gt(referralCredits.endsAt, now))
-  ).orderBy(desc(referralCredits.endsAt)).limit(1);
+    and(eq2(referralCredits.userId, userId), gt(referralCredits.endsAt, now))
+  ).orderBy(desc2(referralCredits.endsAt)).limit(1);
   if (!row) return null;
   return { endsAt: row.endsAt };
 }
 async function getReferralJoinedCount(referrerId) {
-  const [row] = await db.select({ count: sql2`COUNT(*)::int` }).from(users).where(eq(users.referredBy, referrerId));
+  const [row] = await db.select({ count: sql3`COUNT(*)::int` }).from(users).where(eq2(users.referredBy, referrerId));
   return row?.count ?? 0;
 }
 async function grantReferralCredit(params) {
   const now = /* @__PURE__ */ new Date();
   const cap = new Date(now.getTime() + REFERRAL_CREDIT_MAX_STACK_MS);
-  const [latest] = await db.select({ endsAt: referralCredits.endsAt }).from(referralCredits).where(eq(referralCredits.userId, params.userId)).orderBy(desc(referralCredits.endsAt)).limit(1);
+  const [latest] = await db.select({ endsAt: referralCredits.endsAt }).from(referralCredits).where(eq2(referralCredits.userId, params.userId)).orderBy(desc2(referralCredits.endsAt)).limit(1);
   const startsAt = latest && latest.endsAt.getTime() > now.getTime() ? latest.endsAt : now;
   let endsAt = new Date(startsAt.getTime() + REFERRAL_CREDIT_DURATION_MS);
   if (endsAt.getTime() > cap.getTime()) {
@@ -452,10 +645,10 @@ function warnIfReferralDomainMissing() {
 
 // server/routes.ts
 import JSZip from "jszip";
-import { eq as eq3, desc as desc2, inArray, and as and3, lt as lt2, gte as gte2, isNull } from "drizzle-orm";
+import { eq as eq4, desc as desc3, inArray, and as and3, lt as lt2, gte as gte2, isNull as isNull2 } from "drizzle-orm";
 
 // server/tokens.ts
-import { eq as eq2, and as and2, gte, lt, sql as sql3 } from "drizzle-orm";
+import { eq as eq3, and as and2, gte, lt, sql as sql4 } from "drizzle-orm";
 
 // shared/calendar.ts
 function calendarDateKey(date, timeZone) {
@@ -484,18 +677,18 @@ function recentCalendarKeys(days, now, timeZone) {
 var MIN_TOKENS_FOR_REQUEST = 500;
 async function getCalendarUsageHistory(userId, days, unit, timeZone, now = /* @__PURE__ */ new Date()) {
   const keys = recentCalendarKeys(days, now, timeZone);
-  const date = sql3`to_char((${tokenUsage.createdAt} AT TIME ZONE 'UTC') AT TIME ZONE ${timeZone}, 'YYYY-MM-DD')`;
-  const start = sql3`(${keys[0]}::date::timestamp AT TIME ZONE ${timeZone}) AT TIME ZONE 'UTC'`;
-  const end = sql3`((${keys[keys.length - 1]}::date + 1)::timestamp AT TIME ZONE ${timeZone}) AT TIME ZONE 'UTC'`;
+  const date = sql4`to_char((${tokenUsage.createdAt} AT TIME ZONE 'UTC') AT TIME ZONE ${timeZone}, 'YYYY-MM-DD')`;
+  const start = sql4`(${keys[0]}::date::timestamp AT TIME ZONE ${timeZone}) AT TIME ZONE 'UTC'`;
+  const end = sql4`((${keys[keys.length - 1]}::date + 1)::timestamp AT TIME ZONE ${timeZone}) AT TIME ZONE 'UTC'`;
   const column = unit === "messages" ? tokenUsage.messagesUsed : tokenUsage.tokensUsed;
   const rows = await db.select({
     date,
-    total: sql3`COALESCE(SUM(${column}), 0)::int`
+    total: sql4`COALESCE(SUM(${column}), 0)::int`
   }).from(tokenUsage).where(and2(
-    eq2(tokenUsage.userId, userId),
+    eq3(tokenUsage.userId, userId),
     gte(tokenUsage.createdAt, start),
     lt(tokenUsage.createdAt, end)
-  )).groupBy(sql3`1`);
+  )).groupBy(sql4`1`);
   const totals = new Map(rows.map((row) => [row.date, row.total]));
   return keys.map((date2) => ({
     date: date2,
@@ -513,9 +706,9 @@ function getNextPeriodStart() {
 }
 async function getTokensUsed(userId) {
   const periodStart = getCurrentPeriodStart();
-  const result = await db.select({ total: sql3`COALESCE(SUM(${tokenUsage.tokensUsed}), 0)::int` }).from(tokenUsage).where(
+  const result = await db.select({ total: sql4`COALESCE(SUM(${tokenUsage.tokensUsed}), 0)::int` }).from(tokenUsage).where(
     and2(
-      eq2(tokenUsage.userId, userId),
+      eq3(tokenUsage.userId, userId),
       gte(tokenUsage.periodStart, periodStart)
     )
   );
@@ -524,10 +717,10 @@ async function getTokensUsed(userId) {
 async function tryReserveTokens(userId, tokens) {
   const periodStart = getCurrentPeriodStart();
   return await db.transaction(async (tx) => {
-    await tx.execute(sql3`SELECT pg_advisory_xact_lock(hashtext(${userId}))`);
-    const result = await tx.select({ total: sql3`COALESCE(SUM(${tokenUsage.tokensUsed}), 0)::int` }).from(tokenUsage).where(
+    await tx.execute(sql4`SELECT pg_advisory_xact_lock(hashtext(${userId}))`);
+    const result = await tx.select({ total: sql4`COALESCE(SUM(${tokenUsage.tokensUsed}), 0)::int` }).from(tokenUsage).where(
       and2(
-        eq2(tokenUsage.userId, userId),
+        eq3(tokenUsage.userId, userId),
         gte(tokenUsage.periodStart, periodStart)
       )
     );
@@ -549,10 +742,10 @@ async function getTokensUsedHistory(userId, days, unit = "tokens") {
   const column = unit === "messages" ? tokenUsage.messagesUsed : tokenUsage.tokensUsed;
   const rows = await db.select({
     periodStart: tokenUsage.periodStart,
-    total: sql3`COALESCE(SUM(${column}), 0)::int`
+    total: sql4`COALESCE(SUM(${column}), 0)::int`
   }).from(tokenUsage).where(
     and2(
-      eq2(tokenUsage.userId, userId),
+      eq3(tokenUsage.userId, userId),
       gte(tokenUsage.periodStart, oldest)
     )
   ).groupBy(tokenUsage.periodStart);
@@ -581,7 +774,7 @@ async function recordTokens(userId, tokens, periodStart = getCurrentPeriodStart(
 }
 async function getMessagesUsed(userId) {
   const periodStart = getCurrentPeriodStart();
-  const result = await db.select({ total: sql3`COALESCE(SUM(${tokenUsage.messagesUsed}), 0)::int` }).from(tokenUsage).where(and2(eq2(tokenUsage.userId, userId), gte(tokenUsage.periodStart, periodStart)));
+  const result = await db.select({ total: sql4`COALESCE(SUM(${tokenUsage.messagesUsed}), 0)::int` }).from(tokenUsage).where(and2(eq3(tokenUsage.userId, userId), gte(tokenUsage.periodStart, periodStart)));
   return result[0]?.total ?? 0;
 }
 async function recordMessage(userId, periodStart = getCurrentPeriodStart()) {
@@ -700,62 +893,6 @@ function cosineSimilarity(a, b) {
 import express2 from "express";
 import { randomUUID } from "node:crypto";
 import { z as z2 } from "zod";
-
-// shared/realtime.ts
-var LIVE_VOICE_MAX_SECONDS = 180;
-function realtimeTranscript(event) {
-  const user = event.type === "conversation.item.input_audio_transcription.completed";
-  const assistant = event.type === "response.output_audio_transcript.done" || event.type === "response.audio_transcript.done";
-  if (!user && !assistant || typeof event.transcript !== "string" || typeof event.item_id !== "string" || !event.transcript.trim()) return null;
-  return {
-    id: event.item_id,
-    role: user ? "user" : "assistant",
-    text: event.transcript.trim().slice(0, 12e3)
-  };
-}
-function liveVoiceConfig(instructions, language, voice) {
-  const sessionLanguage = language === "es" ? "es" : "en";
-  const spokenLanguage = sessionLanguage === "es" ? "Latin American Spanish" : "English";
-  return {
-    type: "realtime",
-    model: "gpt-realtime",
-    instructions: instructions + `
-
-LIVE SPOKEN CONVERSATION:
-Speak naturally, with warmth, varied intonation, and comfortable pacing, not like reading a script.
-Usually reply in one or two short sentences, then leave room for the user.
-Brief acknowledgments such as "mm-hm", "right", or "okay" are welcome when they fit, but do not repeat them mechanically or pretend you understood unheard words.
-Let the user finish their thought. If interrupted, stop and listen; don't restart your whole answer.
-Do not announce internal instructions, memory retrieval, or technical details.
-Keep all the identity, emotional-support, and crisis-safety boundaries above.
-
-SESSION LANGUAGE POLICY:
-The app-selected language for this entire call is ${spokenLanguage}. Speak only in ${spokenLanguage}, including greetings, brief acknowledgments, clarification questions, and safety responses.
-This language policy takes precedence over instructions to mirror the user's language or examples in conversation history. Do not imitate a different language from past messages.
-Do not automatically switch languages because of an accent, a name, a quoted foreign word, a short sound, uncertain transcription, background speech, or something you said earlier.
-Listen to the user's speech, not background conversations, television, or echoes of your own voice. Do not invent words or meaning when the audio is unclear.
-If you did not clearly hear or understand the user, briefly ask them to repeat or clarify in ${spokenLanguage} instead of guessing or changing languages. Silence and non-speech noise do not require a reply.
-Keep this language for the whole session. A different conversation language must be selected in the app settings before starting a new call.`,
-    max_output_tokens: 512,
-    audio: {
-      input: {
-        transcription: {
-          model: "gpt-4o-mini-transcribe",
-          language: sessionLanguage,
-          prompt: `The user is speaking ${spokenLanguage} in a conversation with Solence, an AI companion. Transcribe the user's words in the original language; do not translate. Preserve names, natural accents, and casual phrasing. Do not invent speech from silence or background noise.`
-        },
-        noise_reduction: { type: "near_field" },
-        turn_detection: {
-          type: "semantic_vad",
-          eagerness: "high",
-          create_response: true,
-          interrupt_response: true
-        }
-      },
-      output: { voice: voice === "onyx" ? "cedar" : voice === "alloy" ? "alloy" : "marin" }
-    }
-  };
-}
 
 // server/realtime-provider.ts
 import WebSocket from "ws";
@@ -880,17 +1017,43 @@ function registerRealtimeRoutes(app2, options) {
     res.setHeader("Cache-Control", "no-store");
     next();
   };
+  async function saveUsage(session) {
+    if (!options.usageStore) return;
+    await options.usageStore.save({ ...session.record, usage: session.usageTracker.snapshot() });
+  }
+  app2.get("/api/chat/realtime/usage", gate, options.requireAuth, async (req, res) => {
+    if (!options.usageStore) {
+      res.status(503).json({ error: "Usage tracking is unavailable." });
+      return;
+    }
+    try {
+      res.json(await options.usageStore.summary(req.user.userId));
+    } catch {
+      res.status(503).json({ error: "Could not load live voice usage. Please retry." });
+    }
+  });
   async function end(id) {
     const session = active.get(id);
     if (!session) return;
     session.ended = true;
     if (!session.ending) session.ending = (async () => {
+      session.record.endedAt = /* @__PURE__ */ new Date();
+      session.record.status = session.record.connectedAt ? "ended" : "failed";
       clearTimeout(session.timer);
       const call = session.call ?? await session.callPromise?.catch(() => void 0);
       await call?.close().catch(() => {
         session.saveError = true;
       });
       await session.queue;
+      if (session.usageError) session.record.status = "tracking_error";
+      await saveUsage(session).catch(() => {
+        session.usageError = true;
+      });
+      if (session.saved >= 2 && !session.saveError && options.finalizeConversation) {
+        void options.finalizeConversation(session.conversationId, session.language).catch(() => {
+          console.error("Live voice reflection generation failed; history backfill can retry.");
+        });
+      }
       session.timer = setTimeout(() => active.delete(id), 6e4);
       session.timer.unref();
     })();
@@ -939,13 +1102,37 @@ function registerRealtimeRoutes(app2, options) {
         seen: /* @__PURE__ */ new Set(),
         saved: 0,
         saveError: false,
-        ended: false
+        ended: false,
+        usageTracker: createLiveUsageTracker(),
+        usageError: false,
+        language: ctx.language,
+        record: {
+          id,
+          userId,
+          conversationId: ctx.conversationId,
+          startedAt: /* @__PURE__ */ new Date(),
+          connectedAt: null,
+          endedAt: null,
+          status: "starting",
+          usage: createLiveUsageTracker().snapshot()
+        }
       };
       active.set(id, session);
+      try {
+        await saveUsage(session);
+      } catch {
+        throw new Error("Could not start live voice usage tracking. Please retry.");
+      }
       const createdTimes = /* @__PURE__ */ new Map();
       const messageIds = /* @__PURE__ */ new Map();
       const truncated = /* @__PURE__ */ new Set();
       session.callPromise = startCall(parsed.data.sdp, liveVoiceConfig(ctx.instructions, ctx.language, ctx.voice), userId, (event) => {
+        if (session.usageTracker.observe(event)) {
+          session.queue = session.queue.then(() => saveUsage(session)).catch(() => {
+            session.usageError = true;
+            console.error("Live voice usage could not be saved.");
+          });
+        }
         const itemId = event.item?.id ?? event.item_id;
         if (typeof itemId === "string" && !createdTimes.has(itemId)) createdTimes.set(itemId, /* @__PURE__ */ new Date());
         const wasTruncated = event.type === "conversation.item.truncated" && typeof event.item_id === "string";
@@ -971,6 +1158,17 @@ function registerRealtimeRoutes(app2, options) {
         if (id) void end(id);
       });
       session.call = await session.callPromise;
+      if (session.ended || disconnected) {
+        await end(id);
+        return;
+      }
+      session.record.connectedAt = /* @__PURE__ */ new Date();
+      session.record.status = "active";
+      try {
+        await saveUsage(session);
+      } catch {
+        throw new Error("Could not save live voice usage tracking. Please retry.");
+      }
       if (session.ended || disconnected) {
         await end(id);
         return;
@@ -1002,7 +1200,12 @@ function registerRealtimeRoutes(app2, options) {
       return;
     }
     await end(id);
-    res.json({ saved: session.saved, saveError: session.saveError, conversationId: session.conversationId });
+    res.json({
+      saved: session.saved,
+      saveError: session.saveError,
+      conversationId: session.conversationId,
+      usageError: session.usageError
+    });
   });
 }
 
@@ -1103,8 +1306,8 @@ function scheduleSmartTitleBackfill(conversationId, currentTitle, firstUserConte
       if (smartTitle === currentTitle) return;
       await db.update(conversations).set({ title: smartTitle }).where(
         and3(
-          eq3(conversations.id, conversationId),
-          eq3(conversations.title, currentTitle)
+          eq4(conversations.id, conversationId),
+          eq4(conversations.title, currentTitle)
         )
       );
     } catch (err) {
@@ -1122,7 +1325,7 @@ async function runSmartTitleBackfillScan(userId) {
   try {
     let userLanguage = DEFAULT_LANGUAGE;
     try {
-      const [userRow] = await db.select({ language: users.language }).from(users).where(eq3(users.id, userId)).limit(1);
+      const [userRow] = await db.select({ language: users.language }).from(users).where(eq4(users.id, userId)).limit(1);
       const stored = userRow?.language ?? null;
       if (stored && LANGUAGE_OPTIONS.includes(stored)) {
         userLanguage = stored;
@@ -1132,13 +1335,13 @@ async function runSmartTitleBackfillScan(userId) {
     const cursor = smartTitleBackfillCursor.get(userId);
     let scanRows = await db.select({ id: conversations.id, title: conversations.title }).from(conversations).where(
       cursor !== void 0 ? and3(
-        eq3(conversations.userId, userId),
+        eq4(conversations.userId, userId),
         lt2(conversations.id, cursor)
-      ) : eq3(conversations.userId, userId)
-    ).orderBy(desc2(conversations.id)).limit(SMART_TITLE_BACKFILL_SCAN_BATCH_SIZE);
+      ) : eq4(conversations.userId, userId)
+    ).orderBy(desc3(conversations.id)).limit(SMART_TITLE_BACKFILL_SCAN_BATCH_SIZE);
     if (scanRows.length === 0 && cursor !== void 0) {
       smartTitleBackfillCursor.delete(userId);
-      scanRows = await db.select({ id: conversations.id, title: conversations.title }).from(conversations).where(eq3(conversations.userId, userId)).orderBy(desc2(conversations.id)).limit(SMART_TITLE_BACKFILL_SCAN_BATCH_SIZE);
+      scanRows = await db.select({ id: conversations.id, title: conversations.title }).from(conversations).where(eq4(conversations.userId, userId)).orderBy(desc3(conversations.id)).limit(SMART_TITLE_BACKFILL_SCAN_BATCH_SIZE);
     }
     if (scanRows.length === 0) return;
     smartTitleBackfillCursor.set(
@@ -1150,7 +1353,7 @@ async function runSmartTitleBackfillScan(userId) {
       conversationId: messages.conversationId,
       role: messages.role,
       content: messages.content
-    }).from(messages).where(inArray(messages.conversationId, scanIds)).orderBy(desc2(messages.createdAt));
+    }).from(messages).where(inArray(messages.conversationId, scanIds)).orderBy(desc3(messages.createdAt));
     const firstUserByConv = /* @__PURE__ */ new Map();
     const firstAssistantByConv = /* @__PURE__ */ new Map();
     for (const m of scanMessages) {
@@ -1179,7 +1382,7 @@ async function runSmartTitleBackfillScan(userId) {
     );
   }
 }
-var REFLECTION_MODEL = "gpt-4o-mini";
+var REFLECTION_MODEL = "gpt-5.1";
 var REFLECTION_MAX_MESSAGES = 30;
 var REFLECTION_SUMMARY_MAX_LEN = 700;
 var REFLECTION_TAKEAWAY_MAX_LEN = 160;
@@ -1217,7 +1420,8 @@ Write the reflection JSON now.`;
     const response = await openai.chat.completions.create({
       model: REFLECTION_MODEL,
       temperature: 0.5,
-      max_tokens: 320,
+      reasoning_effort: "none",
+      max_completion_tokens: 650,
       response_format: { type: "json_object" },
       messages: [
         {
@@ -1275,7 +1479,7 @@ Write the reflection JSON now.`;
 async function persistUserMemories(userId, conversationId, texts) {
   if (!texts || texts.length === 0) return;
   try {
-    const existing = await db.select({ text: userMemories.text }).from(userMemories).where(eq3(userMemories.userId, userId));
+    const existing = await db.select({ text: userMemories.text }).from(userMemories).where(eq4(userMemories.userId, userId));
     const seen = new Set(existing.map((r) => r.text.trim().toLowerCase()));
     const fresh = [];
     for (const raw of texts) {
@@ -1294,7 +1498,7 @@ async function persistUserMemories(userId, conversationId, texts) {
     const embeddings = await embedTexts(fresh.map((f) => f.text));
     const rows = fresh.map((f, i) => ({ ...f, embedding: embeddings[i] }));
     await db.insert(userMemories).values(rows);
-    const allIds = await db.select({ id: userMemories.id }).from(userMemories).where(eq3(userMemories.userId, userId)).orderBy(desc2(userMemories.createdAt), desc2(userMemories.id));
+    const allIds = await db.select({ id: userMemories.id }).from(userMemories).where(eq4(userMemories.userId, userId)).orderBy(desc3(userMemories.createdAt), desc3(userMemories.id));
     if (allIds.length > USER_MEMORY_MAX_PER_USER) {
       const toRemove = allIds.slice(USER_MEMORY_MAX_PER_USER).map((r) => r.id);
       if (toRemove.length > 0) {
@@ -1314,7 +1518,7 @@ async function generateAndPersistReflection(conversationId, language = DEFAULT_L
     summary: conversations.reflectionSummary,
     takeaway: conversations.reflectionTakeaway,
     generatedAt: conversations.reflectionGeneratedAt
-  }).from(conversations).where(eq3(conversations.id, conversationId)).limit(1);
+  }).from(conversations).where(eq4(conversations.id, conversationId)).limit(1);
   if (existing?.summary && existing.takeaway && existing.generatedAt) {
     return {
       summary: existing.summary,
@@ -1328,7 +1532,7 @@ async function generateAndPersistReflection(conversationId, language = DEFAULT_L
     const rows = await db.select({
       role: messages.role,
       content: messages.content
-    }).from(messages).where(eq3(messages.conversationId, conversationId)).orderBy(messages.createdAt);
+    }).from(messages).where(eq4(messages.conversationId, conversationId)).orderBy(messages.createdAt);
     const hasUser = rows.some((m) => m.role === "user");
     const hasAssistant = rows.some((m) => m.role === "assistant");
     if (!hasUser || !hasAssistant) return null;
@@ -1341,8 +1545,8 @@ async function generateAndPersistReflection(conversationId, language = DEFAULT_L
       reflectionGeneratedAt: now
     }).where(
       and3(
-        eq3(conversations.id, conversationId),
-        isNull(conversations.reflectionSummary)
+        eq4(conversations.id, conversationId),
+        isNull2(conversations.reflectionSummary)
       )
     ).returning({
       summary: conversations.reflectionSummary,
@@ -1367,7 +1571,7 @@ async function generateAndPersistReflection(conversationId, language = DEFAULT_L
       summary: conversations.reflectionSummary,
       takeaway: conversations.reflectionTakeaway,
       generatedAt: conversations.reflectionGeneratedAt
-    }).from(conversations).where(eq3(conversations.id, conversationId)).limit(1);
+    }).from(conversations).where(eq4(conversations.id, conversationId)).limit(1);
     if (after?.summary && after.takeaway && after.generatedAt) {
       return {
         summary: after.summary,
@@ -1390,7 +1594,7 @@ async function runReflectionBackfillScan(userId) {
   try {
     let userLanguage = DEFAULT_LANGUAGE;
     try {
-      const [userRow] = await db.select({ language: users.language }).from(users).where(eq3(users.id, userId)).limit(1);
+      const [userRow] = await db.select({ language: users.language }).from(users).where(eq4(users.id, userId)).limit(1);
       const stored = userRow?.language ?? null;
       if (stored && LANGUAGE_OPTIONS.includes(stored)) {
         userLanguage = stored;
@@ -1399,17 +1603,17 @@ async function runReflectionBackfillScan(userId) {
     }
     const candidates = await db.select({ id: conversations.id }).from(conversations).where(
       and3(
-        eq3(conversations.userId, userId),
-        isNull(conversations.reflectionSummary)
+        eq4(conversations.userId, userId),
+        isNull2(conversations.reflectionSummary)
       )
-    ).orderBy(desc2(conversations.id)).limit(REFLECTION_BACKFILL_SCAN_BATCH_SIZE);
+    ).orderBy(desc3(conversations.id)).limit(REFLECTION_BACKFILL_SCAN_BATCH_SIZE);
     if (candidates.length === 0) return;
     const ids = candidates.map((c) => c.id);
     const recent = await db.select({
       conversationId: messages.conversationId,
       role: messages.role,
       createdAt: messages.createdAt
-    }).from(messages).where(inArray(messages.conversationId, ids)).orderBy(desc2(messages.createdAt));
+    }).from(messages).where(inArray(messages.conversationId, ids)).orderBy(desc3(messages.createdAt));
     const lastAtByConv = /* @__PURE__ */ new Map();
     const hasUserByConv = /* @__PURE__ */ new Map();
     const hasAssistantByConv = /* @__PURE__ */ new Map();
@@ -1596,7 +1800,7 @@ PERSONALIZATION (from this user's onboarding preferences \u2014 honor these with
 }
 async function seedTestAccount() {
   try {
-    const existing = await db.select().from(users).where(eq3(users.email, "testuser@solence.ai")).limit(1);
+    const existing = await db.select().from(users).where(eq4(users.email, "testuser@solence.ai")).limit(1);
     const hashedPassword = await bcrypt.hash("testuser123", 10);
     if (existing.length === 0) {
       const referralCode = await allocateUniqueReferralCode();
@@ -1607,7 +1811,7 @@ async function seedTestAccount() {
       });
       console.log("Test account seeded: testuser@solence.ai");
     } else {
-      await db.update(users).set({ password: hashedPassword }).where(eq3(users.email, "testuser@solence.ai"));
+      await db.update(users).set({ password: hashedPassword }).where(eq4(users.email, "testuser@solence.ai"));
       try {
         await ensureReferralCodeForUser(existing[0].id);
       } catch (err) {
@@ -1761,16 +1965,20 @@ async function detectCrisisSignal(text2) {
 }
 async function registerRoutes(app2) {
   registerRealtimeRoutes(app2, {
+    usageStore: liveUsageStore,
+    finalizeConversation: async (conversationId, language) => {
+      await generateAndPersistReflection(conversationId, language === "es" ? "es" : "en");
+    },
     requireAuth,
     loadContext: async (userId, requestedConversationId) => {
-      const [userRow] = await db.select().from(users).where(eq3(users.id, userId)).limit(1);
+      const [userRow] = await db.select().from(users).where(eq4(users.id, userId)).limit(1);
       if (!userRow) throw new Error("Please sign in again.");
       const prefs = serializePreferences(userRow);
       let conversationId;
       if (requestedConversationId !== void 0) {
         const [owned] = await db.select().from(conversations).where(and3(
-          eq3(conversations.id, requestedConversationId),
-          eq3(conversations.userId, userId)
+          eq4(conversations.id, requestedConversationId),
+          eq4(conversations.userId, userId)
         )).limit(1);
         if (!owned) throw new Error("Conversation not found.");
         conversationId = owned.id;
@@ -1779,8 +1987,8 @@ async function registerRoutes(app2) {
         conversationId = created.id;
       }
       const [memories, history] = await Promise.all([
-        db.select({ text: userMemories.text }).from(userMemories).where(eq3(userMemories.userId, userId)).orderBy(desc2(userMemories.createdAt)).limit(USER_MEMORY_PROMPT_MAX_ITEMS),
-        db.select({ role: messages.role, content: messages.content }).from(messages).innerJoin(conversations, eq3(conversations.id, messages.conversationId)).where(eq3(conversations.userId, userId)).orderBy(desc2(messages.createdAt)).limit(12)
+        db.select({ text: userMemories.text }).from(userMemories).where(eq4(userMemories.userId, userId)).orderBy(desc3(userMemories.createdAt)).limit(USER_MEMORY_PROMPT_MAX_ITEMS),
+        db.select({ role: messages.role, content: messages.content }).from(messages).innerJoin(conversations, eq4(conversations.id, messages.conversationId)).where(eq4(conversations.userId, userId)).orderBy(desc3(messages.createdAt)).limit(12)
       ]);
       const reference = JSON.stringify({
         memories: memories.map((m) => m.text).join("\n").slice(0, USER_MEMORY_PROMPT_CHAR_BUDGET),
@@ -1796,8 +2004,8 @@ async function registerRoutes(app2) {
     persistTurn: async (conversationId, turn, createdAt, messageId) => {
       if (messageId) {
         await db.update(messages).set({ content: turn.text }).where(and3(
-          eq3(messages.id, messageId),
-          eq3(messages.conversationId, conversationId)
+          eq4(messages.id, messageId),
+          eq4(messages.conversationId, conversationId)
         ));
         return messageId;
       }
@@ -1824,7 +2032,7 @@ async function registerRoutes(app2) {
         return res.status(400).json({ error: "Password must be at least 6 characters" });
       }
       const normalizedEmail = email.toLowerCase().trim();
-      const existing = await db.select().from(users).where(eq3(users.email, normalizedEmail)).limit(1);
+      const existing = await db.select().from(users).where(eq4(users.email, normalizedEmail)).limit(1);
       if (existing.length > 0) {
         return res.status(409).json({ error: "An account with this email already exists" });
       }
@@ -1832,7 +2040,7 @@ async function registerRoutes(app2) {
       let referrer = null;
       let referralCodeError = null;
       if (inboundReferralCode.length > 0) {
-        const [match] = await db.select({ id: users.id, email: users.email }).from(users).where(eq3(users.referralCode, inboundReferralCode)).limit(1);
+        const [match] = await db.select({ id: users.id, email: users.email }).from(users).where(eq4(users.referralCode, inboundReferralCode)).limit(1);
         if (!match) {
           referralCodeError = "That referral code isn't valid";
         } else if (match.email === normalizedEmail) {
@@ -1893,7 +2101,7 @@ async function registerRoutes(app2) {
       if (!email || !password) {
         return res.status(400).json({ error: "Email and password are required" });
       }
-      const [user] = await db.select().from(users).where(eq3(users.email, email.toLowerCase().trim())).limit(1);
+      const [user] = await db.select().from(users).where(eq4(users.email, email.toLowerCase().trim())).limit(1);
       if (!user || !user.password) {
         return res.status(401).json({ error: "Invalid email or password" });
       }
@@ -1958,15 +2166,15 @@ async function registerRoutes(app2) {
       const email = rawEmail.toLowerCase();
       let linked = false;
       let user;
-      const [byApple] = await db.select().from(users).where(eq3(users.appleUserId, appleSub)).limit(1);
+      const [byApple] = await db.select().from(users).where(eq4(users.appleUserId, appleSub)).limit(1);
       if (byApple) {
         user = byApple;
       } else {
         if (email) {
-          const [byEmail] = await db.select().from(users).where(eq3(users.email, email)).limit(1);
+          const [byEmail] = await db.select().from(users).where(eq4(users.email, email)).limit(1);
           if (byEmail) {
             const [updated] = await db.update(users).set({ appleUserId: appleSub }).where(
-              and3(eq3(users.id, byEmail.id), isNull(users.appleUserId))
+              and3(eq4(users.id, byEmail.id), isNull2(users.appleUserId))
             ).returning();
             user = updated ?? byEmail;
             linked = true;
@@ -2003,7 +2211,7 @@ async function registerRoutes(app2) {
   });
   app2.get("/api/auth/me", requireAuth, async (req, res) => {
     try {
-      const [user] = await db.select().from(users).where(eq3(users.id, req.user.userId)).limit(1);
+      const [user] = await db.select().from(users).where(eq4(users.id, req.user.userId)).limit(1);
       if (!user) {
         return res.status(404).json({ error: "User not found" });
       }
@@ -2021,7 +2229,7 @@ async function registerRoutes(app2) {
     requireAuth,
     async (req, res) => {
       try {
-        const [user] = await db.select().from(users).where(eq3(users.id, req.user.userId)).limit(1);
+        const [user] = await db.select().from(users).where(eq4(users.id, req.user.userId)).limit(1);
         if (!user) {
           return res.status(404).json({ error: "User not found" });
         }
@@ -2093,13 +2301,13 @@ async function registerRoutes(app2) {
           updates.onboardingCompletedAt = /* @__PURE__ */ new Date();
         }
         if (Object.keys(updates).length === 0) {
-          const [current] = await db.select().from(users).where(eq3(users.id, req.user.userId)).limit(1);
+          const [current] = await db.select().from(users).where(eq4(users.id, req.user.userId)).limit(1);
           if (!current) {
             return res.status(404).json({ error: "User not found" });
           }
           return res.json({ preferences: serializePreferences(current) });
         }
-        const [updated] = await db.update(users).set(updates).where(eq3(users.id, req.user.userId)).returning();
+        const [updated] = await db.update(users).set(updates).where(eq4(users.id, req.user.userId)).returning();
         if (!updated) {
           return res.status(404).json({ error: "User not found" });
         }
@@ -2148,7 +2356,7 @@ async function registerRoutes(app2) {
         voicePreviewHits.set(userId, recent);
         let previewLanguage = DEFAULT_LANGUAGE;
         try {
-          const [userRow] = await db.select({ language: users.language }).from(users).where(eq3(users.id, userId)).limit(1);
+          const [userRow] = await db.select({ language: users.language }).from(users).where(eq4(users.id, userId)).limit(1);
           const stored = userRow?.language ?? null;
           if (stored && LANGUAGE_OPTIONS.includes(stored)) {
             previewLanguage = stored;
@@ -2185,7 +2393,7 @@ async function registerRoutes(app2) {
     try {
       const userId = req.user.userId;
       const [userRow, credit] = await Promise.all([
-        db.select({ isPremium: users.isPremium }).from(users).where(eq3(users.id, userId)).limit(1),
+        db.select({ isPremium: users.isPremium }).from(users).where(eq4(users.id, userId)).limit(1),
         getActiveReferralCredit(userId)
       ]);
       const isPremium = userRow[0]?.isPremium ?? false;
@@ -2255,7 +2463,7 @@ async function registerRoutes(app2) {
       }
       const rawDays = Number(req.query.days ?? 7);
       const days = Number.isFinite(rawDays) && rawDays > 0 ? Math.min(30, Math.floor(rawDays)) : 7;
-      const [historyUserRow] = await db.select({ isPremium: users.isPremium }).from(users).where(eq3(users.id, userId)).limit(1);
+      const [historyUserRow] = await db.select({ isPremium: users.isPremium }).from(users).where(eq4(users.id, userId)).limit(1);
       const historyIsPremium = historyUserRow?.isPremium ?? false;
       const unit = historyIsPremium ? "messages" : "tokens";
       const history = typeof timeZone === "string" ? await getCalendarUsageHistory(userId, days, unit, timeZone) : await getTokensUsedHistory(userId, days, unit);
@@ -2278,12 +2486,12 @@ async function registerRoutes(app2) {
       const rawLimit = Number(req.query.limit ?? 10);
       const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(50, Math.floor(rawLimit)) : 10;
       const fetchLimit = Math.max(limit * 5, 50);
-      const candidates = await db.select().from(conversations).where(eq3(conversations.userId, userId)).orderBy(desc2(conversations.createdAt)).limit(fetchLimit);
+      const candidates = await db.select().from(conversations).where(eq4(conversations.userId, userId)).orderBy(desc3(conversations.createdAt)).limit(fetchLimit);
       if (candidates.length === 0) {
         return res.json({ conversations: [] });
       }
       const convIds = candidates.map((c) => c.id);
-      const allMessages = await db.select().from(messages).where(inArray(messages.conversationId, convIds)).orderBy(desc2(messages.createdAt));
+      const allMessages = await db.select().from(messages).where(inArray(messages.conversationId, convIds)).orderBy(desc3(messages.createdAt));
       const lastByConv = /* @__PURE__ */ new Map();
       const countByConv = /* @__PURE__ */ new Map();
       for (const m of allMessages) {
@@ -2337,17 +2545,17 @@ async function registerRoutes(app2) {
           return res.status(400).json({ error: "Invalid conversation id" });
         }
         const [conversation] = await db.select().from(conversations).where(
-          and3(eq3(conversations.id, id), eq3(conversations.userId, userId))
+          and3(eq4(conversations.id, id), eq4(conversations.userId, userId))
         ).limit(1);
         if (!conversation) {
           return res.status(404).json({ error: "Conversation not found" });
         }
-        const conversationMessages = await db.select().from(messages).where(eq3(messages.conversationId, id)).orderBy(messages.createdAt);
+        const conversationMessages = await db.select().from(messages).where(eq4(messages.conversationId, id)).orderBy(messages.createdAt);
         let favoritedIds = /* @__PURE__ */ new Set();
         if (conversationMessages.length > 0) {
           const favRows = await db.select({ messageId: favorites.messageId }).from(favorites).where(
             and3(
-              eq3(favorites.userId, userId),
+              eq4(favorites.userId, userId),
               inArray(
                 favorites.messageId,
                 conversationMessages.map((m) => m.id)
@@ -2391,12 +2599,12 @@ async function registerRoutes(app2) {
           return res.status(400).json({ error: "Invalid conversation id" });
         }
         const [conversation] = await db.select().from(conversations).where(
-          and3(eq3(conversations.id, id), eq3(conversations.userId, userId))
+          and3(eq4(conversations.id, id), eq4(conversations.userId, userId))
         ).limit(1);
         if (!conversation) {
           return res.status(404).json({ error: "Conversation not found" });
         }
-        await db.delete(conversations).where(eq3(conversations.id, id));
+        await db.delete(conversations).where(eq4(conversations.id, id));
         res.json({ success: true, id });
       } catch (error) {
         console.error("Conversation delete error:", error);
@@ -2415,14 +2623,14 @@ async function registerRoutes(app2) {
           return res.status(400).json({ error: "Invalid conversation id" });
         }
         const [conversation] = await db.select().from(conversations).where(
-          and3(eq3(conversations.id, id), eq3(conversations.userId, userId))
+          and3(eq4(conversations.id, id), eq4(conversations.userId, userId))
         ).limit(1);
         if (!conversation) {
           return res.status(404).json({ error: "Conversation not found" });
         }
         let reflectionLanguage = DEFAULT_LANGUAGE;
         try {
-          const [userRow] = await db.select({ language: users.language }).from(users).where(eq3(users.id, userId)).limit(1);
+          const [userRow] = await db.select({ language: users.language }).from(users).where(eq4(users.id, userId)).limit(1);
           const stored = userRow?.language ?? null;
           if (stored && LANGUAGE_OPTIONS.includes(stored)) {
             reflectionLanguage = stored;
@@ -2475,12 +2683,12 @@ async function registerRoutes(app2) {
           });
         }
         const [conversation] = await db.select().from(conversations).where(
-          and3(eq3(conversations.id, id), eq3(conversations.userId, userId))
+          and3(eq4(conversations.id, id), eq4(conversations.userId, userId))
         ).limit(1);
         if (!conversation) {
           return res.status(404).json({ error: "Conversation not found" });
         }
-        const [updated] = await db.update(conversations).set({ title }).where(eq3(conversations.id, id)).returning();
+        const [updated] = await db.update(conversations).set({ title }).where(eq4(conversations.id, id)).returning();
         res.json({
           conversation: {
             id: updated.id,
@@ -2504,9 +2712,9 @@ async function registerRoutes(app2) {
       crisisSupport: messages.crisisSupport
     }).from(messages).innerJoin(
       conversations,
-      eq3(conversations.id, messages.conversationId)
+      eq4(conversations.id, messages.conversationId)
     ).where(
-      and3(eq3(messages.id, messageId), eq3(conversations.userId, userId))
+      and3(eq4(messages.id, messageId), eq4(conversations.userId, userId))
     ).limit(1);
     return row ?? null;
   }
@@ -2553,8 +2761,8 @@ async function registerRoutes(app2) {
         }
         await db.delete(favorites).where(
           and3(
-            eq3(favorites.userId, userId),
-            eq3(favorites.messageId, messageId)
+            eq4(favorites.userId, userId),
+            eq4(favorites.messageId, messageId)
           )
         );
         res.json({ success: true, messageId, isFavorite: false });
@@ -2582,10 +2790,10 @@ async function registerRoutes(app2) {
           conversationId: conversations.id,
           conversationTitle: conversations.title,
           conversationCreatedAt: conversations.createdAt
-        }).from(favorites).innerJoin(messages, eq3(messages.id, favorites.messageId)).innerJoin(
+        }).from(favorites).innerJoin(messages, eq4(messages.id, favorites.messageId)).innerJoin(
           conversations,
-          eq3(conversations.id, messages.conversationId)
-        ).where(eq3(favorites.userId, userId)).orderBy(desc2(favorites.createdAt)).limit(limit);
+          eq4(conversations.id, messages.conversationId)
+        ).where(eq4(favorites.userId, userId)).orderBy(desc3(favorites.createdAt)).limit(limit);
         res.json({
           favorites: rows.map((r) => ({
             id: r.favoriteId,
@@ -2625,14 +2833,14 @@ async function registerRoutes(app2) {
         }).from(userMemories).leftJoin(
           conversations,
           and3(
-            eq3(conversations.id, userMemories.sourceConversationId),
+            eq4(conversations.id, userMemories.sourceConversationId),
             // Defense-in-depth: even though memories only ever reference
             // the owner's conversations today, constraining the join on
             // userId ensures we can never leak another user's title or
             // createdAt if that invariant ever slipped.
-            eq3(conversations.userId, userId)
+            eq4(conversations.userId, userId)
           )
-        ).where(eq3(userMemories.userId, userId)).orderBy(desc2(userMemories.createdAt), desc2(userMemories.id)).limit(USER_MEMORY_MAX_PER_USER);
+        ).where(eq4(userMemories.userId, userId)).orderBy(desc3(userMemories.createdAt), desc3(userMemories.id)).limit(USER_MEMORY_MAX_PER_USER);
         res.json({
           memories: rows.map((r) => ({
             id: r.id,
@@ -2664,8 +2872,8 @@ async function registerRoutes(app2) {
         }
         const removed = await db.delete(userMemories).where(
           and3(
-            eq3(userMemories.id, parsed),
-            eq3(userMemories.userId, userId)
+            eq4(userMemories.id, parsed),
+            eq4(userMemories.userId, userId)
           )
         ).returning({ id: userMemories.id });
         if (removed.length === 0) {
@@ -2698,8 +2906,8 @@ async function registerRoutes(app2) {
         }
         const [updated] = await db.update(userMemories).set({ text: cleaned }).where(
           and3(
-            eq3(userMemories.id, parsed),
-            eq3(userMemories.userId, userId)
+            eq4(userMemories.id, parsed),
+            eq4(userMemories.userId, userId)
           )
         ).returning({
           id: userMemories.id,
@@ -2723,7 +2931,7 @@ async function registerRoutes(app2) {
     async (req, res) => {
       try {
         const userId = req.user.userId;
-        const removed = await db.delete(userMemories).where(eq3(userMemories.userId, userId)).returning({ id: userMemories.id });
+        const removed = await db.delete(userMemories).where(eq4(userMemories.userId, userId)).returning({ id: userMemories.id });
         res.json({ ok: true, removed: removed.length });
       } catch (error) {
         console.error("Clear memories error:", error);
@@ -2760,8 +2968,8 @@ async function registerRoutes(app2) {
           }
           const [owned] = await db.select({ id: conversations.id }).from(conversations).where(
             and3(
-              eq3(conversations.id, parsed),
-              eq3(conversations.userId, userId)
+              eq4(conversations.id, parsed),
+              eq4(conversations.userId, userId)
             )
           ).limit(1);
           if (!owned) {
@@ -2807,10 +3015,10 @@ async function registerRoutes(app2) {
           createdAt: moodEntries.createdAt
         }).from(moodEntries).where(
           and3(
-            eq3(moodEntries.userId, userId),
+            eq4(moodEntries.userId, userId),
             gte2(moodEntries.createdAt, cutoff)
           )
-        ).orderBy(desc2(moodEntries.createdAt));
+        ).orderBy(desc3(moodEntries.createdAt));
         res.json({ days, entries: rows });
       } catch (error) {
         console.error("List mood entries error:", error);
@@ -2848,16 +3056,16 @@ async function registerRoutes(app2) {
           reflectionTakeaway: conversations.reflectionTakeaway
         }).from(conversations).where(
           and3(
-            eq3(conversations.userId, userId),
+            eq4(conversations.userId, userId),
             gte2(conversations.createdAt, weekStart),
             lt2(conversations.createdAt, weekEnd)
           )
-        ).orderBy(desc2(conversations.createdAt));
+        ).orderBy(desc3(conversations.createdAt));
         const weekMoods = await db.select({
           score: moodEntries.score
         }).from(moodEntries).where(
           and3(
-            eq3(moodEntries.userId, userId),
+            eq4(moodEntries.userId, userId),
             gte2(moodEntries.createdAt, weekStart),
             lt2(moodEntries.createdAt, weekEnd)
           )
@@ -2996,7 +3204,7 @@ async function registerRoutes(app2) {
         ]);
         const weekMemories = await db.select({ text: userMemories.text }).from(userMemories).where(
           and3(
-            eq3(userMemories.userId, userId),
+            eq4(userMemories.userId, userId),
             gte2(userMemories.createdAt, weekStart),
             lt2(userMemories.createdAt, weekEnd)
           )
@@ -3012,7 +3220,7 @@ async function registerRoutes(app2) {
         }
         let userLanguage = DEFAULT_LANGUAGE;
         try {
-          const [userRow] = await db.select({ language: users.language }).from(users).where(eq3(users.id, userId)).limit(1);
+          const [userRow] = await db.select({ language: users.language }).from(users).where(eq4(users.id, userId)).limit(1);
           const stored = userRow?.language ?? null;
           if (stored && LANGUAGE_OPTIONS.includes(stored)) {
             userLanguage = stored;
@@ -3052,13 +3260,13 @@ async function registerRoutes(app2) {
             content: messages.content,
             createdAt: messages.createdAt,
             conversationId: messages.conversationId
-          }).from(messages).innerJoin(favorites, eq3(favorites.messageId, messages.id)).where(
+          }).from(messages).innerJoin(favorites, eq4(favorites.messageId, messages.id)).where(
             and3(
-              eq3(favorites.userId, userId),
-              eq3(messages.role, "assistant"),
+              eq4(favorites.userId, userId),
+              eq4(messages.role, "assistant"),
               inArray(messages.conversationId, weekConvIds)
             )
-          ).orderBy(desc2(favorites.createdAt)).limit(1);
+          ).orderBy(desc3(favorites.createdAt)).limit(1);
           if (favRows.length > 0) {
             highlight = favRows[0];
           } else {
@@ -3069,10 +3277,10 @@ async function registerRoutes(app2) {
               conversationId: messages.conversationId
             }).from(messages).where(
               and3(
-                eq3(messages.role, "assistant"),
+                eq4(messages.role, "assistant"),
                 inArray(messages.conversationId, weekConvIds)
               )
-            ).orderBy(desc2(messages.createdAt)).limit(1);
+            ).orderBy(desc3(messages.createdAt)).limit(1);
             if (recent.length > 0) {
               highlight = recent[0];
             }
@@ -3121,7 +3329,7 @@ async function registerRoutes(app2) {
           });
         }
         exportLastRunAt.set(userId, now);
-        const [user] = await db.select().from(users).where(eq3(users.id, userId)).limit(1);
+        const [user] = await db.select().from(users).where(eq4(users.id, userId)).limit(1);
         if (!user) {
           exportLastRunAt.delete(userId);
           return res.status(404).json({ error: "User not found" });
@@ -3134,7 +3342,7 @@ async function registerRoutes(app2) {
           tokenUsageRows,
           memoryRows
         ] = await Promise.all([
-          db.select().from(conversations).where(eq3(conversations.userId, userId)).orderBy(desc2(conversations.createdAt)),
+          db.select().from(conversations).where(eq4(conversations.userId, userId)).orderBy(desc3(conversations.createdAt)),
           db.select({
             id: messages.id,
             conversationId: messages.conversationId,
@@ -3143,16 +3351,16 @@ async function registerRoutes(app2) {
             createdAt: messages.createdAt
           }).from(messages).innerJoin(
             conversations,
-            eq3(conversations.id, messages.conversationId)
-          ).where(eq3(conversations.userId, userId)).orderBy(desc2(messages.createdAt)),
+            eq4(conversations.id, messages.conversationId)
+          ).where(eq4(conversations.userId, userId)).orderBy(desc3(messages.createdAt)),
           db.select({
             id: favorites.id,
             messageId: favorites.messageId,
             createdAt: favorites.createdAt
-          }).from(favorites).where(eq3(favorites.userId, userId)).orderBy(desc2(favorites.createdAt)),
-          db.select().from(moodEntries).where(eq3(moodEntries.userId, userId)).orderBy(desc2(moodEntries.createdAt)),
-          db.select().from(tokenUsage).where(eq3(tokenUsage.userId, userId)).orderBy(desc2(tokenUsage.periodStart)),
-          db.select().from(userMemories).where(eq3(userMemories.userId, userId)).orderBy(desc2(userMemories.createdAt), desc2(userMemories.id))
+          }).from(favorites).where(eq4(favorites.userId, userId)).orderBy(desc3(favorites.createdAt)),
+          db.select().from(moodEntries).where(eq4(moodEntries.userId, userId)).orderBy(desc3(moodEntries.createdAt)),
+          db.select().from(tokenUsage).where(eq4(tokenUsage.userId, userId)).orderBy(desc3(tokenUsage.periodStart)),
+          db.select().from(userMemories).where(eq4(userMemories.userId, userId)).orderBy(desc3(userMemories.createdAt), desc3(userMemories.id))
         ]);
         const generatedAt = (/* @__PURE__ */ new Date()).toISOString();
         const account = {
@@ -3315,7 +3523,7 @@ async function registerRoutes(app2) {
           return res.status(400).json({ error: "Invalid conversationId" });
         }
         const [owned] = await db.select().from(conversations).where(
-          and3(eq3(conversations.id, parsed), eq3(conversations.userId, userId))
+          and3(eq4(conversations.id, parsed), eq4(conversations.userId, userId))
         ).limit(1);
         if (!owned) {
           return res.status(404).json({ error: "Conversation not found" });
@@ -3324,7 +3532,7 @@ async function registerRoutes(app2) {
         targetConversationTitle = owned.title;
       }
       const [userRow, activeCredit] = await Promise.all([
-        db.select({ isPremium: users.isPremium }).from(users).where(eq3(users.id, userId)).limit(1),
+        db.select({ isPremium: users.isPremium }).from(users).where(eq4(users.id, userId)).limit(1),
         getActiveReferralCredit(userId)
       ]);
       const isPremium = userRow[0]?.isPremium ?? false;
@@ -3394,7 +3602,7 @@ async function registerRoutes(app2) {
         }
       }
       let conversationId;
-      const recentConversations = await db.select().from(conversations).where(eq3(conversations.userId, userId)).orderBy(desc2(conversations.createdAt)).limit(6);
+      const recentConversations = await db.select().from(conversations).where(eq4(conversations.userId, userId)).orderBy(desc3(conversations.createdAt)).limit(6);
       if (targetConversationId !== null) {
         conversationId = targetConversationId;
       } else if (recentConversations.length > 0) {
@@ -3410,21 +3618,21 @@ async function registerRoutes(app2) {
       if (activeConversationTitle === LEGACY_DEFAULT_CONVERSATION_TITLE) {
         const [firstUserMessage] = await db.select().from(messages).where(
           and3(
-            eq3(messages.conversationId, conversationId),
-            eq3(messages.role, "user")
+            eq4(messages.conversationId, conversationId),
+            eq4(messages.role, "user")
           )
         ).orderBy(messages.createdAt).limit(1);
         const seedText = firstUserMessage?.content ?? userTranscript;
         const newTitle = generateConversationTitle(seedText);
         if (newTitle !== LEGACY_DEFAULT_CONVERSATION_TITLE) {
-          await db.update(conversations).set({ title: newTitle }).where(eq3(conversations.id, conversationId));
+          await db.update(conversations).set({ title: newTitle }).where(eq4(conversations.id, conversationId));
         }
       }
       const crisisSupportPromise = detectCrisisSignal(userTranscript).catch(
         () => false
       );
       await db.insert(messages).values({ conversationId, role: "user", content: userTranscript });
-      const currentMessages = await db.select().from(messages).where(eq3(messages.conversationId, conversationId)).orderBy(messages.createdAt);
+      const currentMessages = await db.select().from(messages).where(eq4(messages.conversationId, conversationId)).orderBy(messages.createdAt);
       const isFirstExchange = currentMessages.length === 1;
       let pastContext = "";
       const olderConvIds = recentConversations.map((c) => c.id).filter((id) => id !== conversationId);
@@ -3455,7 +3663,7 @@ ${pastMessages.join("\n---\n")}`;
       let selectedVoice = DEFAULT_VOICE;
       let userLanguage = DEFAULT_LANGUAGE;
       try {
-        const [userRow2] = await db.select().from(users).where(eq3(users.id, userId)).limit(1);
+        const [userRow2] = await db.select().from(users).where(eq4(users.id, userId)).limit(1);
         if (userRow2) {
           const prefs = serializePreferences(userRow2);
           personalizationBlock = buildPersonalizationBlock(prefs);
@@ -3474,7 +3682,7 @@ ${pastMessages.join("\n---\n")}`;
           id: userMemories.id,
           text: userMemories.text,
           embedding: userMemories.embedding
-        }).from(userMemories).where(eq3(userMemories.userId, userId)).orderBy(desc2(userMemories.createdAt), desc2(userMemories.id));
+        }).from(userMemories).where(eq4(userMemories.userId, userId)).orderBy(desc3(userMemories.createdAt), desc3(userMemories.id));
         let memoryRows = allMemoryRows;
         const queryEmbedding = allMemoryRows.some((r) => Array.isArray(r.embedding)) && userTranscript ? await embedTextWithTimeout(userTranscript) : null;
         if (queryEmbedding) {
@@ -3609,8 +3817,8 @@ PRE-SESSION MOOD CHECK-IN: The user just rated their current mood as "${preSessi
             if (!smartTitle) return;
             await db.update(conversations).set({ title: smartTitle }).where(
               and3(
-                eq3(conversations.id, conversationIdForTitle),
-                eq3(conversations.title, expectedTitleAtRequestTime)
+                eq4(conversations.id, conversationIdForTitle),
+                eq4(conversations.title, expectedTitleAtRequestTime)
               )
             );
           } catch (err) {
@@ -3666,7 +3874,7 @@ PRE-SESSION MOOD CHECK-IN: The user just rated their current mood as "${preSessi
       if (ACTIVE_EVENTS.has(event.type)) isPremium = true;
       else if (LAPSED_EVENTS.has(event.type)) isPremium = false;
       if (isPremium !== null) {
-        await db.update(users).set({ isPremium }).where(eq3(users.id, appUserId));
+        await db.update(users).set({ isPremium }).where(eq4(users.id, appUserId));
         console.log(`[RC webhook] user=${appUserId} isPremium=${isPremium} event=${event.type}`);
       }
       res.status(200).json({ ok: true });

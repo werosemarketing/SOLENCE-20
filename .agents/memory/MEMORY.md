@@ -3,3 +3,4 @@
 - [Publishing runtime outputs](publishing-runtime-outputs.md) — runtime build folders must remain publishable; verify the production command on the public port, not just dev workflows.
 - [Native build portability](native-build-portability.md) — approved installs can leave internal tarball URLs unreachable by Expo builders; preserve integrity when making lockfiles portable.
 - [Live voice experiment](live-voice-experiment.md) — realtime is a separate development-only trial; token creation alone does not prove that real calls have model access.
+- [Auxiliary AI model access](auxiliary-ai-model-access.md) — background notes need a permitted text model; HTTP 200 with a null reflection is not successful generation.

@@ -4,6 +4,7 @@ import { Feather } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "@/hooks/useTheme";
 import { useLiveVoice } from "@/hooks/useLiveVoice";
+import { LiveUsagePanel } from "@/components/LiveUsagePanel";
 import { CrisisBanner } from "@/components/CrisisBanner";
 import { containsCrisisLanguage } from "@/lib/rating";
 
@@ -61,6 +62,7 @@ export default function LiveVoiceScreen() {
           <Text style={{ color: theme.textMuted, fontSize: 12 }}>{turn.role === "user" ? "YOU" : "SOLENCE"}</Text>
           <Text selectable style={{ color: theme.text, fontSize: 16, lineHeight: 24 }}>{turn.text}</Text>
         </View>)}
+        <LiveUsagePanel active={voice.state !== "idle"} />
       </ScrollView>
       <Text style={[styles.notice, { color: theme.textMuted }]}>
         Completed turns are saved to your development account. Audio is sent to OpenAI.

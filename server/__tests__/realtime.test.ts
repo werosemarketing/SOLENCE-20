@@ -13,7 +13,8 @@ const assistantEvent = (id: string, text: string) => ({
   type: "response.output_audio_transcript.done", item_id: id, transcript: text,
 });
 
-async function setup(t: { after: (fn: () => Promise<void>) => void }, enabled = true) {
+async function setup(t: { after: (fn: () => Promise<void>) => void }, enabled = true,
+  overrides: Partial<Parameters<typeof registerRealtimeRoutes>[1]> = {}) {
   const app = express();
   let receive = (_event: Record<string, any>) => {};
   let failProvider = false;
@@ -48,6 +49,7 @@ async function setup(t: { after: (fn: () => Promise<void>) => void }, enabled = 
       let ended = false;
       return { sdp, close: async () => { if (!ended) { closed++; ended = true; } } };
     },
+    ...overrides,
   });
   const server = app.listen(0, "127.0.0.1");
   await new Promise<void>((resolve) => server.once("listening", resolve));
@@ -203,4 +205,55 @@ test("missing or unsupported live voice languages consistently default to Englis
     assert.match(config.instructions, /Speak only in English/);
     assert.match(config.audio.input.transcription.prompt, /user is speaking English/);
   }
+});
+
+test("usage is persisted through start, provider responses and idempotent stop", async (t) => {
+  const records: any[] = [];
+  const app = await setup(t, true, { usageStore: {
+    save: async record => { records.push({ ...record, usage: { ...record.usage } }); },
+    summary: async () => { throw new Error("Not used"); },
+  } });
+  const { result } = await app.send({ sdp });
+  app.emit({ type: "response.done", response: { id: "r1", usage: {
+    input_tokens: 10, output_tokens: 20,
+    input_token_details: { text_tokens: 10, audio_tokens: 0, cached_tokens: 0 },
+    output_token_details: { text_tokens: 0, audio_tokens: 20 },
+  } } });
+  const ended = await app.end(result.sessionId);
+  assert.equal(ended.result.usageError, false);
+  assert.equal(records[0].status, "starting");
+  assert.equal(records.at(-1).status, "ended");
+  assert.ok(records.at(-1).connectedAt instanceof Date);
+  assert.ok(records.at(-1).endedAt instanceof Date);
+  assert.equal(records.at(-1).usage.responses, 1);
+  assert.ok(records.at(-1).usage.estimatedUsd > 0);
+  const saves = records.length;
+  await app.end(result.sessionId);
+  assert.equal(records.length, saves);
+});
+
+test("failure to initialize persistent usage prevents an untracked paid call", async (t) => {
+  const app = await setup(t, true, { usageStore: {
+    save: async () => { throw new Error("Database unavailable"); },
+    summary: async () => { throw new Error("Not used"); },
+  } });
+  assert.equal((await app.send({ sdp })).response.status, 502);
+  assert.equal(app.counts().created, 0);
+});
+
+test("completed live transcripts trigger the existing notes pipeline once, after persistence", async (t) => {
+  const finalized: number[] = [];
+  const app = await setup(t, true, {
+    finalizeConversation: async (conversationId, language) => {
+      assert.equal(app.rows.length, 2);
+      assert.equal(language, "es");
+      finalized.push(conversationId);
+    },
+  });
+  const { result } = await app.send({ sdp });
+  app.emit(userEvent("user", "Today felt hard."));
+  app.emit(assistantEvent("assistant", "I'm listening."));
+  await app.end(result.sessionId);
+  await app.end(result.sessionId);
+  assert.deepEqual(finalized, [42]);
 });
