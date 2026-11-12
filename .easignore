@@ -31,3 +31,5 @@ app-example
 .config/
 *.dump
 generated-artifacts/
+server_dist/
+static-build/

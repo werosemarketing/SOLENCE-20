@@ -21,3 +21,31 @@ mtime_ms = 1791922413368
 storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:3d6d112c-216b-409e-b869-bab3c9beff13/a7b44fcb-f9c1-42f7-8222-960dc1851346/50196107-3fc2-4289-8e18-e064ca35ae7f"
 storage_version_token = "1791922419010239"
 content_type = "image/png"
+
+[[outputs]]
+id = "vsrUtjun_CxqBzXmZxVTX"
+uri = "file://attached_assets/live-voice/iphone-install-qr.png"
+type = "image"
+title = "1. Install Solence Dev on iPhone"
+description = "Scan to open the completed iPhone development build and install Solence (Dev)."
+logical_id = "3f3daebf-f7ca-46af-9cc7-954673ecbd70"
+content_hash = "sha256:c33777820bb52dba6d04070d2650dc67c6cfcdeb6e8cc1812e1614583a1ed111"
+size = 6453
+mtime_ms = 1794515356961
+storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:3d6d112c-216b-409e-b869-bab3c9beff13/3f3daebf-f7ca-46af-9cc7-954673ecbd70/008044ed-8557-416c-a28a-568a3cbb29cb"
+storage_version_token = "1794515670780261"
+content_type = "image/png"
+
+[[outputs]]
+id = "aXLDTkzI3QKgyO11cog5W"
+uri = "file://attached_assets/live-voice/dev-server-qr.png"
+type = "image"
+title = "2. Connect the development app"
+description = "After installing Solence (Dev), scan to open it with the running development server. Then sign in and tap Try live voice · Dev."
+logical_id = "9eecad1c-ddc2-46e8-8044-e6114913008b"
+content_hash = "sha256:3cb6eba6073ba5e67aab61e2d700d6060b3e1176f9b8ca8514048f70e14af69e"
+size = 8036
+mtime_ms = 1794515357308
+storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:3d6d112c-216b-409e-b869-bab3c9beff13/9eecad1c-ddc2-46e8-8044-e6114913008b/7a890bb4-6ae2-4ed1-b498-b73baa138fab"
+storage_version_token = "1794515671502120"
+content_type = "image/png"

@@ -1,3 +1,5 @@
 - [Voice chat two-call flow](voice-ai-cost-flow.md) — don't revert to single gpt-audio call; text model + TTS is ~100x cheaper; TTS failure must fall back text-only or refunds break.
 - [Expo preview testing](expo-preview-testing.md) — use the actual app-preview URL for browser tests; the bare development host can load Metro instead of the app.
 - [Publishing runtime outputs](publishing-runtime-outputs.md) — runtime build folders must remain publishable; verify the production command on the public port, not just dev workflows.
+- [Native build portability](native-build-portability.md) — approved installs can leave internal tarball URLs unreachable by Expo builders; preserve integrity when making lockfiles portable.
+- [Live voice experiment](live-voice-experiment.md) — realtime is a separate development-only trial; token creation alone does not prove that real calls have model access.

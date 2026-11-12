@@ -72,6 +72,9 @@ module.exports = {
       "expo-image",
       "expo-secure-store",
       "expo-sharing",
+      ...(IS_DEV ? [["@config-plugins/react-native-webrtc", {
+        microphonePermission: "Solence needs microphone access for live voice conversations.",
+      }]] : []),
     ],
     experiments: {
       reactCompiler: true,

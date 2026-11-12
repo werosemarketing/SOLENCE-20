@@ -1710,6 +1710,18 @@ export default function SolenceScreen({
           ) : null}
 
           <View style={styles.orbContainer}>
+            {__DEV__ && Platform.OS !== "web" && voiceState === "idle" && !isConversationActive ? (
+              <Pressable
+                testID="try-live-voice"
+                accessibilityRole="button"
+                onPress={() => navigation.navigate("LiveVoice")}
+                style={{ padding: 12, marginBottom: 12 }}
+              >
+                <Text style={{ color: theme.orbPrimary, textAlign: "center", fontWeight: "600" }}>
+                  Try live voice · Dev
+                </Text>
+              </Pressable>
+            ) : null}
             <Pressable
               onPress={handleOrbPress}
               disabled={voiceState === "responding"}

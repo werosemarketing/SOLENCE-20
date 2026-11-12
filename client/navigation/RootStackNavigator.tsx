@@ -14,6 +14,7 @@ import UpgradeScreen from "@/screens/UpgradeScreen";
 import ConversationDetailScreen from "@/screens/ConversationDetailScreen";
 import BreathingScreen from "@/screens/BreathingScreen";
 import WeeklySummaryScreen from "@/screens/WeeklySummaryScreen";
+import LiveVoiceScreen from "@/screens/LiveVoiceScreen";
 import MainTabNavigator, { type MainTabParamList } from "@/navigation/MainTabNavigator";
 import LockScreen from "@/components/LockScreen";
 import { useScreenOptions } from "@/hooks/useScreenOptions";
@@ -48,6 +49,7 @@ export type RootStackParamList = {
   };
   Breathing: undefined;
   WeeklySummary: { weekOffset?: number } | undefined;
+  LiveVoice: undefined;
   Legal: undefined;
 };
 
@@ -441,6 +443,11 @@ export default function RootStackNavigator() {
           title: t("weeklySummary.header"),
         }}
       />
+      {__DEV__ ? <Stack.Screen
+        name="LiveVoice"
+        component={LiveVoiceScreen}
+        options={{ title: "Live voice test" }}
+      /> : null}
       <Stack.Screen
         name="Legal"
         options={{
