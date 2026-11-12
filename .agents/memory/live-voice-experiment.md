@@ -20,3 +20,9 @@ Use the documented short-lived-token flow for this experiment, keeping the token
 **Why:** After realtime appeared in both keys' allowed model lists, direct multipart call creation still returned a model-access error. Authorizing the session first, then exchanging plain SDP using its short-lived credential, successfully established both the call and transcript observer. The error was not sufficient evidence that the user's model setting was wrong.
 
 **How to apply:** Preserve the working authorization-plus-SDP sequence. Distinguish authorization failures from connection failures in diagnostics, and confirm the actual exchange before asking the user to change keys or permissions again.
+
+Live voice must stay in the app-selected language throughout a call, rather than switching automatically when speech is ambiguous.
+
+**Why:** The user reported a call that started normally in English and then unexpectedly spoke French, and asked for reliable understanding without language switching. A transcription language hint alone does not constrain the realtime model's spoken replies.
+
+**How to apply:** Apply a session-wide spoken-language policy as well as recognition hints. It must take precedence over language mirroring and old conversation examples. Unclear speech should elicit a clarification in the selected language, not guesses or an automatic language change; preserve the user's Spanish preference when selected.

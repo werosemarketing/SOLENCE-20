@@ -173,3 +173,34 @@ test("configuration supports natural speech and interruptions without replacing 
   assert.equal(realtimeTranscript({ type: "response.output_audio_transcript.delta", item_id: "a", delta: "partial" }), null);
   assert.equal(realtimeTranscript({ type: "response.output_audio_transcript.done", item_id: "a", transcript: "   " }), null);
 });
+
+test("English live calls lock spoken replies as well as transcription to the selected language", () => {
+  const config = liveVoiceConfig("Mirror the user's language. Previous reply: Bonjour.", "en", "nova");
+  assert.equal(config.audio.input.transcription.language, "en");
+  assert.match(config.audio.input.transcription.prompt, /user is speaking English/);
+  assert.match(config.audio.input.transcription.prompt, /do not translate/);
+  assert.match(config.instructions, /Speak only in English/);
+  assert.ok(config.instructions.indexOf("SESSION LANGUAGE POLICY:") > config.instructions.indexOf("Bonjour"));
+  assert.match(config.instructions, /takes precedence over instructions to mirror/);
+  assert.match(config.instructions, /Do not automatically switch languages/);
+  assert.match(config.instructions, /ask them to repeat or clarify in English instead of guessing/);
+  assert.match(config.instructions, /Silence and non-speech noise do not require a reply/);
+});
+
+test("Spanish live calls use the same stable language policy without imposing English", () => {
+  const config = liveVoiceConfig("Safety rules.", "es", "onyx");
+  assert.equal(config.audio.input.transcription.language, "es");
+  assert.match(config.audio.input.transcription.prompt, /user is speaking Latin American Spanish/);
+  assert.match(config.instructions, /Speak only in Latin American Spanish/);
+  assert.doesNotMatch(config.instructions, /Speak only in English/);
+  assert.match(config.instructions, /before starting a new call/);
+});
+
+test("missing or unsupported live voice languages consistently default to English", () => {
+  for (const language of ["", "fr", "unknown"]) {
+    const config = liveVoiceConfig("Safety rules.", language, "nova");
+    assert.equal(config.audio.input.transcription.language, "en");
+    assert.match(config.instructions, /Speak only in English/);
+    assert.match(config.audio.input.transcription.prompt, /user is speaking English/);
+  }
+});
