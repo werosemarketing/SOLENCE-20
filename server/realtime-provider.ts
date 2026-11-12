@@ -8,6 +8,43 @@ export type LiveProviderStart = (
   onDisconnect: () => void,
 ) => Promise<LiveProviderCall>;
 
+async function providerError(response: globalThis.Response, stage: string): Promise<Error> {
+  const body = await response.json().catch(() => ({})) as { error?: { code?: string } };
+  const code = body.error?.code?.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 80);
+  return new Error(`OpenAI could not ${stage} (${response.status}${code ? `: ${code}` : ""}).`);
+}
+
+export async function negotiateLiveCall(
+  sdp: string, config: object, userId: string, apiKey: string,
+  request: typeof fetch = fetch,
+) {
+  const headers = { Authorization: `Bearer ${apiKey}` };
+  // Use OpenAI's documented short-lived-token connection flow. Keep both
+  // credentials on the server; the native app receives only the SDP answer.
+  const authorization = await request("https://api.openai.com/v1/realtime/client_secrets", {
+    method: "POST", headers: {
+      ...headers,
+      "Content-Type": "application/json",
+      "OpenAI-Safety-Identifier": createHash("sha256").update(userId).digest("hex"),
+    }, body: JSON.stringify({ session: config }), signal: AbortSignal.timeout(15000),
+  });
+  if (!authorization.ok) throw await providerError(authorization, "authorize live voice");
+  const credential = await authorization.json() as { value?: string };
+  if (typeof credential.value !== "string" || !credential.value) {
+    throw new Error("OpenAI returned an invalid live voice authorization.");
+  }
+  const response = await request("https://api.openai.com/v1/realtime/calls", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${credential.value}`, "Content-Type": "application/sdp" },
+    body: sdp, signal: AbortSignal.timeout(15000),
+  });
+  if (!response.ok) throw await providerError(response, "connect live voice");
+  const answer = await response.text();
+  const callId = response.headers.get("location")?.match(/\/(rtc_[\w-]+)(?:\?|$)/)?.[1];
+  if (!callId || !answer.startsWith("v=0")) throw new Error("OpenAI returned an invalid live voice connection.");
+  return { answer, callId };
+}
+
 // Standard OpenAI credentials stay on the backend. Audio travels directly over
 // WebRTC; the sideband observes transcripts so saving never trusts client text.
 export const startLiveProviderCall: LiveProviderStart = async (
@@ -16,26 +53,7 @@ export const startLiveProviderCall: LiveProviderStart = async (
   const apiKey = process.env.OPENAI_REALTIME_API_KEY || process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error("Live voice is not configured on this server.");
   const headers = { Authorization: `Bearer ${apiKey}` };
-  const form = new FormData();
-  form.set("sdp", sdp);
-  form.set("session", JSON.stringify(config));
-  const response = await fetch("https://api.openai.com/v1/realtime/calls", {
-    method: "POST", headers: {
-      ...headers,
-      "OpenAI-Safety-Identifier": createHash("sha256").update(userId).digest("hex"),
-    }, body: form, signal: AbortSignal.timeout(25000),
-  });
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({})) as { error?: { code?: string } };
-    const code = body.error?.code?.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 80);
-    if (code === "model_not_found") {
-      throw new Error("Live voice is blocked by OpenAI model access (403: model_not_found). The development server needs a key with gpt-realtime access.");
-    }
-    throw new Error(`OpenAI could not start live voice (${response.status}${code ? `: ${code}` : ""}).`);
-  }
-  const answer = await response.text();
-  const callId = response.headers.get("location")?.match(/\/(rtc_[\w-]+)(?:\?|$)/)?.[1];
-  if (!callId || !answer.startsWith("v=0")) throw new Error("OpenAI returned an invalid live voice connection.");
+  const { answer, callId } = await negotiateLiveCall(sdp, config, userId, apiKey);
   let closed = false;
   let observer: WebSocket | undefined;
   const close = async () => {

@@ -14,3 +14,9 @@ Successful ephemeral credential creation does not establish access to the reques
 **Why:** Credential creation returned success while actual WebRTC call creation rejected the same model with an access error.
 
 **How to apply:** Verify actual call initialization and the server observer connection before claiming realtime is operational. A no-media handshake can validate setup without transmitting a person's microphone audio; always end the test call.
+
+Use the documented short-lived-token flow for this experiment, keeping the token on the backend as well as the standard API credential.
+
+**Why:** After realtime appeared in both keys' allowed model lists, direct multipart call creation still returned a model-access error. Authorizing the session first, then exchanging plain SDP using its short-lived credential, successfully established both the call and transcript observer. The error was not sufficient evidence that the user's model setting was wrong.
+
+**How to apply:** Preserve the working authorization-plus-SDP sequence. Distinguish authorization failures from connection failures in diagnostics, and confirm the actual exchange before asking the user to change keys or permissions again.
