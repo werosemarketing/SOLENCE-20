@@ -10,5 +10,5 @@ export type LiveTransportEvents = {
 };
 
 export async function createLiveTransport(_events: LiveTransportEvents): Promise<LiveTransport> {
-  throw new Error("This live voice test is available in the rebuilt Solence development app.");
+  throw new Error("Live voice is available in the Solence iOS and Android apps. You can still use standard voice here.");
 }

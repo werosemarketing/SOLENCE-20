@@ -100,7 +100,7 @@ export function useLiveVoice() {
         },
         disconnected: () => {
           if (!valid()) return;
-          setError("The live connection ended. You can start another test.");
+          setError("The live connection ended. You can start another call.");
           void stopRef.current();
         },
       });

@@ -443,10 +443,10 @@ export default function RootStackNavigator() {
           title: t("weeklySummary.header"),
         }}
       />
-      {__DEV__ ? <Stack.Screen
+      {Platform.OS !== "web" ? <Stack.Screen
         name="LiveVoice"
         component={LiveVoiceScreen}
-        options={{ title: "Live voice test" }}
+        options={{ title: "Live voice" }}
       /> : null}
       <Stack.Screen
         name="Legal"

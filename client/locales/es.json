@@ -1,4 +1,15 @@
 {
+  "liveVoice": {
+    "entry": "Voz en vivo · Unlimited",
+    "badge": "SOLENCE UNLIMITED · VOZ EN VIVO",
+    "checking": "Comprobando tu suscripción Unlimited…",
+    "retry": "No pudimos verificar tu suscripción. Toca para reintentar.",
+    "requiresUnlimited": "La voz en vivo está incluida con una suscripción activa a Solence Unlimited. La voz estándar sigue disponible en tu plan actual.",
+    "upgrade": "Obtener Unlimited o restaurar una compra",
+    "benefitTitle": "Voz natural en vivo",
+    "benefitBody": "Habla libremente e interrumpe con naturalidad en las apps de iOS y Android. Las llamadas duran hasta 3 minutos, con hasta 10 inicios por hora.",
+    "notice": "Los turnos completos se guardan en tu historial. El audio se envía a OpenAI. Unlimited incluye voz en vivo: hasta 3 minutos por llamada y 10 inicios por hora. La voz estándar sigue disponible."
+  },
   "common": {
     "cancel": "Cancelar",
     "save": "Guardar",

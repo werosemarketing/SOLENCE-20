@@ -13,7 +13,7 @@ const LIVE_OUTPUT_GAIN = 2;
 
 export async function createLiveTransport(events: LiveTransportEvents): Promise<LiveTransport> {
   if (!NativeModules.WebRTCModule) {
-    throw new Error("Install the new Solence development build to enable live voice.");
+    throw new Error("Update the Solence app to a version that supports live voice.");
   }
   const permission = await AudioModule.requestRecordingPermissionsAsync();
   if (!permission.granted) throw new Error("Microphone permission is needed. Enable it in your phone settings.");

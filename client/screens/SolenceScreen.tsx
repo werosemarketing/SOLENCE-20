@@ -1710,7 +1710,7 @@ export default function SolenceScreen({
           ) : null}
 
           <View style={styles.orbContainer}>
-            {__DEV__ && Platform.OS !== "web" && voiceState === "idle" && !isConversationActive ? (
+            {Platform.OS !== "web" && voiceState === "idle" && !isConversationActive ? (
               <Pressable
                 testID="try-live-voice"
                 accessibilityRole="button"
@@ -1718,7 +1718,7 @@ export default function SolenceScreen({
                 style={{ padding: 12, marginBottom: 12 }}
               >
                 <Text style={{ color: theme.orbPrimary, textAlign: "center", fontWeight: "600" }}>
-                  Try live voice · Dev
+                  {t("liveVoice.entry")}
                 </Text>
               </Pressable>
             ) : null}

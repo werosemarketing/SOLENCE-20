@@ -7,11 +7,19 @@ import { useLiveVoice } from "@/hooks/useLiveVoice";
 import { LiveUsagePanel } from "@/components/LiveUsagePanel";
 import { CrisisBanner } from "@/components/CrisisBanner";
 import { containsCrisisLanguage } from "@/lib/rating";
+import { useLiveVoiceAccess } from "@/hooks/useLiveVoiceAccess";
+import { useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import type { RootStackParamList } from "@/navigation/RootStackNavigator";
+import { useTranslation } from "react-i18next";
 
 export default function LiveVoiceScreen() {
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
   const voice = useLiveVoice();
+  const access = useLiveVoiceAccess();
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const { t } = useTranslation();
   const scroll = useRef<ScrollView>(null);
   const [showCrisis, setShowCrisis] = useState(true);
   const active = voice.state !== "idle" && voice.state !== "stopping";
@@ -24,18 +32,18 @@ export default function LiveVoiceScreen() {
   };
   return (
     <View style={[styles.container, { backgroundColor: theme.backgroundRoot, paddingBottom: insets.bottom + 16 }]}>
-      <Text style={[styles.badge, { color: theme.textMuted }]}>DEVELOPMENT TEST · LIVE VOICE</Text>
+      <Text style={[styles.badge, { color: theme.textMuted }]}>{t("liveVoice.badge")}</Text>
       <Text style={[styles.title, { color: theme.text }]}>A more natural conversation</Text>
       <Text style={[styles.description, { color: theme.textMuted }]}>
         Start once, then talk freely. Solence hears your voice directly and streams its reply.
-        You can interrupt without tapping. Each test is limited to 3 minutes.
+        You can interrupt without tapping. Each call is limited to 3 minutes.
       </Text>
       <View style={[styles.orb, { backgroundColor: theme.orbPrimary }]}>
         <Feather name={voice.muted ? "mic-off" : voice.state === "speaking" ? "volume-2" : "mic"} size={42} color="#FFFFFF" />
       </View>
       <Text accessibilityLiveRegion="polite" style={[styles.status, { color: theme.text }]}>{labels[voice.state]}</Text>
       {connected ? <Text style={{ color: theme.textMuted, textAlign: "center" }}>
-        {Math.floor(voice.secondsLeft / 60)}:{String(voice.secondsLeft % 60).padStart(2, "0")} left in this test
+        {Math.floor(voice.secondsLeft / 60)}:{String(voice.secondsLeft % 60).padStart(2, "0")} left in this call
       </Text> : null}
       <View style={styles.controls}>
         {connected ? <Pressable accessibilityRole="button" onPress={voice.toggleMute}
@@ -43,12 +51,32 @@ export default function LiveVoiceScreen() {
           <Text style={{ color: theme.text }}>{voice.muted ? "Unmute" : "Mute"}</Text>
         </Pressable> : null}
         <Pressable accessibilityRole="button" testID="live-voice-toggle"
-          disabled={voice.state === "stopping"}
-          onPress={() => { if (!active) setShowCrisis(true); void (active ? voice.stop() : voice.start()); }}
-          style={[styles.primary, { backgroundColor: active ? "#9B4848" : theme.orbPrimary }]}>
+          disabled={voice.state === "stopping" || (!active && (access.data?.allowed !== true || !!access.error))}
+          onPress={() => {
+            if (active) { void voice.stop(); return; }
+            if (access.data?.allowed !== true || access.error) return;
+            setShowCrisis(true);
+            void voice.start();
+          }}
+          style={[styles.primary, {
+            backgroundColor: active ? "#9B4848" : theme.orbPrimary,
+            opacity: !active && (access.data?.allowed !== true || access.error) ? 0.5 : 1,
+          }]}>
           <Text style={styles.buttonText}>{active ? "End call" : voice.state === "stopping" ? "Saving…" : "Start live voice"}</Text>
         </Pressable>
       </View>
+      {!active && access.isFetching ? <Text style={[styles.error, { color: theme.textMuted }]}>
+        {t("liveVoice.checking")}
+      </Text> : null}
+      {!active && access.error ? <Pressable accessibilityRole="button" onPress={() => { void access.refetch(); }}>
+        <Text style={[styles.error, { color: theme.text }]}>{t("liveVoice.retry")}</Text>
+      </Pressable> : null}
+      {!active && !access.error && access.data?.allowed === false ? <View>
+        <Text style={[styles.error, { color: theme.textMuted }]}>{t("liveVoice.requiresUnlimited")}</Text>
+        <Pressable accessibilityRole="button" testID="live-voice-upgrade" onPress={() => navigation.navigate("Upgrade")}>
+          <Text style={[styles.error, { color: theme.orbPrimary }]}>{t("liveVoice.upgrade")}</Text>
+        </Pressable>
+      </View> : null}
       {voice.error ? <View accessibilityRole="alert">
         <Text selectable style={[styles.error, { color: theme.text }]}>{voice.error}</Text>
         {voice.error.includes("permission") ? <Pressable onPress={() => { void Linking.openSettings(); }}>
@@ -62,12 +90,10 @@ export default function LiveVoiceScreen() {
           <Text style={{ color: theme.textMuted, fontSize: 12 }}>{turn.role === "user" ? "YOU" : "SOLENCE"}</Text>
           <Text selectable style={{ color: theme.text, fontSize: 16, lineHeight: 24 }}>{turn.text}</Text>
         </View>)}
-        <LiveUsagePanel active={voice.state !== "idle"} />
+        {__DEV__ ? <LiveUsagePanel active={voice.state !== "idle"} /> : null}
       </ScrollView>
       <Text style={[styles.notice, { color: theme.textMuted }]}>
-        Completed turns are saved to your development account. Audio is sent to OpenAI.
-        This experimental voice uses a different model and can cost more than standard voice.
-        The live production app is unchanged.
+        {t("liveVoice.notice")}
       </Text>
     </View>
   );

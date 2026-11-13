@@ -1,4 +1,15 @@
 {
+  "liveVoice": {
+    "entry": "Live voice · Unlimited",
+    "badge": "SOLENCE UNLIMITED · LIVE VOICE",
+    "checking": "Checking your Unlimited subscription…",
+    "retry": "Could not verify your subscription. Tap to retry.",
+    "requiresUnlimited": "Live voice is included with an active Solence Unlimited subscription. Standard voice remains available on your current plan.",
+    "upgrade": "Get Unlimited or restore a purchase",
+    "benefitTitle": "Natural live voice",
+    "benefitBody": "Talk freely and interrupt naturally in the iOS and Android apps. Calls last up to 3 minutes, with up to 10 starts per hour.",
+    "notice": "Completed turns are saved to your chat history. Audio is sent to OpenAI. Unlimited includes live voice: up to 3 minutes per call and 10 call starts per hour. Standard voice is still available."
+  },
   "common": {
     "cancel": "Cancel",
     "save": "Save",

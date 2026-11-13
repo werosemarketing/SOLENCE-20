@@ -1257,6 +1257,11 @@ export async function detectCrisisSignal(text: string): Promise<boolean> {
 
 export async function registerRoutes(app: Express): Promise<Server> {
   registerRealtimeRoutes(app, {
+    hasUnlimited: async (userId) => {
+      const [user] = await db.select({ isPremium: users.isPremium }).from(users)
+        .where(eq(users.id, userId)).limit(1);
+      return user?.isPremium === true;
+    },
     usageStore: liveUsageStore,
     finalizeConversation: async (conversationId, language) => {
       await generateAndPersistReflection(conversationId, language === "es" ? "es" : "en");
@@ -1274,7 +1279,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (!owned) throw new Error("Conversation not found.");
         conversationId = owned.id;
       } else {
-        const [created] = await db.insert(conversations).values({ userId, title: "Live voice test" }).returning();
+        const [created] = await db.insert(conversations).values({ userId, title: "Live voice" }).returning();
         conversationId = created.id;
       }
       const [memories, history] = await Promise.all([

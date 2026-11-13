@@ -24,6 +24,7 @@ async function setup(t: { after: (fn: () => Promise<void>) => void }, enabled = 
   const rows: Array<{ id: number; turn: LiveVoiceTurn }> = [];
   registerRealtimeRoutes(app, {
     enabled,
+    hasUnlimited: async () => true,
     requireAuth: (req, res, next) => {
       const userId = req.headers.authorization?.replace("Bearer ", "");
       if (!userId) { res.status(401).json({ error: "Authentication required" }); return; }
@@ -74,16 +75,71 @@ async function setup(t: { after: (fn: () => Promise<void>) => void }, enabled = 
   });
   return {
     send, end, emit: (event: Record<string, any>) => receive(event), rows,
+    access: async (user = "a") => {
+      const response = await fetch(`${base}/access`, {
+        headers: user ? { Authorization: `Bearer ${user}` } : {},
+      });
+      return { response, result: await response.json() };
+    },
     failProvider: () => { failProvider = true; },
     failSave: () => { failSave = true; },
     counts: () => ({ closed, created }),
   };
 }
 
-test("live voice is unavailable in production, even to authenticated callers", async (t) => {
+test("explicit kill switch disables live voice, even to authenticated callers", async (t) => {
   const app = await setup(t, false);
   assert.equal((await app.send({ sdp })).response.status, 404);
   assert.equal(app.counts().created, 0);
+});
+
+test("free users cannot start paid calls or create conversation context", async (t) => {
+  let contexts = 0;
+  const app = await setup(t, true, {
+    hasUnlimited: async () => false,
+    loadContext: async () => { contexts++; throw new Error("Must not run"); },
+  });
+  const { response, result } = await app.send({ sdp });
+  assert.equal(response.status, 403);
+  assert.equal(result.code, "UNLIMITED_REQUIRED");
+  assert.equal(contexts, 0);
+  assert.equal(app.counts().created, 0);
+});
+
+test("subscription verification errors fail closed before a paid call", async (t) => {
+  const app = await setup(t, true, {
+    hasUnlimited: async () => { throw new Error("Database unavailable"); },
+  });
+  assert.equal((await app.send({ sdp })).response.status, 503);
+  assert.equal(app.counts().created, 0);
+});
+
+test("subscription is checked on every start but cancellation never prevents teardown", async (t) => {
+  let subscribed = true;
+  const app = await setup(t, true, { hasUnlimited: async () => subscribed });
+  const first = await app.send({ sdp });
+  assert.equal(first.response.status, 200);
+  subscribed = false;
+  assert.equal((await app.end(first.result.sessionId)).response.status, 200);
+  assert.equal(app.counts().closed, 1);
+  assert.equal((await app.send({ sdp })).response.status, 403);
+});
+
+test("release access is enabled by default but reports only the authenticated user's entitlement", async (t) => {
+  const app = await setup(t, true, {
+    enabled: undefined,
+    hasUnlimited: async (userId) => userId === "subscriber",
+  });
+  assert.equal((await app.access("")).response.status, 401);
+  const free = await app.access("free");
+  assert.equal(free.response.status, 200);
+  assert.equal(free.result.allowed, false);
+  assert.equal((await app.access("subscriber")).result.allowed, true);
+  assert.equal((await app.send({ sdp }, "free")).response.status, 403);
+  const paid = await app.send({ sdp }, "subscriber");
+  assert.equal(paid.response.status, 200);
+  assert.equal(paid.result.maxSeconds, 180);
+  assert.equal(app.counts().created, 1);
 });
 
 test("live calls require authentication and a bounded valid offer", async (t) => {

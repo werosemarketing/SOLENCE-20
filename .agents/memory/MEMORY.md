@@ -2,5 +2,5 @@
 - [Expo preview testing](expo-preview-testing.md) — use the actual app-preview URL for browser tests; the bare development host can load Metro instead of the app.
 - [Publishing runtime outputs](publishing-runtime-outputs.md) — runtime build folders must remain publishable; verify the production command on the public port, not just dev workflows.
 - [Native build portability](native-build-portability.md) — approved installs can leave internal tarball URLs unreachable by Expo builders; preserve integrity when making lockfiles portable.
-- [Live voice experiment](live-voice-experiment.md) — realtime is a separate development-only trial; token creation alone does not prove that real calls have model access.
+- [Live voice access](live-voice-experiment.md) — realtime belongs in existing Unlimited on native apps; keep standard voice. Token creation alone doesn't prove model access.
 - [Auxiliary AI model access](auxiliary-ai-model-access.md) — background notes need a permitted text model; HTTP 200 with a null reflection is not successful generation.

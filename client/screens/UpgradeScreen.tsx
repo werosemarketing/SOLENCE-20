@@ -7,6 +7,7 @@ import {
   ScrollView,
   ActivityIndicator,
   Alert,
+  Platform,
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -296,6 +297,13 @@ export default function UpgradeScreen({ navigation, route }: Props) {
               </View>
             </View>
           ))}
+          {Platform.OS !== "web" ? <View style={styles.benefitRow} testID="premium-benefit-live-voice">
+            <Feather name="mic" size={18} color={theme.orbPrimary} style={styles.benefitIcon} />
+            <View style={styles.benefitTextBlock}>
+              <Text style={[styles.benefitTitle, { color: theme.text }]}>{t("liveVoice.benefitTitle")}</Text>
+              <Text style={[styles.benefitBody, { color: theme.textMuted }]}>{t("liveVoice.benefitBody")}</Text>
+            </View>
+          </View> : null}
         </Animated.View>
 
         <Text style={[styles.fineprint, { color: theme.textMuted }]}>

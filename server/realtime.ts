@@ -8,6 +8,7 @@ import { createLiveUsageTracker, type LiveUsageStore, type LiveUsageRecord } fro
 type Context = { conversationId: number; instructions: string; language: string; voice: string };
 type Options = {
   requireAuth: RequestHandler;
+  hasUnlimited: (userId: string) => Promise<boolean>;
   loadContext: (userId: string, conversationId?: number) => Promise<Context>;
   persistTurn: (conversationId: number, turn: LiveVoiceTurn, createdAt: Date, messageId?: number) => Promise<number>;
   startCall?: LiveProviderStart;
@@ -33,12 +34,19 @@ export function registerRealtimeRoutes(app: Express, options: Options) {
   const starts = new Map<string, number[]>();
   const startCall = options.startCall ?? startLiveProviderCall;
   const gate: RequestHandler = (_req, res, next) => {
-    if (!(options.enabled ?? process.env.NODE_ENV === "development")) {
+    if (!(options.enabled ?? true)) {
       res.status(404).json({ error: "Not found" }); return;
     }
     res.setHeader("Cache-Control", "no-store");
     next();
   };
+  app.get("/api/chat/realtime/access", gate, options.requireAuth, async (req, res) => {
+    try {
+      res.json({ allowed: await options.hasUnlimited(req.user!.userId), maxSeconds: LIVE_VOICE_MAX_SECONDS });
+    } catch {
+      res.status(503).json({ error: "Could not verify your Unlimited subscription. Please retry." });
+    }
+  });
   async function saveUsage(session: NonNullable<ReturnType<typeof active.get>>) {
     if (!options.usageStore) return;
     await options.usageStore.save({ ...session.record, usage: session.usageTracker.snapshot() });
@@ -76,6 +84,14 @@ export function registerRealtimeRoutes(app: Express, options: Options) {
     const userId = req.user!.userId;
     const parsed = input.safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ error: "A valid audio connection offer is required." }); return; }
+    try {
+      if (!await options.hasUnlimited(userId)) {
+        res.status(403).json({ code: "UNLIMITED_REQUIRED", error: "Live voice is included with Solence Unlimited. Upgrade or restore your purchase to continue." });
+        return;
+      }
+    } catch {
+      res.status(503).json({ error: "Could not verify your Unlimited subscription. Please retry." }); return;
+    }
     if (pending.has(userId) || [...active.values()].some((s) => s.userId === userId && !s.ended)) {
       res.status(409).json({ error: "End your current live call before starting another." }); return;
     }
@@ -86,7 +102,7 @@ export function registerRealtimeRoutes(app: Express, options: Options) {
     }
     const keys = [`user:${userId}`, `ip:${req.ip}`];
     if (active.size >= 30 || keys.some((key) => (starts.get(key)?.length ?? 0) >= 10)) {
-      res.status(429).json({ error: "Live voice test limit reached. Try again later." }); return;
+      res.status(429).json({ error: "Live voice call limit reached. Try again later." }); return;
     }
     for (const key of keys) starts.set(key, [...(starts.get(key) ?? []), now]);
     pending.add(userId);

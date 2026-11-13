@@ -1010,13 +1010,20 @@ function registerRealtimeRoutes(app2, options) {
   const starts = /* @__PURE__ */ new Map();
   const startCall = options.startCall ?? startLiveProviderCall;
   const gate = (_req, res, next) => {
-    if (!(options.enabled ?? process.env.NODE_ENV === "development")) {
+    if (!(options.enabled ?? true)) {
       res.status(404).json({ error: "Not found" });
       return;
     }
     res.setHeader("Cache-Control", "no-store");
     next();
   };
+  app2.get("/api/chat/realtime/access", gate, options.requireAuth, async (req, res) => {
+    try {
+      res.json({ allowed: await options.hasUnlimited(req.user.userId), maxSeconds: LIVE_VOICE_MAX_SECONDS });
+    } catch {
+      res.status(503).json({ error: "Could not verify your Unlimited subscription. Please retry." });
+    }
+  });
   async function saveUsage(session) {
     if (!options.usageStore) return;
     await options.usageStore.save({ ...session.record, usage: session.usageTracker.snapshot() });
@@ -1066,6 +1073,15 @@ function registerRealtimeRoutes(app2, options) {
       res.status(400).json({ error: "A valid audio connection offer is required." });
       return;
     }
+    try {
+      if (!await options.hasUnlimited(userId)) {
+        res.status(403).json({ code: "UNLIMITED_REQUIRED", error: "Live voice is included with Solence Unlimited. Upgrade or restore your purchase to continue." });
+        return;
+      }
+    } catch {
+      res.status(503).json({ error: "Could not verify your Unlimited subscription. Please retry." });
+      return;
+    }
     if (pending.has(userId) || [...active.values()].some((s) => s.userId === userId && !s.ended)) {
       res.status(409).json({ error: "End your current live call before starting another." });
       return;
@@ -1078,7 +1094,7 @@ function registerRealtimeRoutes(app2, options) {
     }
     const keys = [`user:${userId}`, `ip:${req.ip}`];
     if (active.size >= 30 || keys.some((key) => (starts.get(key)?.length ?? 0) >= 10)) {
-      res.status(429).json({ error: "Live voice test limit reached. Try again later." });
+      res.status(429).json({ error: "Live voice call limit reached. Try again later." });
       return;
     }
     for (const key of keys) starts.set(key, [...starts.get(key) ?? [], now]);
@@ -1965,6 +1981,10 @@ async function detectCrisisSignal(text2) {
 }
 async function registerRoutes(app2) {
   registerRealtimeRoutes(app2, {
+    hasUnlimited: async (userId) => {
+      const [user] = await db.select({ isPremium: users.isPremium }).from(users).where(eq4(users.id, userId)).limit(1);
+      return user?.isPremium === true;
+    },
     usageStore: liveUsageStore,
     finalizeConversation: async (conversationId, language) => {
       await generateAndPersistReflection(conversationId, language === "es" ? "es" : "en");
@@ -1983,7 +2003,7 @@ async function registerRoutes(app2) {
         if (!owned) throw new Error("Conversation not found.");
         conversationId = owned.id;
       } else {
-        const [created] = await db.insert(conversations).values({ userId, title: "Live voice test" }).returning();
+        const [created] = await db.insert(conversations).values({ userId, title: "Live voice" }).returning();
         conversationId = created.id;
       }
       const [memories, history] = await Promise.all([

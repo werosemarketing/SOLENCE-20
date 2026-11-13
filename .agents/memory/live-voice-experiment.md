@@ -3,11 +3,11 @@ name: Live voice experiment
 description: Scope and validation rules for the native conversational voice trial.
 ---
 
-The realtime voice path is a separate development-only experiment, not a replacement for the standard text-plus-speech flow.
+Realtime voice is included in the existing Unlimited subscription on native iOS and Android. Keep standard text-plus-speech voice available; do not create a new subscription tier.
 
-**Why:** The user requested a native development test of more conversational, lower-latency voice, not a production rollout. Realtime uses a different speech model and can cost more.
+**Why:** After testing realtime successfully, the user explicitly chose to roll it out in the existing Unlimited subscription rather than introduce a higher-priced plan. Realtime uses a different speech model and can cost more.
 
-**How to apply:** Keep the existing default voice behavior and cost protections intact. Require an explicit production decision before enabling realtime for live users. Keep provider credentials on the backend, retain Solence's identity and crisis boundaries, and bound experimental call duration.
+**How to apply:** Check the server-side subscription before starting paid calls; never trust a client entitlement claim. Keep provider credentials on the backend, retain Solence's identity and crisis boundaries, and preserve bounded call duration and rate limits. This product decision is not permission to publish or submit builds automatically.
 
 Successful ephemeral credential creation does not establish access to the requested realtime model.
 
